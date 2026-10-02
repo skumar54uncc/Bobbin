@@ -1,4 +1,4 @@
-import { Readability } from "@mozilla/readability";
+import Readability from "@mozilla/readability/Readability.js";
 import { stripIndexedTextNoise } from "../lib/capture/text-noise";
 
 export interface ExtractResult {

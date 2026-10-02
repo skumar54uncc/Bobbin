@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Fails when a shipped bundle exceeds its byte budget. Run after `npm run build`. */
-import { readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const KB = 1024;
@@ -16,8 +16,6 @@ export const BUNDLE_BUDGETS = {
   // Pass 5 Agents UX (tab + coach + local feedback) needs headroom; SW budget unchanged.
   "overlay.js": 155 * KB,
   "service-worker.js": 220 * KB,
-  // History-import Readability path (lazy from SW only when Scan history runs).
-  "history-extract.js": 40 * KB,
   "offscreen.js": 700 * KB,
   // Assistant Sync: Drive client and int8 topic vectors, lazy only.
   // Caps stay under the 130 KB float file so that file cannot return.
@@ -56,6 +54,18 @@ const strayWasm = readdirSync(dist).filter((f) => f.endsWith(".wasm"));
 if (strayWasm.length) {
   failed = true;
   console.error(`FAIL    duplicate .wasm at the package root: ${strayWasm.join(", ")}`);
+}
+const swSource = readFileSync(join(dist, "service-worker.js"), "utf8");
+const swDomLoader =
+  swSource.includes("document.createElement") ||
+  swSource.includes("document.getElementsByTagName") ||
+  swSource.includes("document.head") ||
+  swSource.includes("document.currentScript");
+if (swDomLoader) {
+  failed = true;
+  console.error(
+    "FAIL    service-worker.js touches document (chunk loader must stay out of the service worker)"
+  );
 }
 if (failed) {
   console.error("Bundle budget check FAILED");
