@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { headerFormatRequests, SHEET_TABS } from "./sheet";
+import { headerFormatRequests, PROTECTED_DESCRIPTION, protectTabRequest, SHEET_TABS } from "./sheet";
 
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
@@ -7,13 +7,18 @@ export interface DriveFileInfo {
   id: string;
   name: string;
   trashed: boolean;
+  parents?: string[];
 }
 
 /** Name of the Drive JSON backup that older builds wrote. Kept so the cleanup can find it. */
 export const DRIVE_JSON_BACKUP_NAME = "Cortex Memory Backup.json";
+/** Monthly archive spreadsheets older builds wrote: "Cortex Memory Archive 2026-09". */
+export const DRIVE_ARCHIVE_NAME = /^Cortex Memory Archive \d{4}-\d{2}$/;
+const MEMORY_SHEET_NAME = "Cortex Memory";
+const SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
 
 /**
- * Every Google call Cortex makes. Sheets reads are `getSheetIds` and `readColumns`;
+ * Every Google call Cortex makes. Sheets reads are `getSheetInfo` and `readColumns`;
  * the only Sheets write after creation is `batchUpdate`.
  */
 export interface DriveApi {
@@ -21,13 +26,25 @@ export interface DriveApi {
   createSpreadsheet(name: string, parentId: string): Promise<string>;
   getFile(id: string): Promise<DriveFileInfo | null>;
   trashFile(id: string): Promise<void>;
+  untrashFile(id: string): Promise<void>;
+  /**
+   * One files.list. With the drive.file scope Google returns only files this
+   * app created or the user opened with it, so this never sees other files.
+   */
+  listFiles(query: string): Promise<DriveFileInfo[]>;
   formatHeaders(fileId: string): Promise<void>;
   /** One spreadsheets.batchUpdate. Google applies it atomically and counts it as one write. */
   batchUpdate(fileId: string, requests: object[]): Promise<void>;
-  /** One spreadsheets.get for tab titles and ids. One read. */
-  getSheetIds(fileId: string): Promise<Record<string, number>>;
+  /** One spreadsheets.get for tab titles, ids, and which tabs carry Cortex's edit warning. One read. */
+  getSheetInfo(fileId: string): Promise<SheetInfo>;
   /** One values.batchGet. One read. Returns one row list per range, in order. */
   readColumns(fileId: string, ranges: string[]): Promise<string[][][]>;
+}
+
+export interface SheetInfo {
+  sheetIds: Record<string, number>;
+  /** Tabs that already have the warning-only protection Cortex adds. */
+  protectedIds: number[];
 }
 
 export interface RowRange {
@@ -68,11 +85,64 @@ export function syncedKey(tab: string, id: string): string {
   return `${tab}:${id}`;
 }
 
-/** User asked to turn sync on again. Creates a new folder when the old one is gone or trashed. */
-export async function reenableMemory(api: DriveApi, previous: StoredMemoryIds): Promise<StoredMemoryIds> {
+/** Quotes a value for a Drive query string. */
+function q(value: string): string {
+  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+/** The Cortex Memory sheet this app made earlier, if Drive still has it outside the trash. */
+export async function findMemoryFile(api: DriveApi): Promise<StoredMemoryIds | null> {
+  const files = await api.listFiles(`name = ${q(MEMORY_SHEET_NAME)} and mimeType = ${q(SPREADSHEET_MIME)} and trashed = false`);
+  const file = files[0];
+  if (!file) return null;
+  // A sheet with no parent folder stands in as its own folder; trashMemory handles that.
+  return { fileId: file.id, folderId: file.parents?.[0] ?? file.id };
+}
+
+/** Restore from trash, or create a new sheet after the old one was deleted. Only ever from a click. */
+export type MemoryChoice = "restore" | "create";
+export type ResolvedMemory = { ids: StoredMemoryIds; created: boolean } | { confirm: "missing" | "trashed" };
+
+/**
+ * Enable. Uses the stored sheet when it is there, or the sheet this app made
+ * earlier. Asks before restoring a trashed sheet or replacing a deleted one,
+ * so there is never a second Cortex Memory file.
+ */
+export async function resolveMemory(api: DriveApi, previous: StoredMemoryIds, choice?: MemoryChoice): Promise<ResolvedMemory> {
   const status = await inspectMemory(api, previous);
-  if (status === "ready" && previous.folderId && previous.fileId) return previous;
-  return createMemoryFile(api, "Cortex Memory");
+  if (status === "ready") return { ids: previous, created: false };
+  if (status === "absent") {
+    const found = await findMemoryFile(api);
+    if (found) return { ids: found, created: false };
+    return { ids: await createMemoryFile(api, MEMORY_SHEET_NAME), created: true };
+  }
+  if (status === "trashed") {
+    if (choice !== "restore") return { confirm: "trashed" };
+    for (const id of new Set([previous.fileId, previous.folderId])) {
+      if (id && (await api.getFile(id))?.trashed) await api.untrashFile(id);
+    }
+    const after = await inspectMemory(api, previous);
+    return after === "ready" ? { ids: previous, created: false } : { confirm: "missing" };
+  }
+  if (choice !== "create") return { confirm: "missing" };
+  const folder = previous.folderId ? await api.getFile(previous.folderId) : null;
+  if (folder && !folder.trashed && folder.id !== previous.fileId) {
+    const fileId = await api.createSpreadsheet(MEMORY_SHEET_NAME, folder.id);
+    await api.formatHeaders(fileId);
+    return { ids: { folderId: folder.id, fileId }, created: true };
+  }
+  return { ids: await createMemoryFile(api, MEMORY_SHEET_NAME), created: true };
+}
+
+/** JSON backups and monthly archives older builds left in the Cortex Memory folder. */
+export async function findLegacyFiles(api: DriveApi, folderId: string, backupId?: string | null): Promise<DriveFileInfo[]> {
+  const inFolder = await api.listFiles(`${q(folderId)} in parents and trashed = false`);
+  const found = inFolder.filter((file) => file.name === DRIVE_JSON_BACKUP_NAME || DRIVE_ARCHIVE_NAME.test(file.name));
+  if (backupId && !found.some((file) => file.id === backupId)) {
+    const backup = await api.getFile(backupId);
+    if (backup && !backup.trashed) found.push(backup);
+  }
+  return found.map(({ id, name, trashed }) => ({ id, name, trashed }));
 }
 
 export async function trashMemory(api: DriveApi, ids: StoredMemoryIds): Promise<void> {
@@ -83,11 +153,22 @@ export async function trashMemory(api: DriveApi, ids: StoredMemoryIds): Promise<
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 const IdResponse = v.object({ id: v.string() });
-const FileResponse = v.object({ id: v.string(), name: v.optional(v.string(), ""), trashed: v.optional(v.boolean(), false) });
+const FileResponse = v.object({
+  id: v.string(),
+  name: v.optional(v.string(), ""),
+  trashed: v.optional(v.boolean(), false),
+  parents: v.optional(v.array(v.string())),
+});
+const FileList = v.object({ files: v.optional(v.array(FileResponse), []) });
 const SpreadsheetCreated = v.object({ spreadsheetId: v.string() });
 const SheetsList = v.object({
   sheets: v.optional(
-    v.array(v.object({ properties: v.object({ sheetId: v.number(), title: v.string() }) })),
+    v.array(
+      v.object({
+        properties: v.object({ sheetId: v.number(), title: v.string() }),
+        protectedRanges: v.optional(v.array(v.object({ description: v.optional(v.string(), "") })), []),
+      })
+    ),
     []
   ),
 });
@@ -170,8 +251,23 @@ export class FetchDriveApi implements DriveApi {
     if (!res.ok) throw new Error(`google_${res.status}`);
   }
 
+  async untrashFile(id: string): Promise<void> {
+    const res = await this.send(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ trashed: false }),
+    });
+    if (!res.ok) throw new Error(`google_${res.status}`);
+  }
+
+  async listFiles(query: string): Promise<DriveFileInfo[]> {
+    const params = `q=${encodeURIComponent(query)}&fields=${encodeURIComponent("files(id,name,trashed,parents)")}&pageSize=100&spaces=drive`;
+    const res = await this.send(`https://www.googleapis.com/drive/v3/files?${params}`, { method: "GET" });
+    return (await parsed(res, FileList)).files.map((file) => ({ id: file.id, name: file.name, trashed: file.trashed, parents: file.parents }));
+  }
+
   async formatHeaders(fileId: string): Promise<void> {
-    await this.batchUpdate(fileId, headerFormatRequests());
+    // One batchUpdate on a new sheet: bold, frozen headers and the edit warning on every tab.
+    await this.batchUpdate(fileId, [...headerFormatRequests(), ...SHEET_TABS.map((_, sheetId) => protectTabRequest(sheetId))]);
   }
 
   async batchUpdate(fileId: string, requests: object[]): Promise<void> {
@@ -183,14 +279,18 @@ export class FetchDriveApi implements DriveApi {
     if (!res.ok) throw new Error(`google_${res.status}`);
   }
 
-  async getSheetIds(fileId: string): Promise<Record<string, number>> {
-    const res = await this.send(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(fileId)}?fields=sheets.properties(sheetId,title)`,
-      { method: "GET" }
-    );
-    const out: Record<string, number> = {};
-    for (const sheet of (await parsed(res, SheetsList)).sheets) out[sheet.properties.title] = sheet.properties.sheetId;
-    return out;
+  async getSheetInfo(fileId: string): Promise<SheetInfo> {
+    const fields = encodeURIComponent("sheets(properties(sheetId,title),protectedRanges(description))");
+    const res = await this.send(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(fileId)}?fields=${fields}`, {
+      method: "GET",
+    });
+    const sheetIds: Record<string, number> = {};
+    const protectedIds: number[] = [];
+    for (const sheet of (await parsed(res, SheetsList)).sheets) {
+      sheetIds[sheet.properties.title] = sheet.properties.sheetId;
+      if (sheet.protectedRanges.some((range) => range.description === PROTECTED_DESCRIPTION)) protectedIds.push(sheet.properties.sheetId);
+    }
+    return { sheetIds, protectedIds };
   }
 
   async readColumns(fileId: string, ranges: string[]): Promise<string[][][]> {

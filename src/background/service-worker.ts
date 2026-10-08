@@ -68,6 +68,7 @@ import {
   ASSISTANT_SYNC_FOLDER_ID,
   ASSISTANT_SYNC_ON_KEY,
   ASSISTANT_SYNC_RETENTION_KEY,
+  ASSISTANT_SYNC_SHEET_DETAIL_KEY,
 } from "../assistant-sync/preference-keys";
 import {
   indexPayloadUrlMatchesTab,
@@ -324,9 +325,9 @@ async function ensureOffscreen(): Promise<void> {
 
       await chrome.offscreen.createDocument({
         url: chrome.runtime.getURL("offscreen.html"),
-        reasons: [chrome.offscreen.Reason.WORKERS],
+        reasons: [chrome.offscreen.Reason.WORKERS, chrome.offscreen.Reason.DOM_PARSER],
         justification:
-          "Compute local MiniLM embeddings (Transformers.js) for Cortex.",
+          "Compute local MiniLM embeddings (Transformers.js) and read the text of imported history pages for Cortex.",
       });
       // #region agent log
       agentDebugLog({
@@ -367,15 +368,30 @@ async function readAssistantSyncLaunch(): Promise<{
   folderId: string | null;
   fileId: string | null;
   retentionDays?: number;
+  sheetDetail?: string;
+  backupId: string | null;
 }> {
-  const stored = await storageLocalGet([ASSISTANT_SYNC_FOLDER_ID, ASSISTANT_SYNC_FILE_ID, ASSISTANT_SYNC_RETENTION_KEY]);
+  const stored = await storageLocalGet([
+    ASSISTANT_SYNC_FOLDER_ID,
+    ASSISTANT_SYNC_FILE_ID,
+    ASSISTANT_SYNC_RETENTION_KEY,
+    ASSISTANT_SYNC_SHEET_DETAIL_KEY,
+    ASSISTANT_SYNC_BACKUP_FILE_ID,
+  ]);
   const retention = stored[ASSISTANT_SYNC_RETENTION_KEY];
+  const detail = stored[ASSISTANT_SYNC_SHEET_DETAIL_KEY];
   return {
     folderId: storedId(stored[ASSISTANT_SYNC_FOLDER_ID]),
     fileId: storedId(stored[ASSISTANT_SYNC_FILE_ID]),
     retentionDays: typeof retention === "number" ? retention : undefined,
+    sheetDetail: typeof detail === "string" ? detail : undefined,
+    backupId: storedId(stored[ASSISTANT_SYNC_BACKUP_FILE_ID]),
   };
 }
+
+type SyncWorkAction = "alarm" | "now" | "enable" | "disable" | "cleanup";
+/** The user's answer to a question Settings asked: restore or create the sheet, or the old files cleanup. */
+type SyncWorkAnswer = { choice?: "restore" | "create"; cleanup?: "trash" | "keep" };
 
 async function writeAssistantSyncIds(ids: { folderId?: string | null; fileId?: string | null } | undefined): Promise<void> {
   if (!ids) return;
@@ -409,7 +425,7 @@ function sendToOffscreen<T>(message: Record<string, unknown>): Promise<T | { ok:
   });
 }
 
-async function sendSyncWork(action: "alarm" | "now" | "enable" | "disable", token: string): Promise<SyncWorkReply> {
+async function sendSyncWork(action: SyncWorkAction, token: string, answer: SyncWorkAnswer = {}): Promise<SyncWorkReply> {
   const launch = await readAssistantSyncLaunch();
   await ensureOffscreen();
   const raw = await sendToOffscreen<unknown>({
@@ -419,10 +435,13 @@ async function sendSyncWork(action: "alarm" | "now" | "enable" | "disable", toke
     folderId: launch.folderId,
     fileId: launch.fileId,
     retentionDays: launch.retentionDays,
+    sheetDetail: launch.sheetDetail,
+    backupId: launch.backupId,
+    ...answer,
   });
   const reply = parseMessage(SyncWorkReplySchema, raw) ?? { ok: false, error: "Sync did not start." };
   if (reply.ids) await writeAssistantSyncIds(reply.ids);
-  if (action !== "disable") void recordFlush(action, reply);
+  if (action !== "disable" && action !== "cleanup" && !reply.confirm) void recordFlush(action, reply);
   return reply;
 }
 
@@ -499,7 +518,11 @@ function forgetLocalDwell(tabId: number): void {
  * pass runs once more with a fresh silent token; a second refusal pauses sync until
  * the user reconnects from Settings.
  */
-async function forwardAssistantSync(action: "alarm" | "now" | "enable" | "disable", tokenFromPage?: string): Promise<SyncWorkReply> {
+async function forwardAssistantSync(
+  action: SyncWorkAction,
+  tokenFromPage?: string,
+  answer: SyncWorkAnswer = {}
+): Promise<SyncWorkReply> {
   try {
     if (action === "disable") {
       const reply = await sendSyncWork("disable", "");
@@ -507,19 +530,21 @@ async function forwardAssistantSync(action: "alarm" | "now" | "enable" | "disabl
       await chrome.alarms.clear(ASSISTANT_SYNC_SOON_ALARM);
       return reply.ok === false ? reply : { ok: true, status: "disabled" };
     }
+    if (action === "cleanup" && answer.cleanup !== "trash") return sendSyncWork("cleanup", "", answer);
     let token = action === "enable" ? tokenFromPage : await silentDriveToken().catch(() => "");
     if (!token) {
-      if (action !== "enable") await markAuthNeeded();
+      if (action !== "enable" && action !== "cleanup") await markAuthNeeded();
       return { ok: false, status: "auth", error: "Sign in to Google is needed before Cortex can sync." };
     }
     if (action === "enable") mirrorSyncOn(true);
-    let reply = await sendSyncWork(action, token);
+    let reply = await sendSyncWork(action, token, answer);
     if (reply.authFailed) {
       await dropCachedToken(token);
       token = await silentDriveToken().catch(() => "");
-      reply = token ? await sendSyncWork(action, token) : reply;
+      reply = token ? await sendSyncWork(action, token, answer) : reply;
       if (reply.authFailed || !token) await markAuthNeeded();
     }
+    if (reply.confirm) mirrorSyncOn((await readSyncEngineState()).syncEnabled);
     if (reply.retryAt) await scheduleFlushAlarm(reply.retryAt);
     return reply;
   } catch (error) {
@@ -1072,6 +1097,20 @@ async function commitIndexPayload(
   return { id: docId, chunks: chunkIds.length };
 }
 
+/** Readable text of a fetched history page. The offscreen document parses it; the worker has no DOM. */
+async function extractHistoryHtmlViaOffscreen(html: string, url: string): Promise<{ title: string; text: string } | null> {
+  await ensureOffscreen();
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: "CORTEX_HISTORY_EXTRACT", html, url },
+      (r: { ok?: boolean; title?: unknown; text?: unknown } | undefined) => {
+        if (chrome.runtime.lastError || !r?.ok) resolve(null);
+        else resolve({ title: String(r.title ?? ""), text: String(r.text ?? "") });
+      }
+    );
+  });
+}
+
 let historyImportAbortRequested = false;
 
 const HISTORY_IMPORT_SENDER = {} as chrome.runtime.MessageSender;
@@ -1140,11 +1179,8 @@ async function runHistoryImportJob(
         }
 
         const html = await fetchHtmlForHistory(item.url);
-        if (html) {
-          const { extractPageTextFromHtml } = await import(
-            /* webpackChunkName: "history-extract" */ "../content/extract"
-          );
-          const rawExtract = extractPageTextFromHtml(html, item.url);
+        const rawExtract = html ? await extractHistoryHtmlViaOffscreen(html, item.url) : null;
+        if (rawExtract) {
           const titleRed = redactPII(rawExtract.title);
           const textRed = redactPII(rawExtract.text);
           extractedTitle = titleRed.redacted;
@@ -3015,7 +3051,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       });
       return true;
     }
-    void forwardAssistantSync(action, parsed.token).then(async (result) => {
+    void forwardAssistantSync(action, parsed.token, { choice: parsed.choice, cleanup: parsed.cleanup }).then(async (result) => {
       if (action === "enable" && result.more) await planAssistantFlush("now");
       sendResponse(result);
     });

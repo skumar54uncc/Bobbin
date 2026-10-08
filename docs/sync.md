@@ -46,14 +46,49 @@ A normal flush makes zero reads. Cortex keeps the sheet layout locally: tab ids,
 and the rows of each tab as a run-length list of dates in sheet order. Appends extend the list. Retention
 turns old runs into row ranges and deletes them bottom first, so earlier indexes stay valid.
 
+Repeat visits to a URL on the same local day share one Visits row (`visit_count`, total dwell, deepest
+scroll). `time` stays the first visit of the day and `last_time` is the latest. The row is rewritten in place with `updateCells`, still with no reads: each synced row keeps its
+date and its place among that date's rows, which locates it in the run list. People and Companies rows
+merge the same way. Content and Searches keep the first row of the day. A hash of the cells last written
+means an unchanged row is never sent again.
+
 Reads happen only in verification, which costs 2 reads (`spreadsheets.get` for tab ids and one
-`values:batchGet` of columns A and B of every tab):
+`values:batchGet` of columns A and B of every tab plus the Visits header row):
 
 | Reason | How often |
 | --- | --- |
 | Enable | Once per Enable click |
 | Browser start | At most once per 24 hours per user |
 | Recovery | After a 5xx, a lost reply, a 400 or 404, or a crash mid-flush |
+| Upgrade | Once, on the first flush after updating from a build without row positions |
+
+The upgrade pass also adds the `visit_count` and `last_time` headers to Visits, writes 1 into
+`visit_count` for every row already there, copies `time` into `last_time` (a `copyPaste` of values, no
+read), and adds the edit warning below to every tab, all in the same single write.
+
+Every tab carries a warning-only protected range ("Managed by Cortex"): Sheets asks before a manual edit
+but never blocks one, and Cortex's own writes are unaffected. It is added in the formatting batch when
+the sheet is created, when a deleted tab is re-added, and in the upgrade pass. Verification reads the
+existing protections, so a tab is never protected twice. About also says: "This sheet is managed by
+Cortex. Editing or deleting rows can cause wrong answers."
+
+Imported browser history pages are parsed (DOMParser and Readability) in the offscreen document, since a
+service worker has no DOM. The service worker only fetches the page and sends the HTML across.
+
+Retention, the Sheet detail setting, and the size budget decide which rows stay. See
+[sheet-size.md](sheet-size.md).
+
+## Drive files
+
+Enable uses the stored sheet. With no stored ids it first looks for a Cortex Memory sheet this app made
+(`files.list`, which with the drive.file scope sees only files Cortex created), and creates one only if
+none exists. When the stored sheet is in the trash, Settings offers Restore from trash. When it was
+deleted, Settings offers Create a new sheet, in the old folder if that is still there. Nothing is created
+or restored without that click, so there is never a second Cortex Memory file.
+
+Older builds wrote a JSON backup and monthly archive sheets. The first successful sync on this build lists
+the folder once (one `files.list`) and, if any are there, Settings asks Move to trash or Keep them. The
+answer is saved and the question never returns.
 
 Reads per user per day, normal use: 2. Upper bound with one recovery a day: 4.
 
@@ -101,6 +136,8 @@ project quota.
 | Cadence constants, backoff, status line | `src/assistant-sync/schedule.ts` |
 | One flush, verification, recovery | `src/assistant-sync/sync-engine.ts` (`runFlush`) |
 | Request builders, row positions | `src/assistant-sync/flush-plan.ts` |
+| Repeat visit merging | `src/assistant-sync/merge.ts` |
+| Sheet detail, size estimate, trimming | `src/assistant-sync/sheet-detail.ts` |
 | Dwell measurement in the tab | `src/content/dwell.ts` |
 | Visit end, 5 second filter, excerpt | `src/assistant-sync/finalize.ts` |
 | Alarms, open visits, token refresh | `src/background/service-worker.ts` |

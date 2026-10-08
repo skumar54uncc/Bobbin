@@ -57,6 +57,48 @@ export function dailyRowIndex(runs: Runs, date: string): number | null {
   return null;
 }
 
+/** 0-based sheet row of the `ord`th row dated `date`, counting across runs in sheet order. */
+export function rowIndexOf(runs: Runs, date: string, ord: number): number | null {
+  let index = 1;
+  let seen = 0;
+  for (const run of runs) {
+    if (run.date === date) {
+      if (ord < seen + run.count) return index + (ord - seen);
+      seen += run.count;
+    }
+    index += run.count;
+  }
+  return null;
+}
+
+/** Rows dated `date` already in the sheet. The next one appended gets this as its ord. */
+export function rowsOnDate(runs: Runs, date: string): number {
+  return runs.reduce((n, run) => (run.date === date ? n + run.count : n), 0);
+}
+
+/** Writes one value into a column for a block of rows. */
+export function fillColumnRequest(sheetId: number, column: number, startRow: number, endRow: number, value: string): object {
+  return {
+    repeatCell: {
+      range: { sheetId, startRowIndex: startRow, endRowIndex: endRow, startColumnIndex: column, endColumnIndex: column + 1 },
+      cell: { userEnteredValue: { stringValue: value } },
+      fields: "userEnteredValue",
+    },
+  };
+}
+
+/** Copies the values of one column into another for a block of rows, with no read. */
+export function copyColumnRequest(sheetId: number, from: number, to: number, startRow: number, endRow: number): object {
+  const range = (column: number) => ({
+    sheetId,
+    startRowIndex: startRow,
+    endRowIndex: endRow,
+    startColumnIndex: column,
+    endColumnIndex: column + 1,
+  });
+  return { copyPaste: { source: range(from), destination: range(to), pasteType: "PASTE_VALUES", pasteOrientation: "NORMAL" } };
+}
+
 export function addSheetRequest(sheetId: number, title: string, index: number): object {
   return { addSheet: { properties: { sheetId, title, index } } };
 }

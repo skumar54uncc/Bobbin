@@ -69,12 +69,16 @@ function agoWord(ms: number): string {
 export const CADENCE_SENTENCE = "Updates about every 5 minutes while you browse, and at least every 15 minutes.";
 export const RECONNECT_LINE = "Sync paused: reconnect Google Drive.";
 
+/** A trim stays in the status line this long. */
+export const TRIM_NOTE_MS = 7 * 86_400_000;
+
 /** The status line under Assistant Sync. Built only from recorded state. */
 export function syncStatusLine(
   state: Pick<
     SyncEngineState,
     "syncEnabled" | "authNeeded" | "lastError" | "lastSyncedAt" | "nextAttemptAt" | "slowUntil" | "backfillPhase" | "lastFlushAt"
-  >,
+  > &
+    Partial<Pick<SyncEngineState, "trimNote" | "trimmedAt">>,
   pendingPages: number,
   now: number,
   timeLabel: (ms: number) => string = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
@@ -94,6 +98,7 @@ export function syncStatusLine(
     const due = Math.max(now, state.lastFlushAt + ACTIVITY_GAP_MS);
     return `Waiting to sync ${pages}. Next sync in about ${minutesWord(due - now + JITTER_MAX_MS / 2)}.`;
   }
-  if (state.lastSyncedAt > 0) return `Synced ${agoWord(now - state.lastSyncedAt)}. ${CADENCE_SENTENCE}`;
+  const trimmed = state.trimNote && now - (state.trimmedAt ?? 0) < TRIM_NOTE_MS ? `${state.trimNote} ` : "";
+  if (state.lastSyncedAt > 0) return `Synced ${agoWord(now - state.lastSyncedAt)}. ${trimmed}${CADENCE_SENTENCE}`;
   return `Not synced yet. ${CADENCE_SENTENCE}`;
 }

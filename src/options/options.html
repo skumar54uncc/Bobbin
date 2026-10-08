@@ -448,6 +448,26 @@
                 <button type="button" id="cx-assistant-now" class="cx-btn cx-btn-secondary" disabled title="Turn Assistant Sync on before syncing">Sync now</button>
               </div>
               <p id="cx-assistant-feedback" class="cx-form-feedback" hidden role="status" aria-live="polite"></p>
+              <div id="cx-assistant-confirm" class="cx-assistant-ask" hidden role="alert">
+                <p id="cx-assistant-confirm-text" class="cx-group-desc"></p>
+                <div class="cx-actions-row">
+                  <button type="button" id="cx-assistant-confirm-go" class="cx-btn cx-btn-primary">Restore from trash</button>
+                  <button type="button" id="cx-assistant-confirm-cancel" class="cx-btn cx-btn-secondary">Keep sync off</button>
+                </div>
+              </div>
+            </div>
+            <div class="cx-group" id="cx-assistant-legacy" hidden>
+              <h3 class="cx-group-title">Older Cortex files in Drive</h3>
+              <p class="cx-group-desc">
+                Earlier versions of Cortex saved a JSON backup and monthly archive sheets in the Cortex Memory folder.
+                Cortex no longer writes them, and Cortex Memory is the only file assistants need.
+              </p>
+              <ul id="cx-assistant-legacy-list" class="cx-assistant-legacy-list"></ul>
+              <div class="cx-actions-row">
+                <button type="button" id="cx-assistant-legacy-trash" class="cx-btn cx-btn-secondary">Move to trash</button>
+                <button type="button" id="cx-assistant-legacy-keep" class="cx-btn cx-btn-secondary">Keep them</button>
+              </div>
+              <p class="cx-field-hint">Drive keeps trashed files for 30 days, so you can restore them there.</p>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">Status</h3>
@@ -458,6 +478,7 @@
                   <div><dt>Last sync</dt><dd id="cx-assistant-last">Not yet</dd></div>
                   <div><dt>Last error</dt><dd id="cx-assistant-error">None</dd></div>
                   <div><dt>Backfill</dt><dd id="cx-assistant-backfill">idle</dd></div>
+                  <div><dt>Sheet size</dt><dd id="cx-assistant-size">Not measured yet</dd></div>
                 </dl>
                 <img
                   id="cx-assistant-lost"
@@ -478,9 +499,36 @@
                 <p class="cx-field-hint">From 7 to 365 days. The default is 90.</p>
                 <p class="cx-field-hint" id="cx-assistant-retention-warn">
                   Rows older than this are deleted from the sheet permanently. To keep a copy, use
-                  <a href="#cx-sec-backup">Download backup</a> first.
+                  <a href="#cx-sec-backup">Export my data</a> first.
                 </p>
               </div>
+            </div>
+            <div class="cx-group">
+              <h3 class="cx-group-title" id="cx-assistant-detail-h">Sheet detail</h3>
+              <p class="cx-group-desc">Assistants read the whole sheet, so a smaller sheet fits more of your history into each answer.</p>
+              <div class="cx-radio-cards is-two" role="radiogroup" aria-labelledby="cx-assistant-detail-h">
+                <label class="cx-radio-card">
+                  <input type="radio" name="cx-assistant-detail" value="standard" checked />
+                  <span class="cx-radio-card-inner">
+                    <span class="cx-radio-card-title">Standard</span>
+                    <span class="cx-radio-card-desc">Rows for your full retention. Excerpts from the last 30 days. Under 3 MB.</span>
+                    <svg class="cx-radio-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                      <path d="M20 6L9 17l-5-5"></path>
+                    </svg>
+                  </span>
+                </label>
+                <label class="cx-radio-card">
+                  <input type="radio" name="cx-assistant-detail" value="compact" />
+                  <span class="cx-radio-card-inner">
+                    <span class="cx-radio-card-title">Compact <span class="cx-badge">For Claude</span></span>
+                    <span class="cx-radio-card-desc">Rows from the last 30 days. Shorter excerpts from the last 7 days. Under 600 KB.</span>
+                    <svg class="cx-radio-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                      <path d="M20 6L9 17l-5-5"></path>
+                    </svg>
+                  </span>
+                </label>
+              </div>
+              <p class="cx-field-hint">Repeat visits to a page on the same day share one row. When the sheet passes its size, Cortex removes the oldest excerpts first, then the oldest visits.</p>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">Assistant setup guides</h3>
@@ -710,7 +758,7 @@
               </p>
               <div class="cx-actions-row">
                 <button type="button" id="cx-export-md" class="cx-btn cx-btn-secondary">Export notes (Markdown)</button>
-                <button type="button" id="cx-export-json" class="cx-btn cx-btn-secondary">Download backup (JSON)</button>
+                <button type="button" id="cx-export-json" class="cx-btn cx-btn-secondary">Export my data (JSON)</button>
               </div>
               <p id="cx-export-feedback" class="cx-form-feedback" hidden role="status" aria-live="polite"></p>
             </div>

@@ -349,6 +349,7 @@ describe("backfill and enable", () => {
       },
       random: () => 0,
     });
+    if ("confirm" in result) throw new Error("enable asked a question");
     expect(result.created).toBe(true);
     expect(result.flush.status).toBe("ready");
     expect(result.flush.appended).toBeGreaterThanOrEqual(1);
@@ -379,5 +380,16 @@ describe("service worker boundaries", () => {
     expect(syncGate).toContain("isOptionsPageSender(sender)");
     expect(syncGate).toContain("AssistantSyncMessageSchema");
     expect(syncGate).toContain("DwellMessageSchema");
+  });
+
+  it("parses imported history pages in the offscreen document, which has a DOM", () => {
+    const source = readFileSync(join(__dirname, "..", "src", "background", "service-worker.ts"), "utf8");
+    expect(source).not.toContain("content/extract");
+    expect(source).not.toContain("DOMParser");
+    expect(source).toContain('type: "CORTEX_HISTORY_EXTRACT"');
+    const offscreen = readFileSync(join(__dirname, "..", "src", "offscreen", "offscreen.ts"), "utf8");
+    const handler = offscreen.slice(offscreen.indexOf('"CORTEX_HISTORY_EXTRACT"'), offscreen.indexOf('"CORTEX_PDF_EXTRACT"'));
+    expect(handler).toContain("isServiceWorkerSender(sender)");
+    expect(handler).toContain("extractPageTextFromHtml");
   });
 });

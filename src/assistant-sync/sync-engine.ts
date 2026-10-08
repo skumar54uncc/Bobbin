@@ -8,6 +8,7 @@ import {
   type SheetLayout,
   type SyncCompanyRecord,
   type SyncContentRecord,
+  type SyncedRecord,
   type SyncEngineState,
   type SyncPersonRecord,
   type SyncSearchRecord,
@@ -15,26 +16,33 @@ import {
 } from "./db";
 import { syncDenyReason } from "./denylist";
 import {
+  findLegacyFiles,
   googleStatus,
   inspectMemory,
-  reenableMemory,
+  resolveMemory,
   syncedKey,
   type DriveApi,
   type DriveMemoryStatus,
+  type MemoryChoice,
   type StoredMemoryIds,
 } from "./drive-api";
 import {
   addSheetRequest,
   appendCellsRequest,
   appendRuns,
+  copyColumnRequest,
   dailyRowIndex,
   deleteRowsRequest,
+  fillColumnRequest,
   rowCount,
+  rowIndexOf,
+  rowsOnDate,
   runsFromDates,
   staleRanges,
   updateCellsRequest,
 } from "./flush-plan";
 import { localVisitStamp } from "./local-time";
+import { mergeDailyRepeats } from "./merge";
 import { pageTypeForUrl } from "./page-type";
 import { redactForSync } from "./redact-sync";
 import {
@@ -45,18 +53,18 @@ import {
 } from "./schedule";
 import { parseSearchQuery } from "./search-capture";
 import {
-  aboutRows,
   cellWarning,
-  companyRows,
-  contentRows,
-  dailyRows,
-  peopleRows,
-  searchRows,
+  DATE_COLUMN,
+  dataTabs,
+  protectTabRequest,
+  SCHEMA_VERSION,
   SHEET_TABS,
+  sizedAbout,
   TAB_HEADERS,
-  visitRows,
+  VISIT_HEADERS,
   type SheetTabName,
 } from "./sheet";
+import { csvLineBytes, planTrim, SHEET_DETAIL, trimNote, type SheetDetail, type TrimTab } from "./sheet-detail";
 
 export const DAY_MS = 86_400_000;
 /** Google recommends request bodies under 2 MB. A backlog larger than this goes out over several flushes. */
@@ -178,60 +186,131 @@ function finalOnly(memory: Memory): Memory {
   };
 }
 
-async function syncedSet(): Promise<Set<string>> {
-  const keys = await assistantSyncDb.synced.toCollection().primaryKeys();
-  return new Set(keys.map(String));
+type SyncedMap = Map<string, SyncedRecord>;
+
+async function syncedMap(): Promise<SyncedMap> {
+  const rows = await assistantSyncDb.synced.toArray();
+  return new Map(rows.map((row) => [row.key, row]));
 }
 
-async function markSynced(keys: string[]): Promise<void> {
-  if (!keys.length) return;
-  await assistantSyncDb.synced.bulkPut(keys.map((key) => ({ key })));
-  await assistantSyncDb.pending.bulkDelete(keys);
+async function markSynced(records: SyncedRecord[]): Promise<void> {
+  if (!records.length) return;
+  await assistantSyncDb.synced.bulkPut(records);
 }
 
 async function dropKeys(keys: string[]): Promise<void> {
   if (!keys.length) return;
   await assistantSyncDb.synced.bulkDelete(keys);
-  await assistantSyncDb.pending.bulkDelete(keys);
+}
+
+/** Short hash of a row's cells. A changed hash means the row needs rewriting. */
+function signature(cells: string[]): string {
+  const text = cells.join("\u001f");
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ cells.length;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619);
+    b = Math.imul(b ^ c, 2246822507);
+  }
+  return (a >>> 0).toString(36) + (b >>> 0).toString(36);
+}
+
+export type TabCutoffDates = Record<DataTab, string>;
+
+/**
+ * Per tab, rows dated before this date leave the sheet and local memory.
+ * Retention bounds every tab. Sheet detail tightens Content, and in compact
+ * mode the row tabs. Daily follows retention only.
+ */
+export function tabCutoffs(now: number, timeZone: string, retentionDays: number, detail: SheetDetail): TabCutoffDates {
+  const at = (days: number) => dateOf(now - days * DAY_MS, timeZone);
+  const later = (a: string, b: string) => (a > b ? a : b);
+  const retention = dateOf(retentionCutoffMs(now, retentionDays), timeZone);
+  const rules = SHEET_DETAIL[detail];
+  const rows = rules.rowDays == null ? retention : later(retention, at(rules.rowDays));
+  return {
+    Visits: rows,
+    Content: later(rows, at(rules.contentDays)),
+    Searches: rows,
+    People: rows,
+    Companies: rows,
+    Daily: retention,
+  };
 }
 
 /**
  * Two Sheets reads: the tab ids, then column A (ids) and B (dates) of every tab.
- * Rebuilds the cached layout and returns the ids already in the sheet.
+ * Rebuilds the cached layout and returns the rows already in the sheet, each
+ * with its date and place among that date's rows. Hashes already known are kept.
  */
-async function readLayout(api: DriveApi, fileId: string, now: number): Promise<{ layout: SheetLayout; found: string[] }> {
-  const sheetIds = await api.getSheetIds(fileId);
+async function readLayout(
+  api: DriveApi,
+  fileId: string,
+  now: number,
+  known: SyncedMap
+): Promise<{ layout: SheetLayout; found: SyncedRecord[] }> {
+  const { sheetIds, protectedIds } = await api.getSheetInfo(fileId);
   const present = DATA_TABS.filter((tab) => sheetIds[tab] != null);
-  const ranges = ["About!A:A", ...present.map((tab) => (tab === "Daily" ? "Daily!A:A" : `${tab}!A:B`))];
-  const columns = await api.readColumns(fileId, sheetIds.About != null ? ranges : ranges.slice(1));
-  const offset = sheetIds.About != null ? 1 : 0;
+  const withAbout = sheetIds.About != null;
+  const ranges = [
+    ...(withAbout ? ["About!A:A"] : []),
+    ...present.map((tab) => (tab === "Daily" ? "Daily!A:A" : `${tab}!A:B`)),
+    ...(sheetIds.Visits != null ? ["Visits!1:1"] : []),
+  ];
+  const columns = await api.readColumns(fileId, ranges);
+  const offset = withAbout ? 1 : 0;
   const runs: SheetLayout["runs"] = {};
   const headers: Record<string, boolean> = {};
-  const found: string[] = [];
+  const found: SyncedRecord[] = [];
   present.forEach((tab, i) => {
     const rows = columns[i + offset] ?? [];
     headers[tab] = rows.length > 0;
     const data = rows.slice(1);
-    runs[tab] = runsFromDates(data.map((row) => (tab === "Daily" ? row[0] : row[1]) ?? ""));
-    for (const row of data) if (row[0]) found.push(syncedKey(tab, row[0]));
+    const dates = data.map((row) => (tab === "Daily" ? row[0] : row[1]) ?? "");
+    runs[tab] = runsFromDates(dates);
+    const ords = new Map<string, number>();
+    data.forEach((row, j) => {
+      const date = dates[j] ?? "";
+      const ord = ords.get(date) ?? 0;
+      ords.set(date, ord + 1);
+      if (!row[0]) return;
+      const key = syncedKey(tab, row[0]);
+      const sig = known.get(key)?.sig;
+      found.push(tab === "Daily" ? { key } : { key, date, ord, ...(sig ? { sig } : {}) });
+    });
   });
+  const header = sheetIds.Visits != null ? (columns[columns.length - 1]?.[0] ?? []) : [];
+  const schema = !headers.Visits || header.includes("last_time") ? SCHEMA_VERSION : 3;
   return {
-    layout: { fileId, sheetIds, runs, headers, aboutRows: offset ? (columns[0] ?? []).length : 0, verifiedAt: now },
+    layout: {
+      fileId,
+      sheetIds,
+      runs,
+      headers,
+      aboutRows: offset ? (columns[0] ?? []).length : 0,
+      verifiedAt: now,
+      schema,
+      visitColumns: header.length,
+      protectedIds,
+    },
     found,
   };
 }
 
-/** Local rows past retention go, along with their sync keys. The sheet rows go in the same flush. */
-async function purgeLocal(cutoffDate: string, timeZone: string): Promise<void> {
+/** Local rows before each tab's cutoff go, along with their sync keys. The sheet rows go in the same flush. */
+async function purgeLocal(cutoffs: TabCutoffDates, timeZone: string): Promise<void> {
   const memory = await loadMemory();
-  const old = <T extends { id: string; visitedAt: number }>(rows: T[]) =>
-    rows.filter((row) => dateOf(row.visitedAt, timeZone) < cutoffDate).map((row) => row.id);
-  const visits = old(memory.visits);
-  const content = old(memory.content);
-  const searches = old(memory.searches);
-  const people = old(memory.people);
-  const companies = old(memory.companies);
-  const days = new Set(memory.visits.filter((row) => dateOf(row.visitedAt, timeZone) < cutoffDate).map((row) => dateOf(row.visitedAt, timeZone)));
+  const old = <T extends { id: string; visitedAt: number }>(rows: T[], before: string) =>
+    rows.filter((row) => dateOf(row.visitedAt, timeZone) < before).map((row) => row.id);
+  const visits = old(memory.visits, cutoffs.Visits);
+  const content = old(memory.content, cutoffs.Content);
+  const searches = old(memory.searches, cutoffs.Searches);
+  const people = old(memory.people, cutoffs.People);
+  const companies = old(memory.companies, cutoffs.Companies);
+  const days = (await assistantSyncDb.synced.where("key").startsWith("Daily:").primaryKeys())
+    .map((key) => String(key).slice("Daily:".length))
+    .filter((date) => date < cutoffs.Daily);
   await assistantSyncDb.visits.bulkDelete(visits);
   await assistantSyncDb.content.bulkDelete(content);
   await assistantSyncDb.searches.bulkDelete(searches);
@@ -244,49 +323,52 @@ async function purgeLocal(cutoffDate: string, timeZone: string): Promise<void> {
     ...searches.map((id) => syncedKey("Searches", id)),
     ...people.map((id) => syncedKey("People", id)),
     ...companies.map((id) => syncedKey("Companies", id)),
-    ...[...days].map((date) => syncedKey("Daily", date)),
+    ...days.map((date) => syncedKey("Daily", date)),
   ]);
-}
-
-/** Queues every finalized row the sheet does not have yet. */
-async function enqueueUnsynced(timeZone: string, now: number, synced: Set<string>): Promise<void> {
-  const memory = finalOnly(await loadMemory());
-  const queued = new Set((await assistantSyncDb.pending.toCollection().primaryKeys()).map(String));
-  const rows: { key: string; tab: string; rowId: string; cells: string[]; enqueuedAt: number }[] = [];
-  const consider = (tab: SheetTabName, built: string[][]) => {
-    for (const cells of built.slice(1)) {
-      const rowId = cells[0] ?? "";
-      const key = syncedKey(tab, rowId);
-      if (!rowId || synced.has(key) || queued.has(key)) continue;
-      queued.add(key);
-      rows.push({ key, tab, rowId, cells, enqueuedAt: now });
-    }
-  };
-  consider("Visits", visitRows(memory.visits, timeZone));
-  consider("Content", contentRows(memory.content, timeZone));
-  consider("Searches", searchRows(memory.searches, timeZone));
-  consider("People", peopleRows(memory.people, timeZone));
-  consider("Companies", companyRows(memory.companies, timeZone));
-  if (rows.length) await assistantSyncDb.pending.bulkPut(rows);
 }
 
 function rowBytes(cells: string[]): number {
   return cells.reduce((n, cell) => n + cell.length + 48, 16);
 }
 
+/** Tabs whose rows are rewritten in place when a merge changes them. Content and Searches keep their first row. */
+const UPDATABLE: ReadonlySet<DataTab> = new Set(["Visits", "People", "Companies"]);
+const TRIM_TABS: TrimTab[] = ["Content", "Visits", "Searches", "People", "Companies"];
+
 interface Plan {
   requests: object[];
-  keys: string[];
+  records: SyncedRecord[];
   layout: SheetLayout;
+  /** Sheet rows written: appended or rewritten. */
   appended: number;
   more: boolean;
+  /** CSV size estimate of the sheet after this flush. */
+  bytes: number;
+  trim: string;
+  /** A row could not be located. The next flush reads the sheet first. */
+  stale: boolean;
+}
+
+type Tabs = ReturnType<typeof dataTabs>;
+
+function bytesByDate(tabs: Tabs): Partial<Record<TrimTab, Map<string, number>>> {
+  const out: Partial<Record<TrimTab, Map<string, number>>> = {};
+  for (const tab of TRIM_TABS) {
+    const sizes = new Map<string, number>();
+    for (const row of tabs[tab].slice(1)) {
+      const date = row[DATE_COLUMN[tab]] ?? "";
+      sizes.set(date, (sizes.get(date) ?? 0) + csvLineBytes(row));
+    }
+    out[tab] = sizes;
+  }
+  return out;
 }
 
 async function planFlush(
   layoutIn: SheetLayout,
   state: SyncEngineState,
   deps: FlushDeps,
-  synced: Set<string>
+  synced: SyncedMap
 ): Promise<Plan> {
   const layout: SheetLayout = structuredClone(layoutIn);
   layout.headers ??= {};
@@ -294,96 +376,200 @@ async function planFlush(
   const deletes: object[] = [];
   const appends: object[] = [];
   const updates: object[] = [];
-  const keys: string[] = [];
+  const records: SyncedRecord[] = [];
+  const tz = deps.timeZone;
+  const detail = state.sheetDetail;
+  const rules = SHEET_DETAIL[detail];
 
   let nextSheetId = Math.max(-1, ...Object.values(layout.sheetIds)) + 1;
   for (const tab of SHEET_TABS) {
     if (layout.sheetIds[tab] != null) continue;
     layout.sheetIds[tab] = nextSheetId;
-    adds.push(addSheetRequest(nextSheetId, tab, SHEET_TABS.indexOf(tab)));
+    adds.push(addSheetRequest(nextSheetId, tab, SHEET_TABS.indexOf(tab)), protectTabRequest(nextSheetId));
+    layout.protectedIds = [...(layout.protectedIds ?? []), nextSheetId];
     layout.runs[tab] = [];
     layout.headers[tab] = false;
     nextSheetId += 1;
   }
 
-  const cutoffDate = dateOf(retentionCutoffMs(deps.now, state.retentionDays), deps.timeZone);
-  await purgeLocal(cutoffDate, deps.timeZone);
+  // Retention and sheet detail first, then trim whole days until the estimate fits the target.
+  const cutoffs = tabCutoffs(deps.now, tz, state.retentionDays, detail);
+  await purgeLocal(cutoffs, tz);
+  const rowIds = new Set(
+    [...synced.values()].filter((r) => r.key.startsWith("Visits:") && !r.of).map((r) => r.key.slice("Visits:".length))
+  );
+  const build = async () => {
+    const merged = mergeDailyRepeats(finalOnly(await loadMemory()), tz, rowIds);
+    return { merged, tabs: dataTabs(merged, { timeZone: tz, detail }) };
+  };
+  let { merged, tabs } = await build();
+  const sizeOf = (t: Tabs) => sizedAbout(t, { timeZone: tz, syncedAt: syncedAtLabel(deps.now, tz), detail });
+  const trim = planTrim({
+    bytes: sizeOf(tabs).bytes,
+    targetBytes: rules.targetBytes,
+    today: dateOf(deps.now, tz),
+    bytesByDate: bytesByDate(tabs),
+  });
+  for (const [tab, date] of Object.entries(trim.cutoffs) as [TrimTab, string][]) {
+    if (date > cutoffs[tab]) cutoffs[tab] = date;
+  }
+  // An excerpt never outlives its visit row.
+  if (cutoffs.Visits > cutoffs.Content) cutoffs.Content = cutoffs.Visits;
+  if (Object.keys(trim.cutoffs).length) {
+    await purgeLocal(cutoffs, tz);
+    ({ merged, tabs } = await build());
+  }
+
   for (const tab of DATA_TABS) {
-    const { ranges, kept } = staleRanges(layout.runs[tab] ?? [], cutoffDate);
+    const { ranges, kept } = staleRanges(layout.runs[tab] ?? [], cutoffs[tab]);
     for (const range of ranges) deletes.push(deleteRowsRequest(layout.sheetIds[tab]!, range));
     layout.runs[tab] = kept;
   }
 
-  await enqueueUnsynced(deps.timeZone, deps.now, synced);
-  const pending = (await assistantSyncDb.pending.toArray())
-    .filter((row) => !synced.has(row.key) && (ROW_TABS as string[]).includes(row.tab))
-    .sort((a, b) => `${a.cells[1]} ${a.cells[3]}`.localeCompare(`${b.cells[1]} ${b.cells[3]}`));
+  // Every row the sheet lacks, and every merged row whose cells changed.
+  interface Out {
+    tab: (typeof ROW_TABS)[number];
+    cells: string[];
+    record: SyncedRecord;
+    update: boolean;
+    /** Merged visits that now live in this row. */
+    members: SyncedRecord[];
+  }
+  const members = new Map(merged.visits.map((v) => [v.id, v.memberIds.slice(1)]));
+  const out: Out[] = [];
+  const adopt: SyncedRecord[] = [];
+  for (const tab of ROW_TABS) {
+    for (const cells of tabs[tab].slice(1)) {
+      const id = cells[0] ?? "";
+      if (!id) continue;
+      const key = syncedKey(tab, id);
+      const sig = signature(cells);
+      const merges = (tab === "Visits" ? (members.get(id) ?? []) : [])
+        .filter((m) => synced.get(syncedKey("Visits", m))?.of !== id)
+        .map((m) => ({ key: syncedKey("Visits", m), of: id }));
+      const prior = synced.get(key);
+      if (prior && !prior.of) {
+        if (!UPDATABLE.has(tab) || prior.sig === sig) continue;
+        if (prior.sig == null && !merges.length && !(members.get(id)?.length)) {
+          // Written before hashes were kept, and nothing merged into it since.
+          adopt.push({ ...prior, sig });
+          continue;
+        }
+        if (prior.date == null || prior.ord == null) continue;
+        out.push({ tab, cells, record: { key, sig, date: prior.date, ord: prior.ord }, update: true, members: merges });
+      } else {
+        out.push({ tab, cells, record: { key, sig }, update: false, members: merges });
+      }
+    }
+  }
+  await markSynced(adopt);
+
+  out.sort((a, b) => `${a.cells[1]} ${a.cells[3]}`.localeCompare(`${b.cells[1]} ${b.cells[3]}`));
   let budget = FLUSH_BYTE_BUDGET;
-  const chosen: typeof pending = [];
-  for (const row of pending) {
+  const chosen: Out[] = [];
+  for (const row of out) {
     const size = rowBytes(row.cells);
     if (chosen.length && size > budget) break;
     chosen.push(row);
     budget -= size;
   }
-  const more = chosen.length < pending.length;
+  const more = chosen.length < out.length;
 
+  // Old Visits headers end at topics. Add visit_count (1 for every row already there) and
+  // last_time (a copy of time, since each old row is one visit), and the edit warning on every tab.
+  const visitsId = layout.sheetIds.Visits!;
+  const schema = layout.schema ?? (layout.headers.Visits ? 3 : SCHEMA_VERSION);
+  if (layout.headers.Visits && schema < SCHEMA_VERSION) {
+    updates.push(updateCellsRequest(visitsId, 0, [[...VISIT_HEADERS]]));
+    const rows = rowCount(layout.runs.Visits);
+    const width = layout.visitColumns ?? VISIT_HEADERS.indexOf("visit_count");
+    const count = VISIT_HEADERS.indexOf("visit_count");
+    const last = VISIT_HEADERS.indexOf("last_time");
+    if (rows && width <= count) updates.push(fillColumnRequest(visitsId, count, 1, 1 + rows, "1"));
+    if (rows && width <= last) updates.push(copyColumnRequest(visitsId, VISIT_HEADERS.indexOf("time"), last, 1, 1 + rows));
+    const already = new Set(layout.protectedIds ?? []);
+    for (const tab of SHEET_TABS) {
+      const id = layout.sheetIds[tab]!;
+      if (!already.has(id)) adds.push(protectTabRequest(id));
+    }
+    layout.protectedIds = SHEET_TABS.map((tab) => layout.sheetIds[tab]!);
+  }
+  layout.schema = SCHEMA_VERSION;
+  layout.visitColumns = VISIT_HEADERS.length;
+
+  let written = 0;
+  let stale = false;
   const touchedDates = new Set<string>();
   for (const tab of ROW_TABS) {
-    const rows = chosen.filter((row) => row.tab === tab);
+    const sheetId = layout.sheetIds[tab]!;
+    for (const row of chosen.filter((r) => r.tab === tab && r.update)) {
+      const at = rowIndexOf(layout.runs[tab] ?? [], row.record.date!, row.record.ord!);
+      if (at == null) {
+        stale = true;
+        continue;
+      }
+      updates.push(updateCellsRequest(sheetId, at, [row.cells]));
+      records.push(row.record, ...row.members);
+      written += 1;
+      touchedDates.add(row.record.date!);
+    }
+    const rows = chosen.filter((r) => r.tab === tab && !r.update);
     const withHeader = !layout.headers[tab] && (rows.length > 0 || deps.mode === "enable");
     if (!rows.length && !withHeader) continue;
-    const out = withHeader ? [[...TAB_HEADERS[tab]], ...rows.map((row) => row.cells)] : rows.map((row) => row.cells);
-    appends.push(appendCellsRequest(layout.sheetIds[tab]!, out));
+    const next = new Map<string, number>();
+    for (const row of rows) {
+      const date = row.cells[1] ?? "";
+      const ord = next.get(date) ?? rowsOnDate(layout.runs[tab] ?? [], date);
+      next.set(date, ord + 1);
+      records.push({ ...row.record, date, ord }, ...row.members);
+      if (date) touchedDates.add(date);
+    }
+    const cells = rows.map((row) => row.cells);
+    appends.push(appendCellsRequest(sheetId, withHeader ? [[...TAB_HEADERS[tab]], ...cells] : cells));
     layout.headers[tab] = true;
     layout.runs[tab] = appendRuns(layout.runs[tab] ?? [], rows.map((row) => row.cells[1] ?? ""));
-    for (const row of rows) {
-      keys.push(row.key);
-      if (row.cells[1]) touchedDates.add(row.cells[1]);
-    }
+    written += rows.length;
   }
 
-  const memory = finalOnly(await loadMemory());
   if (touchedDates.size || (deps.mode === "enable" && !layout.headers.Daily)) {
-    const daily = new Map(dailyRows(memory, deps.timeZone).slice(1).map((row) => [row[0] ?? "", row]));
+    const daily = new Map(tabs.Daily.slice(1).map((row) => [row[0] ?? "", row]));
     const fresh: string[][] = [];
     for (const date of [...touchedDates].sort()) {
       const row = daily.get(date);
-      if (!row) continue;
+      if (!row || date < cutoffs.Daily) continue;
       const at = dailyRowIndex(layout.runs.Daily ?? [], date);
       if (at != null) updates.push(updateCellsRequest(layout.sheetIds.Daily!, at, [row]));
       else fresh.push(row);
-      keys.push(syncedKey("Daily", date));
+      records.push({ key: syncedKey("Daily", date) });
+      written += 1;
     }
     if (fresh.length || !layout.headers.Daily) {
-      const out = layout.headers.Daily ? fresh : [[...TAB_HEADERS.Daily], ...fresh];
-      appends.push(appendCellsRequest(layout.sheetIds.Daily!, out));
+      const rows = layout.headers.Daily ? fresh : [[...TAB_HEADERS.Daily], ...fresh];
+      appends.push(appendCellsRequest(layout.sheetIds.Daily!, rows));
       layout.headers.Daily = true;
       layout.runs.Daily = appendRuns(layout.runs.Daily ?? [], fresh.map((row) => row[0] ?? ""));
     }
   }
 
+  const { about, bytes } = sizeOf(tabs);
   const changed = adds.length + deletes.length + appends.length + updates.length > 0;
   if (changed) {
-    const dates = memory.visits.map((row) => dateOf(row.visitedAt, deps.timeZone)).sort();
-    const about = aboutRows({
-      firstDate: dates[0] ?? "",
-      lastDate: dates[dates.length - 1] ?? "",
-      syncedAt: syncedAtLabel(deps.now, deps.timeZone),
-      timeZone: deps.timeZone,
-      visits: memory.visits.length,
-      content: memory.content.length,
-      searches: memory.searches.length,
-      people: memory.people.length,
-      companies: memory.companies.length,
-    });
     const padded = [...about];
     while (padded.length < layout.aboutRows) padded.push([""]);
     updates.push(updateCellsRequest(layout.sheetIds.About!, 0, padded));
     layout.aboutRows = about.length;
   }
 
-  return { requests: [...adds, ...deletes, ...appends, ...updates], keys, layout, appended: keys.length, more };
+  return {
+    requests: [...adds, ...deletes, ...appends, ...updates],
+    records,
+    layout,
+    appended: written,
+    more,
+    bytes,
+    trim: trimNote(trim.cutoffs, rules.targetBytes),
+    stale,
+  };
 }
 
 function cellEstimate(layout: SheetLayout): number {
@@ -419,9 +605,15 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
   const priorFlushAt = state.lastFlushAt;
   try {
     const inflight = await assistantSyncDb.inflight.get("inflight");
+    // A layout saved before row positions were kept (no schema) needs one read to locate rows.
     const verify =
-      deps.mode === "enable" || state.verifyNext || inflight != null || !state.layout || state.layout.fileId !== fileId;
-    const synced = await syncedSet();
+      deps.mode === "enable" ||
+      state.verifyNext ||
+      inflight != null ||
+      !state.layout ||
+      state.layout.fileId !== fileId ||
+      state.layout.schema == null;
+    const synced = await syncedMap();
     let layout = state.layout;
     if (verify) {
       const status = await inspectMemory(deps.api, deps.ids);
@@ -431,10 +623,11 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
         return result({ status, appended: 0, error: state.lastError });
       }
       counts.reads += 2;
-      const read = await readLayout(deps.api, fileId, deps.now);
+      const read = await readLayout(deps.api, fileId, deps.now, synced);
       layout = read.layout;
-      for (const key of read.found) synced.add(key);
+      for (const record of read.found) synced.set(record.key, record);
       await markSynced(read.found);
+      await assistantSyncDb.pending.clear();
       await assistantSyncDb.inflight.delete("inflight");
       state.verifyNext = false;
       state.layout = layout;
@@ -452,18 +645,20 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
     const plan = await planFlush(layout!, state, deps, synced);
     if (!plan.requests.length) {
       state.lastError = "";
+      state.sheetBytes = plan.bytes;
+      if (plan.stale) state.verifyNext = true;
       await writeSyncEngineState(state);
       return result({ status: "ready", appended: 0 });
     }
 
-    await assistantSyncDb.inflight.put({ id: "inflight", fileId, keys: plan.keys, startedAt: deps.now });
+    await assistantSyncDb.inflight.put({ id: "inflight", fileId, keys: plan.records.map((r) => r.key), startedAt: deps.now });
     state.lastFlushAt = deps.now;
     await writeSyncEngineState(state);
     sent = true;
     counts.writes += 1;
     await deps.api.batchUpdate(fileId, plan.requests);
 
-    await markSynced(plan.keys);
+    await markSynced(plan.records);
     await assistantSyncDb.inflight.delete("inflight");
     Object.assign(state, {
       layout: plan.layout,
@@ -472,6 +667,9 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
       backoffFailures: 0,
       consecutive429: 0,
       nextAttemptAt: 0,
+      sheetBytes: plan.bytes,
+      ...(plan.trim ? { trimNote: plan.trim, trimmedAt: deps.now } : {}),
+      ...(plan.stale ? { verifyNext: true } : {}),
     });
     await writeSyncEngineState(state);
     const warning = cellWarning(cellEstimate(plan.layout));
@@ -698,9 +896,20 @@ export async function enableAssistantSync(input: {
   saveIds: (ids: StoredMemoryIds) => Promise<void>;
   random?: () => number;
   onProgress?: (progress: BackfillProgress) => Promise<void> | void;
-}): Promise<{ ids: StoredMemoryIds; created: boolean; backfill: { stored: number; skipped: number; total: number }; flush: FlushResult }> {
+  /** The user's answer when the stored sheet is trashed or deleted. */
+  choice?: MemoryChoice;
+}): Promise<
+  | { ids: StoredMemoryIds; created: boolean; backfill: { stored: number; skipped: number; total: number }; flush: FlushResult }
+  | { confirm: "missing" | "trashed" }
+> {
   const previous = await readSyncEngineState();
   const retentionDays = clampRetentionDays(input.retentionDays ?? previous.retentionDays);
+  const resolved = await resolveMemory(input.api, input.ids, input.choice);
+  if ("confirm" in resolved) {
+    await writeSyncEngineState({ ...previous, lastError: statusMessage(resolved.confirm) });
+    return resolved;
+  }
+  const { ids } = resolved;
   const state: SyncEngineState = {
     ...previous,
     syncEnabled: true,
@@ -712,10 +921,9 @@ export async function enableAssistantSync(input: {
     lastError: "",
   };
   await writeSyncEngineState(state);
-  const ids = await reenableMemory(input.api, input.ids);
   const created = ids.fileId !== input.ids.fileId || ids.folderId !== input.ids.folderId;
   if (created) {
-    // A new file has nothing in it yet. Every row goes again.
+    // A different file. The rows it has are found by the read on the first flush.
     await assistantSyncDb.synced.clear();
     await writeSyncEngineState({ ...(await readSyncEngineState()), layout: null });
   }
@@ -741,5 +949,36 @@ export async function enableAssistantSync(input: {
     random: input.random,
     loadLibraryPeople: input.loadLibraryPeople,
   });
-  return { ids, created, backfill, flush };
+  return { ids, created: resolved.created, backfill, flush };
+}
+
+/**
+ * Looks once for JSON backups and archives older builds left in the folder.
+ * One Drive list call, the first time sync runs on this build. Never trashes anything.
+ */
+export async function checkLegacyFiles(api: DriveApi, ids: StoredMemoryIds, backupId?: string | null): Promise<void> {
+  const state = await readSyncEngineState();
+  if (state.legacyCleanup !== "unchecked" || !ids.folderId || ids.folderId === ids.fileId) return;
+  const files = await findLegacyFiles(api, ids.folderId, backupId);
+  await writeSyncEngineState({
+    ...(await readSyncEngineState()),
+    legacyCleanup: files.length ? "ask" : "none",
+    legacyFiles: files.map(({ id, name }) => ({ id, name })),
+  });
+}
+
+/** The user's answer to the cleanup prompt. Trash moves the listed files to the Drive trash. */
+export async function answerLegacyCleanup(api: DriveApi | null, answer: "trash" | "keep"): Promise<SyncEngineState> {
+  const state = await readSyncEngineState();
+  if (state.legacyCleanup !== "ask") return state;
+  if (answer === "trash") {
+    if (!api) throw new Error("google_401");
+    for (const file of state.legacyFiles) {
+      const info = await api.getFile(file.id);
+      if (info && !info.trashed) await api.trashFile(file.id);
+    }
+  }
+  const next: SyncEngineState = { ...state, legacyCleanup: answer === "trash" ? "trashed" : "kept", legacyFiles: [] };
+  await writeSyncEngineState(next);
+  return next;
 }

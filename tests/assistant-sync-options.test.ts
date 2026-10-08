@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { assistantSyncDb, readSyncEngineState } from "../src/assistant-sync/db";
 import { applyAssistantSyncPreferences } from "../src/assistant-sync/preferences";
-import { ASSISTANT_SYNC_RETENTION_KEY } from "../src/assistant-sync/preference-keys";
+import { ASSISTANT_SYNC_RETENTION_KEY, ASSISTANT_SYNC_SHEET_DETAIL_KEY } from "../src/assistant-sync/preference-keys";
 import { mountAssistantSyncPanel } from "../src/options/assistant-sync-panel";
 
 const html = readFileSync(join(__dirname, "..", "src", "options", "options.html"), "utf8");
@@ -37,7 +37,11 @@ describe("assistant sync options", () => {
     expect(document.getElementById("cx-assistant-archives")).toBeNull();
     const warn = document.getElementById("cx-assistant-retention-warn")?.textContent ?? "";
     expect(warn).toMatch(/deleted from the sheet permanently/);
-    expect(warn).toMatch(/Download backup/);
+    expect(warn).toMatch(/Export my data/);
+    expect(document.getElementById("cx-export-json")?.textContent).toBe("Export my data (JSON)");
+    expect(html).not.toMatch(/Download backup/);
+    expect(document.getElementById("cx-assistant-legacy")?.hidden).toBe(true);
+    expect(document.getElementById("cx-assistant-confirm")?.hidden).toBe(true);
     expect(document.getElementById("cx-assistant-retention")?.getAttribute("min")).toBe("7");
     expect(document.getElementById("cx-assistant-retention")?.getAttribute("max")).toBe("365");
     const guides = [...document.querySelectorAll("[data-assistant-guide]")];
@@ -209,5 +213,84 @@ describe("assistant sync options", () => {
     const state = await readSyncEngineState();
     expect(state.retentionDays).toBe(30);
     expect(state.syncEnabled).toBe(false);
+
+    const compact = document.querySelector<HTMLInputElement>('input[name="cx-assistant-detail"][value="compact"]')!;
+    compact.checked = true;
+    compact.dispatchEvent(new Event("change"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(stored[ASSISTANT_SYNC_SHEET_DETAIL_KEY]).toBe("compact");
+    await applyAssistantSyncPreferences({ sheetDetail: stored[ASSISTANT_SYNC_SHEET_DETAIL_KEY] });
+    expect((await readSyncEngineState()).sheetDetail).toBe("compact");
+  });
+
+  it("asks before restoring a trashed sheet and answers with the token from the Enable click", async () => {
+    const sent: { action?: string; token?: string; choice?: string }[] = [];
+    let interactive = 0;
+    (globalThis as { chrome?: unknown }).chrome = {
+      storage: { local: { get: async () => ({}), set: async () => {} } },
+      identity: {
+        getAuthToken: (_details: { interactive: boolean }, callback: (token?: string) => void) => {
+          interactive += 1;
+          callback("click-token");
+        },
+      },
+      runtime: {
+        lastError: undefined,
+        sendMessage: async (msg: { action?: string; token?: string; choice?: string }) => {
+          sent.push(msg);
+          if (msg.action === "status") return { ok: true, state: await readSyncEngineState() };
+          if (!msg.choice) return { ok: false, status: "confirm", confirm: "trashed" };
+          return { ok: true, status: "ready" };
+        },
+      },
+    };
+    mountAssistantSyncPanel();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    document.getElementById("cx-assistant-enable")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const box = document.getElementById("cx-assistant-confirm")!;
+    expect(box.hidden).toBe(false);
+    expect(box.textContent).toMatch(/in your Google Drive trash/);
+    const go = document.getElementById("cx-assistant-confirm-go")!;
+    expect(go.textContent).toBe("Restore from trash");
+    go.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sent.filter((m) => m.action === "enable").map((m) => [m.token, m.choice])).toEqual([
+      ["click-token", undefined],
+      ["click-token", "restore"],
+    ]);
+    expect(interactive).toBe(1);
+    expect(box.hidden).toBe(true);
+  });
+
+  it("shows the old files prompt and the sheet size from state", async () => {
+    const { writeSyncEngineState, defaultSyncEngineState } = await import("../src/assistant-sync/db");
+    await writeSyncEngineState({
+      ...defaultSyncEngineState(),
+      syncEnabled: true,
+      sheetBytes: 1.2 * 1024 * 1024,
+      legacyCleanup: "ask",
+      legacyFiles: [{ id: "b", name: "Cortex Memory Backup.json" }],
+    });
+    const sent: { action?: string; cleanup?: string }[] = [];
+    (globalThis as { chrome?: unknown }).chrome = {
+      storage: { local: { get: async () => ({}), set: async () => {} } },
+      runtime: {
+        lastError: undefined,
+        sendMessage: async (msg: { action?: string; cleanup?: string }) => {
+          sent.push(msg);
+          if (msg.action === "status") return { ok: true, state: await readSyncEngineState() };
+          return { ok: true };
+        },
+      },
+    };
+    mountAssistantSyncPanel();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(document.getElementById("cx-assistant-size")?.textContent).toBe("1.2 MB of 3 MB");
+    expect(document.getElementById("cx-assistant-legacy")?.hidden).toBe(false);
+    expect(document.getElementById("cx-assistant-legacy-list")?.textContent).toBe("Cortex Memory Backup.json");
+    document.getElementById("cx-assistant-legacy-keep")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sent.find((m) => m.action === "cleanup")?.cleanup).toBe("keep");
   });
 });

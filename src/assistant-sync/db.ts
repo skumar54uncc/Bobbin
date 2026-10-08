@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from "dexie";
 import type { PageType } from "./page-type";
 import type { CompanySection, HowFound } from "./linkedin-selectors";
 import type { SearchEngine } from "./search-capture";
+import type { SheetDetail } from "./sheet-detail";
 
 export interface SyncVisitRecord {
   id: string;
@@ -36,6 +37,25 @@ export interface SheetLayout {
   headers?: Record<string, boolean>;
   aboutRows: number;
   verifiedAt: number;
+  /** Visits header version: 4 has visit_count and last_time. Unset on layouts saved before it, which forces one read. */
+  schema?: number;
+  /** Columns in the Visits header when it was last read. Tells the migration which columns to fill. */
+  visitColumns?: number;
+  /** Tabs that carry Cortex's warning-only protection. */
+  protectedIds?: number[];
+}
+
+/**
+ * A row the sheet has. `date` and `ord` (its place among that date's rows, in
+ * sheet order) locate it for an in-place update with no read. `sig` is a hash of
+ * the cells last written. `of` marks a visit merged into another visit's row.
+ */
+export interface SyncedRecord {
+  key: string;
+  sig?: string;
+  date?: string;
+  ord?: number;
+  of?: string;
 }
 
 /** A flush that was sent but not confirmed. Its presence after a restart triggers a recovery read. */
@@ -129,6 +149,15 @@ export interface SyncEngineState {
   /** The next flush reads the sheet first (startup check, recovery). */
   verifyNext: boolean;
   layout: SheetLayout | null;
+  sheetDetail: SheetDetail;
+  /** CSV size estimate of the sheet after the last flush. */
+  sheetBytes: number;
+  /** What the last trim removed. Shown for a week. */
+  trimNote: string;
+  trimmedAt: number;
+  /** Old Drive JSON backups and monthly archives: not checked yet, none, waiting for the user, or the user's answer. */
+  legacyCleanup: "unchecked" | "none" | "ask" | "trashed" | "kept";
+  legacyFiles: { id: string; name: string }[];
 }
 
 export function clampRetentionDays(days: number): number {
@@ -155,6 +184,12 @@ export function defaultSyncEngineState(): SyncEngineState {
     authNeeded: false,
     verifyNext: false,
     layout: null,
+    sheetDetail: "standard",
+    sheetBytes: 0,
+    trimNote: "",
+    trimmedAt: 0,
+    legacyCleanup: "unchecked",
+    legacyFiles: [],
   };
 }
 
@@ -165,7 +200,7 @@ class AssistantSyncDB extends Dexie {
   people!: EntityTable<SyncPersonRecord, "id">;
   companies!: EntityTable<SyncCompanyRecord, "id">;
   /** Keys are `Tab:id`. Cleared on a full local delete. */
-  synced!: EntityTable<{ key: string }, "key">;
+  synced!: EntityTable<SyncedRecord, "key">;
   pending!: EntityTable<PendingSyncRow, "key">;
   state!: EntityTable<SyncEngineState, "id">;
   drafts!: EntityTable<SyncDraftRecord, "id">;

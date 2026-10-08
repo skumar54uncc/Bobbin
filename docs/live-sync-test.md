@@ -50,6 +50,7 @@ Do each item in a new tab and close the tab when done.
 | Open one LinkedIn profile for 20 seconds (if signed in) | 1 People row, no photo column, no photo URL |
 | Open a site in your block list, or a bank site | No row |
 | Open one article and leave the tab open | No row yet |
+| Reopen one of the 5 articles, read 20 seconds, close it | Still one row for it, visit_count 2, dwell is the total |
 
 Also check locally: open Cortex search, search for one of the articles.
 The result shows "Read N min" (or "Read under a minute").
@@ -63,14 +64,26 @@ The first activity flush comes 5 minutes after the Enable pass, plus 0 to
    appended is the rows you expect plus 1, because today's Daily row
    counts too.
 2. Sheet, counting rows under the header:
-   - Visits: one row per article. Search pages and the LinkedIn profile
-     also get a Visits row, with the same id as their Searches or People
-     row. The short read, the blocked site, and the open tab are absent.
+   - Visits: one row per article per day; the reopened article shows
+     visit_count 2, time is when you first opened it and last_time is
+     when you reopened it. The last two column headers are visit_count
+     and last_time. Search pages
+     and the LinkedIn profile also get a Visits row, with the same id as
+     their Searches or People row. The short read, the blocked site, and
+     the open tab are absent.
    - Searches: 2. People: 1 if you opened a profile.
    - Content: empty. Excerpts are written only for pages read 5 minutes or more.
    - About row 2: "Last synced" moved to this flush.
-   - About row 3: the counts match the tab row counts.
+   - About row 3: "Sheet size: N KB." and the counts match the tab row
+     counts. Settings, Status, Sheet size shows the same size.
+   - About, last row: schema_version: 4. Near the top: "This sheet is
+     managed by Cortex. Editing or deleting rows can cause wrong answers."
+   - Type into any cell on any tab: Sheets shows a warning before the
+     edit and lets you continue. Press Cancel so the sheet stays as
+     Cortex wrote it. Data, Protect sheets and ranges lists one
+     "Managed by Cortex" entry per tab (7).
    - Daily: a row for today with pages_visited, profiles_viewed, searches.
+     pages_visited counts every visit, so the reopened article counts twice.
 
 ## Minute 7: Sync now and the countdown
 
@@ -115,3 +128,14 @@ row with appended 0 and writes 0, and the sheet does not change.
 - Normal flushes: 0 reads, 1 write.
 - About and Daily match the tab counts.
 - No duplicate ids after the crash step.
+- Every tab warns before a manual edit, with one "Managed by Cortex"
+  protection each.
+
+## Optional: history import (outside the 15 minutes)
+
+Settings, History import: Time range Last 7 days, Max URLs to try 50,
+then Scan history. Imported
+articles show up in Cortex search with their text, not just the title.
+Before Phase 2 the service worker had no DOM to parse them; now the
+offscreen document does it. This needs no sheet, so you can run it any
+time.

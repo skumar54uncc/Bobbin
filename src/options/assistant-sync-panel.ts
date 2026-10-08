@@ -1,6 +1,15 @@
 /// <reference types="chrome"/>
 import type { SyncEngineState } from "../assistant-sync/db";
-import { ASSISTANT_SYNC_RETENTION_KEY } from "../assistant-sync/preference-keys";
+import { ASSISTANT_SYNC_RETENTION_KEY, ASSISTANT_SYNC_SHEET_DETAIL_KEY } from "../assistant-sync/preference-keys";
+import { formatSheetSize, normalizeSheetDetail, SHEET_DETAIL } from "../assistant-sync/sheet-detail";
+
+type EnableReply = { ok?: boolean; error?: string; status?: string; confirm?: "missing" | "trashed" } | undefined;
+
+const CONFIRM_TEXT = {
+  trashed: "Cortex Memory is in your Google Drive trash. Restore it to keep syncing into the same sheet.",
+  missing: "Cortex Memory was deleted from Google Drive. Create a new sheet to start syncing again. Cortex fills it from the history on this device.",
+} as const;
+const CONFIRM_BUTTON = { trashed: "Restore from trash", missing: "Create a new sheet" } as const;
 
 /** The Sync now button rests this long after a press. Matches SYNC_NOW_COOLDOWN_MS. */
 const SYNC_NOW_COOLDOWN_MS = 30_000;
@@ -82,6 +91,12 @@ function paint(state: SyncEngineState, statusLine?: string): void {
       ? `${state.backfillDone}/${state.backfillTotal}, ${state.backfillPhase}`
       : state.backfillPhase;
   }
+  const size = byId<HTMLElement>("cx-assistant-size");
+  if (size) {
+    const target = SHEET_DETAIL[normalizeSheetDetail(state.sheetDetail)].targetBytes;
+    size.textContent = state.sheetBytes > 0 ? `${formatSheetSize(state.sheetBytes)} of ${formatSheetSize(target)}` : "Not measured yet";
+  }
+  paintLegacy(state);
   if (enable) {
     // Reconnect Google Drive runs the same Enable flow.
     enable.hidden = state.syncEnabled && !state.authNeeded;
@@ -94,6 +109,21 @@ function paint(state: SyncEngineState, statusLine?: string): void {
   }
   paintNowButton();
   schedule(state.backfillPhase);
+}
+
+function paintLegacy(state: SyncEngineState): void {
+  const group = byId<HTMLElement>("cx-assistant-legacy");
+  const list = byId<HTMLUListElement>("cx-assistant-legacy-list");
+  if (!group || !list) return;
+  const files = state.legacyCleanup === "ask" ? (state.legacyFiles ?? []) : [];
+  group.hidden = files.length === 0;
+  list.replaceChildren(
+    ...files.map((file) => {
+      const item = document.createElement("li");
+      item.textContent = file.name;
+      return item;
+    })
+  );
 }
 
 async function refresh(): Promise<void> {
@@ -141,6 +171,38 @@ async function saveRetention(days: number): Promise<void> {
   await chrome.storage.local.set({ [ASSISTANT_SYNC_RETENTION_KEY]: days });
 }
 
+/** Token from the last Enable click, kept only while Cortex waits for an answer to its question. */
+let confirmToken = "";
+
+function showConfirm(kind: "missing" | "trashed" | null): void {
+  const box = byId<HTMLElement>("cx-assistant-confirm");
+  const text = byId<HTMLElement>("cx-assistant-confirm-text");
+  const go = byId<HTMLButtonElement>("cx-assistant-confirm-go");
+  if (!box || !text || !go) return;
+  box.hidden = kind == null;
+  if (!kind) {
+    confirmToken = "";
+    return;
+  }
+  text.textContent = CONFIRM_TEXT[kind];
+  go.textContent = CONFIRM_BUTTON[kind];
+  go.dataset.choice = kind === "trashed" ? "restore" : "create";
+  go.disabled = false;
+}
+
+function afterEnable(res: EnableReply, token: string): Promise<void> {
+  if (res?.status === "confirm" && res.confirm) {
+    confirmToken = token;
+    showFeedback("", false);
+    showConfirm(res.confirm);
+  } else {
+    showConfirm(null);
+    if (!res?.ok) showFeedback(res?.error || "Sync did not start.", true);
+    else showFeedback("Sync is on.", false);
+  }
+  return refresh();
+}
+
 export function mountAssistantSyncPanel(): void {
   const enable = byId<HTMLButtonElement>("cx-assistant-enable");
   const disable = byId<HTMLButtonElement>("cx-assistant-disable");
@@ -154,13 +216,11 @@ export function mountAssistantSyncPanel(): void {
   enable.addEventListener("click", () => {
     enable.disabled = true;
     showFeedback("", false);
+    showConfirm(null);
     void driveTokenFromClick()
-      .then((token) => chrome.runtime.sendMessage({ type: "CORTEX_ASSISTANT_SYNC", action: "enable", token }))
-      .then((res: { ok?: boolean; error?: string; status?: string } | undefined) => {
-        if (!res?.ok) showFeedback(res?.error || "Sync did not start.", true);
-        else showFeedback("Sync is on.", false);
-        return refresh();
-      })
+      .then(async (token) =>
+        afterEnable((await chrome.runtime.sendMessage({ type: "CORTEX_ASSISTANT_SYNC", action: "enable", token })) as EnableReply, token)
+      )
       .catch((error: unknown) => {
         showFeedback(
           error instanceof Error ? error.message : "Sign in to Google is needed before Cortex can sync.",
@@ -219,9 +279,56 @@ export function mountAssistantSyncPanel(): void {
     void saveRetention(days);
   });
 
-  void chrome.storage.local.get(ASSISTANT_SYNC_RETENTION_KEY).then((stored) => {
+  // The answer to Cortex's question continues the same Enable, with the token from that click.
+  const go = byId<HTMLButtonElement>("cx-assistant-confirm-go");
+  go?.addEventListener("click", () => {
+    const choice = go.dataset.choice === "restore" ? "restore" : "create";
+    const token = confirmToken;
+    if (!token) {
+      showConfirm(null);
+      showFeedback("Press Enable again to continue.", true);
+      return;
+    }
+    go.disabled = true;
+    void chrome.runtime
+      .sendMessage({ type: "CORTEX_ASSISTANT_SYNC", action: "enable", token, choice })
+      .then((res: EnableReply) => afterEnable(res, token))
+      .catch((error: unknown) => showFeedback(error instanceof Error ? error.message : "Sync did not start.", true));
+  });
+  byId<HTMLButtonElement>("cx-assistant-confirm-cancel")?.addEventListener("click", () => {
+    showConfirm(null);
+    showFeedback("Sync stays off. Your Drive was not changed.", false);
+  });
+
+  const answerLegacy = (cleanup: "trash" | "keep") => {
+    const buttons = [byId<HTMLButtonElement>("cx-assistant-legacy-trash"), byId<HTMLButtonElement>("cx-assistant-legacy-keep")];
+    for (const b of buttons) if (b) b.disabled = true;
+    void chrome.runtime
+      .sendMessage({ type: "CORTEX_ASSISTANT_SYNC", action: "cleanup", cleanup })
+      .then((res: { ok?: boolean; error?: string } | undefined) => {
+        if (!res?.ok) showFeedback(res?.error || "Drive did not change. Try again.", true);
+        else showFeedback(cleanup === "trash" ? "The older files are in your Drive trash." : "The older files stay in Drive.", false);
+        return refresh();
+      })
+      .finally(() => {
+        for (const b of buttons) if (b) b.disabled = false;
+      });
+  };
+  byId<HTMLButtonElement>("cx-assistant-legacy-trash")?.addEventListener("click", () => answerLegacy("trash"));
+  byId<HTMLButtonElement>("cx-assistant-legacy-keep")?.addEventListener("click", () => answerLegacy("keep"));
+
+  const details = [...document.querySelectorAll<HTMLInputElement>('input[name="cx-assistant-detail"]')];
+  for (const input of details) {
+    input.addEventListener("change", () => {
+      if (input.checked) void chrome.storage.local.set({ [ASSISTANT_SYNC_SHEET_DETAIL_KEY]: normalizeSheetDetail(input.value) });
+    });
+  }
+
+  void chrome.storage.local.get([ASSISTANT_SYNC_RETENTION_KEY, ASSISTANT_SYNC_SHEET_DETAIL_KEY]).then((stored) => {
     const days = stored[ASSISTANT_SYNC_RETENTION_KEY];
     if (retention && typeof days === "number") retention.value = String(clampDays(days));
+    const detail = normalizeSheetDetail(stored[ASSISTANT_SYNC_SHEET_DETAIL_KEY]);
+    for (const input of details) input.checked = input.value === detail;
   });
   void refresh();
 }

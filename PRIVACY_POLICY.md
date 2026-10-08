@@ -26,8 +26,8 @@ When capture is on, Cortex records:
   scrolled.
 - Searches you make on supported search engines and sites, with the
   search text.
-- Short excerpts of pages you read for 5 minutes or longer (up to 1,500
-  characters). You can turn excerpts off.
+- Short excerpts of pages you read for 5 minutes or longer (up to 800
+  characters, or 400 with Compact sheet detail). You can turn excerpts off.
 - LinkedIn profiles and company pages you open: name, headline,
   company, and the profile photo shown on the page, stored only on your
   device and never synced. Cortex copies the photo only while you are

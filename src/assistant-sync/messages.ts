@@ -18,8 +18,12 @@ export const DwellAllowedMessageSchema = v.object({
 
 export const AssistantSyncMessageSchema = v.object({
   type: v.literal("CORTEX_ASSISTANT_SYNC"),
-  action: v.picklist(["status", "enable", "now", "disable"]),
+  action: v.picklist(["status", "enable", "now", "disable", "cleanup"]),
   token: v.optional(v.pipe(v.string(), v.maxLength(4096))),
+  /** Enable again after Cortex asked: restore the trashed sheet, or create one in place of a deleted sheet. */
+  choice: v.optional(v.picklist(["restore", "create"])),
+  /** The answer to the old backups and archives prompt. */
+  cleanup: v.optional(v.picklist(["trash", "keep"])),
 });
 export type AssistantSyncMessage = v.InferOutput<typeof AssistantSyncMessageSchema>;
 
@@ -36,6 +40,8 @@ export const SyncWorkReplySchema = v.object({
   more: v.optional(v.boolean()),
   reads: v.optional(v.number()),
   writes: v.optional(v.number()),
+  /** Enable stopped to ask: the stored sheet is in the trash, or was deleted. */
+  confirm: v.optional(v.picklist(["missing", "trashed"])),
   ids: v.optional(
     v.object({
       folderId: v.optional(v.nullable(v.string())),

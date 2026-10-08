@@ -1,5 +1,5 @@
 import type { SyncCompanyRecord, SyncContentRecord, SyncPersonRecord, SyncSearchRecord, SyncVisitRecord } from "./db";
-import { buildWorkbook, SEED_SHEET_NAME, type Workbook } from "./sheet";
+import { buildWorkbook, SEED_SHEET_NAME, type MemoryRows, type Workbook } from "./sheet";
 
 export const SEED_DAYS = 90;
 export const SEED_VISITS_PER_WEEKDAY = 150;
@@ -33,13 +33,22 @@ function weekdayIndex(ms: number, timeZone: string): number {
   return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(name);
 }
 
+export const SEED_NEEDLES = ["needle-pinecone", "needle-search", "needle-tesla", "needle-company"];
+
 /** Deterministic fake history. Needles are fixed ids an assistant recall test can ask for. */
 export function buildSeed(opts: SeedOptions = {}): { workbook: Workbook; needles: string[] } {
+  const timeZone = opts.timeZone ?? "America/New_York";
+  const syncedAt = opts.syncedAt ?? "2026-10-02 12:00";
+  const workbook = buildWorkbook(seedMemory(opts), { title: SEED_SHEET_NAME, timeZone, syncedAt });
+  return { workbook, needles: SEED_NEEDLES };
+}
+
+/** The seed rows before they become a sheet. */
+export function seedMemory(opts: SeedOptions = {}): MemoryRows {
   const days = opts.days ?? SEED_DAYS;
   const perWeekday = opts.visitsPerWeekday ?? SEED_VISITS_PER_WEEKDAY;
   const now = opts.now ?? Date.parse("2026-10-02T16:00:00.000Z");
   const timeZone = opts.timeZone ?? "America/New_York";
-  const syncedAt = opts.syncedAt ?? "2026-10-02 12:00";
   const random = rng(3);
   const visits: SyncVisitRecord[] = [];
   const content: SyncContentRecord[] = [];
@@ -124,9 +133,5 @@ export function buildSeed(opts: SeedOptions = {}): { workbook: Workbook; needles
     dwellMinutes: 3,
   });
 
-  const workbook = buildWorkbook(
-    { visits, content, searches, people, companies },
-    { title: SEED_SHEET_NAME, timeZone, syncedAt }
-  );
-  return { workbook, needles: ["needle-pinecone", "needle-search", "needle-tesla", "needle-company"] };
+  return { visits, content, searches, people, companies };
 }

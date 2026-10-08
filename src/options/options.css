@@ -727,8 +727,13 @@ body {
   margin-bottom: var(--space-4);
 }
 
+.cx-radio-cards.is-two {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 @media (max-width: 640px) {
-  .cx-radio-cards {
+  .cx-radio-cards,
+  .cx-radio-cards.is-two {
     grid-template-columns: 1fr;
   }
 }
@@ -1575,4 +1580,22 @@ body {
 
 .cx-assistant-status dd {
   margin: 0;
+}
+
+.cx-assistant-ask {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.cx-assistant-ask[hidden],
+#cx-assistant-legacy[hidden] {
+  display: none;
+}
+
+.cx-assistant-legacy-list {
+  margin: 0 0 var(--space-3);
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
 }

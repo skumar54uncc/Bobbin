@@ -1,6 +1,8 @@
 /// <reference types="chrome"/>
-import { FetchDriveApi, trashMemory, type DriveApi, type StoredMemoryIds } from "./drive-api";
+import { FetchDriveApi, trashMemory, type DriveApi, type MemoryChoice, type StoredMemoryIds } from "./drive-api";
 import {
+  answerLegacyCleanup,
+  checkLegacyFiles,
   disableAssistantSync,
   enableAssistantSync,
   runFlush,
@@ -98,6 +100,17 @@ export interface AssistantSyncWorkResult {
   /** Sheets requests this pass made, for the flush log. */
   reads?: number;
   writes?: number;
+  confirm?: "missing" | "trashed";
+}
+
+export interface AssistantSyncLaunch {
+  ids: StoredMemoryIds;
+  retentionDays?: number;
+  sheetDetail?: string;
+  /** Drive id of the JSON backup older builds wrote, for the one-time cleanup check. */
+  backupId?: string | null;
+  choice?: MemoryChoice;
+  cleanup?: "trash" | "keep";
 }
 
 function plainSyncError(error: unknown): string {
@@ -135,9 +148,9 @@ function workResult(flush: FlushResult, created = false): AssistantSyncWorkResul
 
 /** Token comes from the service worker. This function performs the Google fetches. */
 export async function runAssistantSyncFromChrome(
-  action: "alarm" | "now" | "enable" | "disable",
+  action: "alarm" | "now" | "enable" | "disable" | "cleanup",
   token: string,
-  launch: { ids: StoredMemoryIds; retentionDays?: number }
+  launch: AssistantSyncLaunch
 ): Promise<AssistantSyncWorkResult> {
   const store = memoryIdStore(launch.ids);
   try {
@@ -145,11 +158,19 @@ export async function runAssistantSyncFromChrome(
       await disableAssistantSync();
       return { ok: true, status: "disabled", ids: store.current() };
     }
+    if (action === "cleanup") {
+      const answer = launch.cleanup ?? "keep";
+      await answerLegacyCleanup(answer === "trash" ? new FetchDriveApi(token) : null, answer);
+      return { ok: true, status: "ready", ids: store.current() };
+    }
     const api = new FetchDriveApi(token);
-    await applyAssistantSyncPreferences({ retentionDays: launch.retentionDays });
+    await applyAssistantSyncPreferences({ retentionDays: launch.retentionDays, sheetDetail: launch.sheetDetail });
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     const now = Date.now();
     const loadLibraryPeople = async () => (await loadCortexHistory(0)).people;
+    const legacy = async (ids: StoredMemoryIds) => {
+      await checkLegacyFiles(api, ids, launch.backupId).catch(() => undefined);
+    };
     if (action === "enable") {
       const result = await enableAssistantSync({
         api,
@@ -159,7 +180,12 @@ export async function runAssistantSyncFromChrome(
         saveIds: (next) => store.setIds(next),
         loadHistory: loadCortexHistory,
         loadLibraryPeople,
+        choice: launch.choice,
       });
+      if ("confirm" in result) {
+        return { ok: false, status: "confirm", confirm: result.confirm, ids: store.current() };
+      }
+      if (result.flush.status === "ready") await legacy(result.ids);
       return { ...workResult(result.flush, result.created), ids: store.current() };
     }
     const flush = await runFlush({
@@ -170,6 +196,7 @@ export async function runAssistantSyncFromChrome(
       mode: action === "now" ? "user" : "scheduled",
       loadLibraryPeople,
     });
+    if (flush.status === "ready") await legacy(launch.ids);
     return { ...workResult(flush), ids: store.current() };
   } catch (error) {
     const message = plainSyncError(error);

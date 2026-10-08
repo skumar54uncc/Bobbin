@@ -280,15 +280,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       return true;
     }
     const action =
-      msg.action === "enable" || msg.action === "now" || msg.action === "alarm" || msg.action === "disable"
+      msg.action === "enable" ||
+      msg.action === "now" ||
+      msg.action === "alarm" ||
+      msg.action === "disable" ||
+      msg.action === "cleanup"
         ? msg.action
         : "alarm";
     const token = typeof msg.token === "string" ? msg.token : "";
     const folderId = typeof msg.folderId === "string" ? msg.folderId : null;
     const fileId = typeof msg.fileId === "string" ? msg.fileId : null;
-    const retentionDays = typeof msg.retentionDays === "number" ? msg.retentionDays : undefined;
+    const launch = {
+      ids: { folderId, fileId },
+      retentionDays: typeof msg.retentionDays === "number" ? msg.retentionDays : undefined,
+      sheetDetail: typeof msg.sheetDetail === "string" ? msg.sheetDetail : undefined,
+      backupId: typeof msg.backupId === "string" ? msg.backupId : null,
+      choice: msg.choice === "restore" || msg.choice === "create" ? (msg.choice as "restore" | "create") : undefined,
+      cleanup: msg.cleanup === "trash" || msg.cleanup === "keep" ? (msg.cleanup as "trash" | "keep") : undefined,
+    };
     void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
-      .then((mod) => mod.runAssistantSyncFromChrome(action, token, { ids: { folderId, fileId }, retentionDays }))
+      .then((mod) => mod.runAssistantSyncFromChrome(action, token, launch))
       .then((result) => sendResponse(result))
       .catch((error: unknown) =>
         sendResponse({
@@ -388,6 +399,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       .then((mod) => mod.trashStoredMemoryFromChrome(token, { folderId, fileId }))
       .then((result) => sendResponse(result))
       .catch(() => sendResponse({ ok: false as const, error: "drive_trash_failed" }));
+    return true;
+  }
+
+  if (msg?.type === "CORTEX_HISTORY_EXTRACT") {
+    // The service worker has no DOMParser. It fetched the page after the privacy gate.
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false as const });
+      return true;
+    }
+    void import(/* webpackChunkName: "history-extract" */ "../content/extract")
+      .then(({ extractPageTextFromHtml }) => {
+        const out = extractPageTextFromHtml(String(msg.html ?? ""), String(msg.url ?? ""));
+        sendResponse({ ok: true as const, title: out.title, text: out.text });
+      })
+      .catch(() => sendResponse({ ok: false as const }));
     return true;
   }
 
