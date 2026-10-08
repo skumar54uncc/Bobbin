@@ -426,8 +426,62 @@ function sendToOffscreen<T>(message: Record<string, unknown>): Promise<T | { ok:
   });
 }
 
+const OTHER_DEVICE_CURSOR_KEY = "cortex_assist_other_device_since";
+/** The first pass looks back this far for pages Chrome synced from other devices. */
+const OTHER_DEVICE_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+const OTHER_DEVICE_PAGES_PER_PASS = 500;
+const OTHER_DEVICE_VISITS_PER_PASS = 300;
+
+interface OtherDeviceVisit {
+  id: string;
+  url: string;
+  title: string;
+  visitedAt: number;
+}
+
+/**
+ * Visits chrome.history marks isLocal false: Chrome synced them from the user's other signed-in
+ * devices. Title, URL, and time only. A missing isLocal (older Chrome) counts as this device.
+ */
+async function collectOtherDeviceVisits(now: number): Promise<{ visits: OtherDeviceVisit[]; until: number }> {
+  const stored = await storageLocalGet([OTHER_DEVICE_CURSOR_KEY]);
+  const cursor = stored[OTHER_DEVICE_CURSOR_KEY];
+  const since = typeof cursor === "number" ? cursor : now - OTHER_DEVICE_LOOKBACK_MS;
+  const items = await chrome.history.search({ text: "", startTime: since, endTime: now, maxResults: OTHER_DEVICE_PAGES_PER_PASS });
+  const found: OtherDeviceVisit[] = [];
+  for (const item of items) {
+    if (!item.url) continue;
+    // isLocal is Chrome 115+; the installed @types/chrome predates it.
+    const visits = (await chrome.history.getVisits({ url: item.url })) as (chrome.history.VisitItem & { isLocal?: boolean })[];
+    for (const visit of visits) {
+      if (visit.isLocal !== false) continue;
+      const at = visit.visitTime ?? 0;
+      if (at <= since || at > now) continue;
+      found.push({ id: `other:${visit.visitId}`, url: item.url, title: item.title ?? "", visitedAt: at });
+    }
+  }
+  found.sort((a, b) => a.visitedAt - b.visitedAt);
+  const kept: OtherDeviceVisit[] = [];
+  const allowed = new Map<string, boolean>();
+  for (const visit of found) {
+    if (kept.length >= OTHER_DEVICE_VISITS_PER_PASS) break;
+    let ok = allowed.get(visit.url);
+    if (ok === undefined) {
+      ok = !(await shouldSkipIndexing(visit.url, {})).skip;
+      allowed.set(visit.url, ok);
+    }
+    if (ok) kept.push(visit);
+  }
+  const capped = kept.length >= OTHER_DEVICE_VISITS_PER_PASS;
+  return { visits: kept, until: capped ? kept[kept.length - 1]!.visitedAt : now };
+}
+
 async function sendSyncWork(action: SyncWorkAction, token: string, answer: SyncWorkAnswer = {}): Promise<SyncWorkReply> {
   const launch = await readAssistantSyncLaunch();
+  const other =
+    action === "alarm" || action === "now"
+      ? await collectOtherDeviceVisits(Date.now()).catch(() => null)
+      : null;
   await ensureOffscreen();
   const raw = await sendToOffscreen<unknown>({
     type: "CORTEX_ASSISTANT_SYNC_WORK",
@@ -438,10 +492,12 @@ async function sendSyncWork(action: SyncWorkAction, token: string, answer: SyncW
     retentionDays: launch.retentionDays,
     sheetDetail: launch.sheetDetail,
     backupId: launch.backupId,
+    otherDeviceVisits: other?.visits ?? [],
     ...answer,
   });
   const reply = parseMessage(SyncWorkReplySchema, raw) ?? { ok: false, error: "Sync did not start." };
   if (reply.ids) await writeAssistantSyncIds(reply.ids);
+  if (other && reply.otherDeviceStored) await storageLocalSet({ [OTHER_DEVICE_CURSOR_KEY]: other.until });
   if (action !== "disable" && action !== "cleanup" && !reply.confirm) void recordFlush(action, reply);
   return reply;
 }

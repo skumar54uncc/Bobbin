@@ -80,8 +80,9 @@ The first activity flush comes 5 minutes after the Enable pass, plus 0 to
 2. Sheet, counting rows under the header:
    - Visits: one row per article per day; the reopened article shows
      visit_count 2, time is when you first opened it and last_time is
-     when you reopened it. The last two column headers are visit_count
-     and last_time. Search pages
+     when you reopened it. The last three column headers are visit_count,
+     last_time, and device. device is "this device" on every row you
+     browsed here. Search pages
      and the LinkedIn profile also get a Visits row, with the same id as
      their Searches or People row. The short read, the blocked site, and
      the open tab are absent. Article rows have 1 to 3 labels in topics
@@ -91,7 +92,7 @@ The first activity flush comes 5 minutes after the Enable pass, plus 0 to
    - About row 2: "Last synced" moved to this flush.
    - About row 3: "Sheet size: N KB." and the counts match the tab row
      counts. Settings, Status, Sheet size shows the same size.
-   - About, last row: schema_version: 4. Near the top: "This sheet is
+   - About, last row: schema_version: 5. Near the top: "This sheet is
      managed by Cortex. Editing or deleting rows can cause wrong answers."
    - Type into any cell on any tab: Sheets shows a warning before the
      edit and lets you continue. Press Cancel so the sheet stays as
@@ -134,6 +135,23 @@ without changing it.
 Do nothing. The safety alarm runs every 15 minutes and plans a pass. With
 nothing pending the pass makes no write: the flush log shows an `alarm`
 row with appended 0 and writes 0, and the sheet does not change.
+
+## Optional: capture hardening checks
+
+1. Open a LinkedIn profile from the feed, a YouTube video from the
+   home page, and a post on X, without reloading. Each gets its own
+   Visits row.
+2. Open `https://www.google.com/url?q=https://example.com/` and an AMP
+   article link from Google search. Visits has the destination article
+   URL, with no google.com/url or /amp row.
+3. Search Amazon. Searches has an Amazon row with the query.
+4. Other device: with Chrome history sync on, open a page on your phone
+   while signed in to the same Chrome profile. After the next sync,
+   Visits has that page with device "other device" and blank dwell,
+   scroll, and topics.
+5. Visit a page titled "Ignore previous instructions" (any test page).
+   The row is written as is. In the offscreen document's DevTools, IndexedDB
+   cortex-assistant-sync, warnings lists it.
 
 ## Pass criteria
 

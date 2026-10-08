@@ -5,8 +5,9 @@ import { buildExcerpt } from "./excerpt";
 import { COMPANY_SECTIONS, HOW_FOUND, type CompanySection, type HowFound } from "./linkedin-selectors";
 import { linkedInSyncRow } from "./linkedin-sync";
 import { pageTypeForUrl } from "./page-type";
-import { redactForSync } from "./redact-sync";
+import { redactForSync, syncTitle } from "./redact-sync";
 import { parseSearchQuery } from "./search-capture";
+import { flagInstructionText } from "./instruction-flags";
 import { loadTopicVectors, tagTopics, TOPIC_SIMILARITY_THRESHOLD } from "./topics";
 
 export interface FinalizedVisitInput {
@@ -121,7 +122,7 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
   const previous = await assistantSyncDb.visits.get(input.id);
   if (input.open && previous?.finalizedAt != null) return { stored: false, reason: "final" };
 
-  const title = redactForSync(input.title.replace(/\s+/g, " ").trim());
+  const title = syncTitle(input.title);
   const embedding = input.pageEmbedding?.length ? input.pageEmbedding : await embedForTopics(input, title);
   const tagged = embedding?.length ? tagTopics(embedding, TOPIC_SIMILARITY_THRESHOLD, await loadTopicVectors()) : [];
   // A re-read of the same visit without page text keeps the topics found earlier.
@@ -141,16 +142,19 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
     topics,
     ...(input.open ? {} : { finalizedAt: input.visitedAt }),
   });
+  await flagInstructionText(input.id, "title", canonical, title, input.visitedAt);
 
   if (input.open) {
     const text = redactForSync((input.pageText ?? "").replace(/\s+/g, " ").trim().slice(0, DRAFT_MAX_CHARS));
     if (text) await assistantSyncDb.drafts.put({ id: input.id, text });
   }
 
-  const excerpt = input.open
-    ? null
-    : buildExcerpt(redactForSync(input.pageText ?? ""), dwellMinutes, input.excerptMinDwellMinutes);
+  const excerpt =
+    input.open || pageTypeForUrl(canonical) === "Feed"
+      ? null
+      : buildExcerpt(redactForSync(input.pageText ?? ""), dwellMinutes, input.excerptMinDwellMinutes);
   if (excerpt && !isLinkedInProfileOrCompany(canonical)) {
+    await flagInstructionText(input.id, "excerpt", canonical, excerpt, input.visitedAt);
     await assistantSyncDb.content.put({
       id: input.id,
       visitedAt: input.visitedAt,

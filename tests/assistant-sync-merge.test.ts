@@ -32,6 +32,7 @@ const COUNT = VISIT_HEADERS.indexOf("visit_count");
 const DWELL = VISIT_HEADERS.indexOf("dwell_minutes");
 const TIME = VISIT_HEADERS.indexOf("time");
 const LAST = VISIT_HEADERS.indexOf("last_time");
+const DEVICE = VISIT_HEADERS.indexOf("device");
 
 function visit(id: string, visitedAt: number, extra: Partial<SyncVisitRecord> = {}): SyncVisitRecord {
   return {
@@ -172,7 +173,8 @@ describe("repeat visits in the sheet", () => {
     // The untouched old row: one visit, so last_time is a copy of time.
     expect(sheets.tab("Visits")[2]?.[COUNT]).toBe("1");
     expect(sheets.tab("Visits")[2]?.[LAST]).toBe(sheets.tab("Visits")[2]?.[TIME]);
-    expect((await readSyncEngineState()).layout?.schema).toBe(4);
+    expect(sheets.tab("Visits")[2]?.[DEVICE]).toBe("this device");
+    expect((await readSyncEngineState()).layout?.schema).toBe(5);
     // The edit warning went out in that same single write, once per tab.
     expect(Object.values(sheets.protections()).every((p) => p.length === 1 && p[0] === "Managed by Cortex")).toBe(true);
     const kinds = sheets.batches.at(-1)!.map((r) => Object.keys(r)[0]);
@@ -187,6 +189,56 @@ describe("repeat visits in the sheet", () => {
     await writeSyncEngineState({ ...state2, verifyNext: true });
     await runFlush(deps(sheets, NOW + 50 * MIN));
     expect(Object.values(sheets.protections()).every((p) => p.length === 1)).toBe(true);
+  });
+
+  it("adds the device column to a schema 4 sheet: this device on every old row, one write, no read", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW + MIN));
+    await assistantSyncDb.visits.put(visit("x", NOW + 2 * MIN, { url: "https://example.com/other" }));
+    await runFlush(deps(sheets, NOW + 6 * MIN));
+    // What a Phase 2 install leaves behind: Visits ends at last_time, layout schema 4.
+    for (const row of sheets.tab("Visits")) row.length = DEVICE;
+    const state = await readSyncEngineState();
+    state.layout!.schema = 4;
+    state.layout!.visitColumns = DEVICE;
+    await writeSyncEngineState(state);
+
+    await assistantSyncDb.visits.put(visit("o1", NOW + 20 * MIN, { device: "other" }));
+    const result = await runFlush(deps(sheets, NOW + 30 * MIN));
+    expect(result).toMatchObject({ status: "ready", reads: 0, writes: 1 });
+    expect(sheets.tab("Visits")[0]).toEqual([...VISIT_HEADERS]);
+    expect(sheets.tab("Visits").slice(1).map((row) => [row[0], row[DEVICE]])).toEqual([
+      ["v1", "this device"],
+      ["x", "this device"],
+      ["o1", "other device"],
+    ]);
+    expect((await readSyncEngineState()).layout?.schema).toBe(5);
+    // Protections were already there; none are added again.
+    const kinds = sheets.batches.at(-1)!.map((r) => Object.keys(r)[0]);
+    expect(kinds).not.toContain("addProtectedRange");
+  });
+
+  it("keeps this device and other device visits to the same page as separate rows", () => {
+    const merged = mergeDailyRepeats(
+      {
+        visits: [
+          visit("a", NOW),
+          visit("b", NOW + MIN),
+          visit("o1", NOW + 2 * MIN, { device: "other", dwellMinutes: null }),
+          visit("o2", NOW + 3 * MIN, { device: "other", dwellMinutes: null }),
+        ],
+        content: [],
+        searches: [],
+        people: [],
+        companies: [],
+      },
+      ZONE
+    );
+    expect(merged.visits.map((v) => [v.id, v.device ?? "this", v.visitCount])).toEqual([
+      ["a", "this", 2],
+      ["o1", "other", 2],
+    ]);
   });
 });
 

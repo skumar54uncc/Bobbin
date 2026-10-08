@@ -48,7 +48,7 @@ const byTime = <T extends { id: string; visitedAt: number }>(a: T, b: T) => a.vi
 export function mergeDailyRepeats(memory: MemoryInput, timeZone: string, rowIds: Set<string> = new Set()): MergedMemory {
   const groups = new Map<string, SyncVisitRecord[]>();
   for (const visit of [...memory.visits].sort(byTime)) {
-    const key = `${localVisitStamp(visit.visitedAt, timeZone).date}\t${visit.url}`;
+    const key = `${localVisitStamp(visit.visitedAt, timeZone).date}\t${visit.url}\t${visit.device ?? "this"}`;
     const list = groups.get(key);
     if (list) list.push(visit);
     else groups.set(key, [visit]);

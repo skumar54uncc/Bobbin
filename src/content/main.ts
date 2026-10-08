@@ -127,20 +127,34 @@ function stopDwell(): void {
   dwell = null;
 }
 
+const INTERACTION_EVENTS = ["pointerdown", "keydown", "wheel", "touchstart"] as const;
+
+function afterFirstInteraction(run: () => void): void {
+  const once = () => {
+    for (const event of INTERACTION_EVENTS) window.removeEventListener(event, once, true);
+    run();
+  };
+  for (const event of INTERACTION_EVENTS) window.addEventListener(event, once, { passive: true, capture: true });
+}
+
 const markInput = () => dwell?.input();
 for (const event of ["pointerdown", "pointermove", "keydown", "wheel", "scroll", "touchstart"]) {
   window.addEventListener(event, markInput, { passive: true, capture: true });
 }
 window.addEventListener("pagehide", () => dwell?.end());
+// A page restored from the back/forward cache is not a visit until the user interacts with it.
 window.addEventListener("pageshow", (event) => {
-  if (!event.persisted || !dwell) return;
+  if (!event.persisted) return;
   stopDwell();
-  startDwell();
+  afterFirstInteraction(() => {
+    void refreshDwell();
+    scheduleIndex(600);
+  });
 });
 
 void refreshDwell();
 
-function onLocationLikeChange(reason: "spa" | "mutation"): void {
+function onLocationLikeChange(reason: "spa" | "mutation" | "title"): void {
   const next = normalizedUrl();
   if (next !== currentUrl) {
     currentUrl = next;
@@ -153,7 +167,7 @@ function onLocationLikeChange(reason: "spa" | "mutation"): void {
     return;
   }
 
-  if (reason === "mutation") {
+  if (reason === "mutation" || reason === "title") {
     // Pages that never settle (YouTube, feeds) would otherwise ask for a
     // re-index every few seconds and exhaust the per tab extraction budget.
     if (!shouldReindexAfterMutation(lastMutationIndexAt, Date.now())) return;
@@ -181,21 +195,33 @@ history.replaceState = function (
 };
 window.addEventListener("popstate", () => onLocationLikeChange("spa"));
 
-// LinkedIn's app keeps the original history.pushState, so the hook above
-// never sees an in-app profile open. Watch the address instead.
-if (/(^|\.)linkedin\.com$/i.test(location.hostname)) {
-  window.setInterval(() => {
-    if (!isExtensionRuntimeAlive()) return;
-    if (normalizedUrl() === currentUrl) return;
-    onLocationLikeChange("spa");
-  }, 1000);
-}
+// A content script runs in an isolated world: the wrappers above see only this script's
+// own history calls, never the page's pushState or replaceState (LinkedIn, YouTube, X).
+// Watch the address once a second instead, plus popstate and the title below.
+window.setInterval(() => {
+  if (!isExtensionRuntimeAlive()) return;
+  if (normalizedUrl() === currentUrl) return;
+  onLocationLikeChange("spa");
+}, 1000);
 
+// Throttle, not debounce: a page that never stops changing (feeds, players) still gets checked.
 const mo = new MutationObserver(() => {
-  window.clearTimeout(mutationTimer);
-  mutationTimer = window.setTimeout(() => onLocationLikeChange("mutation"), 950);
+  if (mutationTimer !== undefined) return;
+  mutationTimer = window.setTimeout(() => {
+    mutationTimer = undefined;
+    onLocationLikeChange("mutation");
+  }, 950);
 });
 mo.observe(document.documentElement, { childList: true, subtree: true });
+
+// SPAs often change the title before, or instead of, the address.
+let lastTitle = document.title;
+const titleWatch = new MutationObserver(() => {
+  if (document.title === lastTitle) return;
+  lastTitle = document.title;
+  onLocationLikeChange("title");
+});
+titleWatch.observe(document.head ?? document.documentElement, { childList: true, subtree: true, characterData: true });
 
 if (document.readyState === "complete") {
   scheduleIndex(1800);
@@ -273,5 +299,10 @@ chrome.storage?.onChanged?.addListener((changes, area) => {
 
 if (!window.__cortexMainLoaded) {
   window.__cortexMainLoaded = true;
-  bootstrap();
+  // A prerendered page may never be shown. Start only when the user actually opens it.
+  if ((document as Document & { prerendering?: boolean }).prerendering) {
+    document.addEventListener("prerenderingchange", () => bootstrap(), { once: true });
+  } else {
+    bootstrap();
+  }
 }

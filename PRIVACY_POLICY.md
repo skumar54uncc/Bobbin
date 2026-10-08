@@ -36,6 +36,11 @@ When capture is on, Cortex records:
   collects contact details or messages, and never visits pages on its
   own.
 - Topic labels that Cortex computes on your device to help search.
+- With Assistant Sync on and Chrome history sync turned on in your
+  Google account, pages Chrome synced from your other signed-in devices:
+  title, address, and time only. They are marked "other device" in the
+  sheet. Cortex reads them from Chrome's own history on this device and
+  applies the same block list.
 
 Cortex does not collect anything in Incognito windows, on pages that
 contain a password field, or on sites in the block list (banking,
@@ -45,7 +50,13 @@ billing, and photo pages (myaccount.google.com, accounts.google.com,
 one.google.com, photos.google.com, payments.google.com, pay.google.com);
 you can remove any of them in Settings. Assistant Sync never records
 its own Cortex Memory sheet or folder. Cortex removes email addresses,
-phone numbers, and long card-like numbers from captured text.
+phone numbers, numbers of 13 or more digits, and invisible characters
+from captured text, and cuts titles to 200 characters. Addresses lose
+tracking parameters, AMP pages are recorded as the article, and link
+redirects (such as t.co and lnkd.in) are recorded as the page they lead
+to. Titles and excerpts that read like instructions to an AI are listed
+on your device for review; Cortex does not change or send that list.
+Cortex asks Chrome to keep its storage when your disk runs low.
 
 ## Where your data is stored
 

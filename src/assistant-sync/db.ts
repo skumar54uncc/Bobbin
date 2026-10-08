@@ -19,6 +19,25 @@ export interface SyncVisitRecord {
    * page is still open. Backfilled history rows are final on arrival.
    */
   finalizedAt?: number;
+  /** Set on visits read from Chrome history that came from another signed-in device. */
+  device?: "other";
+}
+
+/**
+ * A title or excerpt that reads like instructions to an AI ("ignore previous instructions",
+ * "system prompt", role tags). Kept on this device for review; the row itself is not changed.
+ */
+export interface SyncWarningRecord {
+  /** `visitId:field`. */
+  key: string;
+  visitId: string;
+  field: "title" | "excerpt";
+  url: string;
+  /** The matched text with some context, at most 160 characters. */
+  snippet: string;
+  /** Names of the patterns that matched. */
+  flags: string[];
+  at: number;
 }
 
 /** Page text kept until the visit ends, so the excerpt can depend on real dwell. Never synced. */
@@ -205,6 +224,7 @@ class AssistantSyncDB extends Dexie {
   state!: EntityTable<SyncEngineState, "id">;
   drafts!: EntityTable<SyncDraftRecord, "id">;
   inflight!: EntityTable<InflightFlush, "id">;
+  warnings!: EntityTable<SyncWarningRecord, "key">;
 
   constructor() {
     super("cortex-assistant-sync");
@@ -252,6 +272,19 @@ class AssistantSyncDB extends Dexie {
           if (visit.finalizedAt == null) visit.finalizedAt = visit.visitedAt;
         });
       });
+    this.version(5).stores({
+      visits: "id, visitedAt, domain, finalizedAt",
+      content: "id, visitedAt",
+      searches: "id, visitedAt",
+      people: "id, visitedAt",
+      companies: "id, visitedAt",
+      synced: "key",
+      pending: "key, tab, enqueuedAt",
+      state: "id",
+      drafts: "id",
+      inflight: "id",
+      warnings: "key, visitId, at",
+    });
   }
 }
 
@@ -271,8 +304,10 @@ export async function clearAssistantSyncDatabase(): Promise<void> {
       assistantSyncDb.state,
       assistantSyncDb.drafts,
       assistantSyncDb.inflight,
+      assistantSyncDb.warnings,
     ],
     async () => {
+      await assistantSyncDb.warnings.clear();
       await assistantSyncDb.drafts.clear();
       await assistantSyncDb.inflight.clear();
       await assistantSyncDb.visits.clear();

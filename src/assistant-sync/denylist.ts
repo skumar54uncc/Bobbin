@@ -1,9 +1,10 @@
 import { isBlockedDomain, looksSensitiveHostname } from "../lib/privacy";
 import { shouldAlwaysSkipUrl } from "../lib/sensitive-domains";
+import { isRedirectUrl } from "./url-cleanup";
 
 export const PASSWORD_INPUT_SELECTOR = 'input[type="password"]';
 
-export type SyncDenyReason = "password" | "sensitive" | "user" | "local" | "browser" | "cortex";
+export type SyncDenyReason = "password" | "sensitive" | "user" | "local" | "browser" | "cortex" | "redirect";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
 
@@ -68,6 +69,7 @@ export function syncDenyReason(
   if (shouldAlwaysSkipUrl(raw)) return "sensitive";
   if (looksSensitiveHostname(url.hostname, url.pathname)) return "sensitive";
   if (isBlockedDomain(url.hostname, opts?.userDomains ?? [])) return "user";
+  if (isRedirectUrl(raw)) return "redirect";
   return null;
 }
 

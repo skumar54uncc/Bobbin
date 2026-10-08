@@ -137,6 +137,16 @@ const SERVICE_WORKER_URL = chrome.runtime.getURL("service-worker.js");
  * `documentId` and its own URL while the service worker carries neither.
  * The options-page check and the rate limit have already run there.
  */
+function otherDeviceVisits(raw: unknown): { id: string; url: string; title: string; visitedAt: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    const v = item as Record<string, unknown> | null;
+    return v && typeof v.id === "string" && typeof v.url === "string" && typeof v.visitedAt === "number"
+      ? [{ id: v.id, url: v.url, title: typeof v.title === "string" ? v.title : "", visitedAt: v.visitedAt }]
+      : [];
+  });
+}
+
 function isServiceWorkerSender(sender: chrome.runtime.MessageSender): boolean {
   if (!isPrivilegedExtensionSender(sender)) return false;
   if (sender.documentId != null) return false;
@@ -305,6 +315,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       backupId: typeof msg.backupId === "string" ? msg.backupId : null,
       choice: msg.choice === "restore" || msg.choice === "create" ? (msg.choice as "restore" | "create") : undefined,
       cleanup: msg.cleanup === "trash" || msg.cleanup === "keep" ? (msg.cleanup as "trash" | "keep") : undefined,
+      otherDeviceVisits: otherDeviceVisits(msg.otherDeviceVisits),
     };
     void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
       .then((mod) => mod.runAssistantSyncFromChrome(action, token, launch))

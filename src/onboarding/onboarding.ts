@@ -5,8 +5,11 @@ import {
 } from "../shared/onboarding-constants";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import { storageLocalGet, storageLocalSet } from "../shared/storage-local";
+import { requestPersistentStorage } from "../shared/persist-storage";
 
 injectBrandFontFacesInto(document.head);
+// Onboarding opens on install: ask once then for storage that survives low disk space.
+void requestPersistentStorage();
 
 function setMascot(state: "wave" | "found"): void {
   const img = document.querySelector<HTMLImageElement>(".cx-onb-mascot");

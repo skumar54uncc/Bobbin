@@ -38,6 +38,8 @@ export const SyncWorkReplySchema = v.object({
   authFailed: v.optional(v.boolean()),
   retryAt: v.optional(v.number()),
   more: v.optional(v.boolean()),
+  /** The other device visits sent with this pass are stored, so the service worker moves its cursor. */
+  otherDeviceStored: v.optional(v.boolean()),
   reads: v.optional(v.number()),
   writes: v.optional(v.number()),
   /** Enable stopped to ask: the stored sheet is in the trash, or was deleted. */

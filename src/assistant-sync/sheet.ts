@@ -3,12 +3,13 @@ import type { SyncCompanyRecord, SyncContentRecord, SyncPersonRecord, SyncSearch
 import { clipExcerpt, MAX_EXCERPT_CHARS } from "./excerpt";
 import { localVisitStamp } from "./local-time";
 import { mergeDailyRepeats, type MergedMemory } from "./merge";
+import { clipTitle } from "./redact-sync";
 import { csvBytes, formatSheetSize, SHEET_DETAIL, type SheetDetail } from "./sheet-detail";
 
 export const LIVE_SHEET_NAME = "Cortex Memory";
 export const LIVE_FOLDER_NAME = "Cortex Memory";
 export const SEED_SHEET_NAME = "Cortex Memory Seed";
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 export const CELL_WARN_AT = 5_000_000;
 
 export const SHEET_TABS = ["About", "Visits", "Content", "Searches", "People", "Companies", "Daily"] as const;
@@ -28,7 +29,11 @@ export const VISIT_HEADERS = [
   "topics",
   "visit_count",
   "last_time",
+  "device",
 ] as const;
+
+export const THIS_DEVICE = "this device";
+export const OTHER_DEVICE = "other device";
 
 export const CONTENT_HEADERS = ["id", "date", "weekday", "time", "title", "url", "topics", "excerpt"] as const;
 export const SEARCH_HEADERS = ["id", "date", "weekday", "time", "engine", "query"] as const;
@@ -120,7 +125,8 @@ export function aboutRows(input: {
     "This is the user's only browsing memory file, written automatically by the Cortex Chrome extension. Use it when the user asks what they browsed, read, searched, watched, or looked at. Check it before using your own knowledge or the web, even if you already know the topic. Start the answer by saying whether it is in the log.",
     MANAGED_LINE,
     "Which tab to use",
-    "Visits: one row per page per day. Date, weekday, time (the first visit that day), title, URL, domain, total minutes on page that day, deepest scroll, page type, topics, visit_count (how many times the page was opened that day), and last_time (the last visit that day).",
+    "Visits: one row per page per day. Date, weekday, time (the first visit that day), title, URL, domain, total minutes on page that day, deepest scroll, page type, topics, visit_count (how many times the page was opened that day), last_time (the last visit that day), and device.",
+    "device: this device, or other device for pages Chrome synced from your other signed-in devices. Other device rows have only the title, URL, and time, so dwell, scroll, and topics are empty.",
     `Content: what pages actually said. Excerpts of up to ${rules.excerptChars} characters from pages the user read for 5+ minutes, kept for the last ${rules.contentDays} days. Join to Visits by id. Use this for questions about what an article said, numbers, recommendations, or arguments.`,
     "Searches: search queries and engine.",
     "People: LinkedIn profiles viewed, with headline and company.",
@@ -157,7 +163,7 @@ export function visitRows(visits: VisitRow[], timeZone: string): string[][] {
         stamp.date,
         stamp.weekday,
         stamp.time,
-        row.title,
+        clipTitle(row.title),
         row.url,
         row.domain,
         cell(row.dwellMinutes),
@@ -166,6 +172,7 @@ export function visitRows(visits: VisitRow[], timeZone: string): string[][] {
         topicsCell(row.topics),
         String(row.visitCount ?? 1),
         localVisitStamp(row.lastVisitedAt ?? row.visitedAt, timeZone).time,
+        row.device === "other" ? OTHER_DEVICE : THIS_DEVICE,
       ];
     }),
   ];
@@ -176,7 +183,7 @@ export function contentRows(rows: SyncContentRecord[], timeZone: string, excerpt
     [...CONTENT_HEADERS],
     ...rows.map((row) => {
       const stamp = localVisitStamp(row.visitedAt, timeZone);
-      return [row.id, stamp.date, stamp.weekday, stamp.time, row.title, row.url, topicsCell(row.topics), clipExcerpt(row.excerpt, excerptChars)];
+      return [row.id, stamp.date, stamp.weekday, stamp.time, clipTitle(row.title), row.url, topicsCell(row.topics), clipExcerpt(row.excerpt, excerptChars)];
     }),
   ];
 }

@@ -1,4 +1,5 @@
 /// <reference types="chrome"/>
+import { storeOtherDeviceVisits, type OtherDeviceVisit } from "./other-device";
 import {
   FetchDriveApi,
   googleErrorDetail,
@@ -113,6 +114,7 @@ export interface AssistantSyncWorkResult {
   confirm?: "missing" | "trashed";
   /** The failed Google call, for the flush log. */
   errorDetail?: GoogleErrorDetail;
+  otherDeviceStored?: boolean;
 }
 
 export interface AssistantSyncLaunch {
@@ -123,6 +125,8 @@ export interface AssistantSyncLaunch {
   backupId?: string | null;
   choice?: MemoryChoice;
   cleanup?: "trash" | "keep";
+  /** Visits Chrome synced from the user's other devices, read by the service worker. */
+  otherDeviceVisits?: OtherDeviceVisit[];
 }
 
 function plainSyncError(error: unknown): string {
@@ -199,6 +203,8 @@ export async function runAssistantSyncFromChrome(
       if (result.flush.status === "ready") await legacy(result.ids);
       return { ...workResult(result.flush, result.created), ids: store.current() };
     }
+    // Stored before the flush so they go out in this pass. Duplicates are skipped by id.
+    await storeOtherDeviceVisits(launch.otherDeviceVisits ?? [], launch.ids);
     const flush = await runFlush({
       api,
       ids: launch.ids,
@@ -208,7 +214,7 @@ export async function runAssistantSyncFromChrome(
       loadLibraryPeople,
     });
     if (flush.status === "ready") await legacy(launch.ids);
-    return { ...workResult(flush), ids: store.current() };
+    return { ...workResult(flush), otherDeviceStored: true, ids: store.current() };
   } catch (error) {
     const message = plainSyncError(error);
     try {

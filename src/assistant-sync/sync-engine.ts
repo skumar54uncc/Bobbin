@@ -46,7 +46,7 @@ import {
 import { localVisitStamp } from "./local-time";
 import { mergeDailyRepeats } from "./merge";
 import { pageTypeForUrl } from "./page-type";
-import { redactForSync } from "./redact-sync";
+import { redactForSync, syncTitle } from "./redact-sync";
 import {
   MIN_FLUSH_GAP_MS,
   retryDelayMs,
@@ -64,6 +64,7 @@ import {
   sizedAbout,
   TAB_HEADERS,
   VISIT_HEADERS,
+  THIS_DEVICE,
   type SheetTabName,
 } from "./sheet";
 import { csvLineBytes, planTrim, SHEET_DETAIL, trimNote, type SheetDetail, type TrimTab } from "./sheet-detail";
@@ -290,7 +291,7 @@ async function readLayout(
     });
   });
   const header = sheetIds.Visits != null ? (columns[columns.length - 1]?.[0] ?? []) : [];
-  const schema = !headers.Visits || header.includes("last_time") ? SCHEMA_VERSION : 3;
+  const schema = !headers.Visits || header.includes("device") ? SCHEMA_VERSION : header.includes("last_time") ? 4 : 3;
   return {
     layout: {
       fileId,
@@ -326,6 +327,7 @@ async function purgeLocal(cutoffs: TabCutoffDates, timeZone: string): Promise<vo
   await assistantSyncDb.people.bulkDelete(people);
   await assistantSyncDb.companies.bulkDelete(companies);
   await assistantSyncDb.drafts.bulkDelete(visits);
+  await assistantSyncDb.warnings.where("visitId").anyOf([...visits, ...content]).delete();
   await dropKeys([
     ...visits.map((id) => syncedKey("Visits", id)),
     ...content.map((id) => syncedKey("Content", id)),
@@ -485,7 +487,8 @@ async function planFlush(
   const more = chosen.length < out.length;
 
   // Old Visits headers end at topics. Add visit_count (1 for every row already there) and
-  // last_time (a copy of time, since each old row is one visit), and the edit warning on every tab.
+  // last_time (a copy of time, since each old row is one visit), device ("this device": only this
+  // device was captured before), and the edit warning on every tab.
   const visitsId = layout.sheetIds.Visits!;
   const schema = layout.schema ?? (layout.headers.Visits ? 3 : SCHEMA_VERSION);
   if (layout.headers.Visits && schema < SCHEMA_VERSION) {
@@ -496,6 +499,8 @@ async function planFlush(
     const last = VISIT_HEADERS.indexOf("last_time");
     if (rows && width <= count) updates.push(fillColumnRequest(visitsId, count, 1, 1 + rows, "1"));
     if (rows && width <= last) updates.push(copyColumnRequest(visitsId, VISIT_HEADERS.indexOf("time"), last, 1, 1 + rows));
+    const device = VISIT_HEADERS.indexOf("device");
+    if (rows && width <= device) updates.push(fillColumnRequest(visitsId, device, 1, 1 + rows, THIS_DEVICE));
     const already = new Set(layout.protectedIds ?? []);
     for (const tab of SHEET_TABS) {
       const id = layout.sheetIds[tab]!;
@@ -842,7 +847,7 @@ export async function backfillHistory(input: {
     if (denied || duplicate || !canonical) {
       skipped += 1;
     } else {
-      const title = redactForSync(visit.title.replace(/\s+/g, " ").trim());
+      const title = syncTitle(visit.title);
       // History has no dwell. The visit is final as it is; dwell stays blank, never invented.
       await assistantSyncDb.visits.put({
         id: visit.id,

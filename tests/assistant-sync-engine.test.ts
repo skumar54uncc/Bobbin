@@ -255,7 +255,7 @@ describe("flush", () => {
     await enabled(sheets);
     const big = "x".repeat(2500);
     const rows = Array.from({ length: 400 }, (_, i) =>
-      visit(`v${String(i).padStart(4, "0")}`, NOW - (i % 30) * DAY_MS, { title: big, url: `https://example.com/${i}/${big}` })
+      visit(`v${String(i).padStart(4, "0")}`, NOW - (i % 30) * DAY_MS, { title: big, url: `https://example.com/${i}/${big}${big}` })
     );
     await assistantSyncDb.visits.bulkPut(rows);
     const first = await runFlush(deps(sheets, NOW + 6 * MIN));

@@ -84,6 +84,44 @@ drive.google.com by a "Cortex Memory" title), and sites on the block list. The b
 myaccount.google.com, accounts.google.com, one.google.com, photos.google.com, payments.google.com, and
 pay.google.com; users can remove them.
 
+## Capture hardening (schema 5)
+
+- Single page apps: a content script runs in an isolated world, so it never sees the page's own
+  `pushState` or `replaceState`. It checks the address once a second on every site, listens for
+  `popstate`, and watches the `<title>`. DOM changes are throttled (one check per 950 ms), not debounced,
+  so a feed that never stops changing is still checked.
+- Dwell counts only while the tab is visible and focused and the user has had input in the last 60
+  seconds (`dwell.ts`). Cortex has no `idle` permission; the input check stands in for `chrome.idle`.
+- A prerendered page starts nothing until `prerenderingchange`. A page restored from the back/forward
+  cache is not a visit until the first pointer, key, wheel, or touch input.
+- Feeds (any `/feed` path such as LinkedIn's, X `/home`, Reddit home and popular, YouTube home;
+  `page-type.ts`) are one Visits row per session with dwell and scroll. Scrolling posts changes no
+  address, so it adds no rows; feeds never get an excerpt. A post opened from the feed is its own visit.
+- URL cleanup (sheet only, `url-cleanup.ts`): `utm_*` and click ids removed, YouTube `si`, `feature`, `pp`,
+  `ab_channel` removed, youtu.be expanded, Google AMP viewer and AMP cache unwrapped, `/amp` and `.amp.html`
+  article paths collapsed. Redirect wrappers (google.com/url, l.facebook.com, youtube.com/redirect,
+  linkedin.com/safety/go, out.reddit.com, l.instagram.com, slack-redir.net) and shorteners (t.co, lnkd.in,
+  bit.ly and others) are skipped: the page they lead to is the visit. The local library keeps exact URLs,
+  because highlights and reading time look a page up by the tab's address.
+- Searches: Google, Bing, DuckDuckGo, YouTube, LinkedIn, Amazon (national stores, `k`), Google Flights.
+- Other devices: each sync pass, the service worker reads `chrome.history` visits with `isLocal` false
+  (Chrome 115 and later; Chrome history sync must be on) since a cursor in `chrome.storage.local`. The first
+  pass looks back 7 days. At most 500 pages and 300 visits per pass; the cursor moves only after offscreen
+  stores them. Stored with title, URL, and time only (no dwell, scroll, topics, excerpt, or search rows),
+  through the same block list, deny rules, and Cortex file skip, with ids `other:<visitId>` so a repeated
+  pass adds nothing. Visits has a last column `device`: "this device" or "other device". The two never merge
+  into one row. A schema 4 sheet gets the header and "this device" on every existing row in the next
+  flush's single write, with no read.
+- Safety: titles and excerpts lose invisible characters (zero width, bidi controls, soft hyphen, tag
+  characters), emails, phone numbers, and digit runs of 13 or more (the whole run, so a card number right
+  after a phone number cannot leave digits behind). Titles are cut to 200 characters.
+- Instruction-like text ("ignore previous instructions", "system prompt", role tags such as `<system>` or
+  `<|im_start|>`, a "System:" line) in a title or excerpt is listed in the local `warnings` table
+  (IndexedDB `cortex-assistant-sync`). The row is not changed or deleted. A warning goes when its visit is
+  purged.
+- Persistent storage: onboarding (opened on install) and Settings call `navigator.storage.persist()` and
+  keep the answer in `cortex_storage_persisted`. It is a Window API, so the service worker cannot call it.
+
 Imported browser history pages are parsed (DOMParser and Readability) in the offscreen document, since a
 service worker has no DOM. The service worker only fetches the page and sends the HTML across.
 

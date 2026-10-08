@@ -12,6 +12,7 @@ import { applyManagedLockout, stripLockedFields } from "./managed-ui";
 import type { HistoryImportProgress } from "../lib/history-import";
 import { INDEXING_CONSENT_KEY } from "../shared/onboarding-constants";
 import { storageLocalGet } from "../shared/storage-local";
+import { requestPersistentStorage } from "../shared/persist-storage";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import { siteBadgeColors, siteInitial } from "../lib/site-badge";
 import {
@@ -762,6 +763,8 @@ function updateDeleteConfirmEnabled(): void {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Installs from before onboarding asked for persistent storage get asked here.
+  void requestPersistentStorage();
   initBackupUi(document, {
     send: (m) => chrome.runtime.sendMessage(m),
     download: saveBlob,
