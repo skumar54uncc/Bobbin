@@ -1,10 +1,20 @@
 /// <reference types="chrome"/>
-import { FetchDriveApi, trashMemory, type DriveApi, type MemoryChoice, type StoredMemoryIds } from "./drive-api";
+import {
+  FetchDriveApi,
+  googleErrorDetail,
+  googleStatus,
+  trashMemory,
+  type DriveApi,
+  type GoogleErrorDetail,
+  type MemoryChoice,
+  type StoredMemoryIds,
+} from "./drive-api";
 import {
   answerLegacyCleanup,
   checkLegacyFiles,
   disableAssistantSync,
   enableAssistantSync,
+  forbiddenMessage,
   runFlush,
   type FlushResult,
   type HistoryPerson,
@@ -101,6 +111,8 @@ export interface AssistantSyncWorkResult {
   reads?: number;
   writes?: number;
   confirm?: "missing" | "trashed";
+  /** The failed Google call, for the flush log. */
+  errorDetail?: GoogleErrorDetail;
 }
 
 export interface AssistantSyncLaunch {
@@ -115,9 +127,7 @@ export interface AssistantSyncLaunch {
 
 function plainSyncError(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
-  if (message === "google_403" || message === "drive_folder_failed" || message === "drive_sheet_failed") {
-    return "Google refused the Drive call. Enable the Google Drive API and the Google Sheets API in this Cloud project, then press Enable again.";
-  }
+  if (googleStatus(error) === 403) return forbiddenMessage(error);
   if (message === "google_401") {
     return "Google did not accept the sign-in. Press Enable to reconnect Google Drive.";
   }
@@ -138,6 +148,7 @@ function workResult(flush: FlushResult, created = false): AssistantSyncWorkResul
     created,
     ...(flush.status === "auth" ? { authFailed: true } : {}),
     ...(flush.error ? { error: flush.error } : {}),
+    ...(flush.errorDetail ? { errorDetail: flush.errorDetail } : {}),
     ...(flush.warning ? { warning: flush.warning } : {}),
     ...(flush.retryAt ? { retryAt: flush.retryAt } : {}),
     ...(flush.more ? { more: true } : {}),
@@ -206,7 +217,8 @@ export async function runAssistantSyncFromChrome(
     } catch {
       /* The page still receives the message below. */
     }
-    return { ok: false, error: message, ids: store.current() };
+    const detail = googleErrorDetail(error);
+    return { ok: false, error: message, ...(detail ? { errorDetail: detail } : {}), ids: store.current() };
   }
 }
 
@@ -228,7 +240,8 @@ export async function captureVisitFromChrome(visit: {
     company?: string;
     profileUrl: string;
   } | null;
-}): Promise<{ ok: true; stored: boolean }> {
+  ownIds?: StoredMemoryIds | null;
+}, embed?: (text: string) => Promise<number[] | null>): Promise<{ ok: true; stored: boolean }> {
   const state = await readSyncEngineState();
   if (!state.syncEnabled) return { ok: true, stored: false };
   const { captureFinalizedVisit } = await import(/* webpackChunkName: "assistant-sync-capture" */ "./capture");
@@ -248,6 +261,8 @@ export async function captureVisitFromChrome(visit: {
     linkedInFields: visit.linkedInFields ?? null,
     syncEnabled: true,
     open: visit.open === true,
+    ownIds: visit.ownIds ?? null,
+    embed,
   });
   return { ok: true, stored: result.stored };
 }

@@ -24,6 +24,8 @@ export interface CortexUserSettings {
   indexingPaused: boolean;
   /** Lowercase domain fragments e.g. banking.example.com */
   blocklist: string[];
+  /** Version of DEFAULT_BLOCKLIST already merged into `blocklist`. */
+  blocklistDefaults?: number;
   /** When true, only index hosts listed in allowlist (advanced) */
   allowlistOnly: boolean;
   allowlist: string[];
@@ -83,9 +85,22 @@ export type FeatureToggle =
 
 const KEY = "cortex_user_settings";
 
+/** Google account, billing, and photo pages. On the block list by default; users can remove them. */
+export const DEFAULT_BLOCKLIST: readonly string[] = [
+  "myaccount.google.com",
+  "accounts.google.com",
+  "one.google.com",
+  "photos.google.com",
+  "payments.google.com",
+  "pay.google.com",
+];
+/** Bump when DEFAULT_BLOCKLIST gains entries, so they are added once to lists saved before. */
+export const BLOCKLIST_DEFAULTS_VERSION = 1;
+
 export const DEFAULT_USER_SETTINGS: CortexUserSettings = {
   indexingPaused: false,
-  blocklist: [],
+  blocklist: [...DEFAULT_BLOCKLIST],
+  blocklistDefaults: BLOCKLIST_DEFAULTS_VERSION,
   allowlistOnly: false,
   allowlist: [],
   chatMode: "auto",
@@ -119,6 +134,18 @@ function stringList(v: unknown): string[] {
   return v.filter((item): item is string => typeof item === "string");
 }
 
+/**
+ * A list saved before this version of the defaults gets the defaults added once. After that the
+ * saved list is used as it is, so a default the user removed stays removed.
+ */
+function blocklistWithDefaults(raw: Partial<CortexUserSettings> | undefined): string[] {
+  if (!raw) return [...DEFAULT_BLOCKLIST];
+  const saved = stringList(raw.blocklist);
+  if (typeof raw.blocklistDefaults === "number" && raw.blocklistDefaults >= BLOCKLIST_DEFAULTS_VERSION) return saved;
+  const have = new Set(saved.map((domain) => domain.trim().toLowerCase()));
+  return [...saved, ...DEFAULT_BLOCKLIST.filter((domain) => !have.has(domain))];
+}
+
 let memorySettings: CortexUserSettings | null = null;
 
 function normalizeSettings(
@@ -128,7 +155,8 @@ function normalizeSettings(
   // S-2: never surface geminiApiKey from the local settings blob.
   return {
     indexingPaused: bool(raw?.indexingPaused, DEFAULT_USER_SETTINGS.indexingPaused),
-    blocklist: stringList(raw?.blocklist),
+    blocklist: blocklistWithDefaults(raw),
+    blocklistDefaults: BLOCKLIST_DEFAULTS_VERSION,
     allowlistOnly: bool(raw?.allowlistOnly, DEFAULT_USER_SETTINGS.allowlistOnly),
     allowlist: stringList(raw?.allowlist),
     chatMode:

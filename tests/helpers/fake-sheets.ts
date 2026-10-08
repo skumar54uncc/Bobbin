@@ -1,5 +1,5 @@
-import type { DriveApi, DriveFileInfo, SheetInfo } from "../../src/assistant-sync/drive-api";
-import { headerFormatRequests, PROTECTED_DESCRIPTION, protectTabRequest, SHEET_TABS } from "../../src/assistant-sync/sheet";
+import { FOLDER_MIME, GoogleCallError, type DriveApi, type DriveFileInfo, type SheetInfo } from "../../src/assistant-sync/drive-api";
+import { PROTECTED_DESCRIPTION, SHEET_TABS } from "../../src/assistant-sync/sheet";
 
 type Cells = { values: { userEnteredValue: { stringValue: string } }[] };
 interface Tab {
@@ -9,8 +9,11 @@ interface Tab {
   protections: string[];
 }
 
-/** One scripted outcome for the next batchUpdate. `lost` applies the batch and then fails, like a dropped reply. */
-export type BatchOutcome = { status: number; lost?: boolean };
+/**
+ * One scripted outcome for the next batchUpdate. `lost` applies the batch and then fails, like a dropped reply.
+ * `googleStatus` and `message` are Google's error.status and error.message.
+ */
+export type BatchOutcome = { status: number; lost?: boolean; googleStatus?: string; message?: string };
 
 /**
  * In-memory Drive and Sheets. batchUpdate applies addSheet, deleteDimension,
@@ -27,6 +30,8 @@ export class FakeSheets implements DriveApi {
   batches: object[][] = [];
   outcomes: BatchOutcome[] = [];
   creates = 0;
+  /** sheetId of the one tab a Drive-created spreadsheet starts with. */
+  defaultSheetId = 0;
 
   constructor(seed = true) {
     if (!seed) return;
@@ -63,12 +68,18 @@ export class FakeSheets implements DriveApi {
     return id;
   }
 
+  /** Like Drive files.create with the spreadsheet mimeType: one untitled default tab, no Cortex tabs yet. */
   async createSpreadsheet(name: string, parentId?: string): Promise<string> {
     this.creates += 1;
     const id = `file-${this.files.size + 1}`;
     this.files.set(id, { name, trashed: false, parent: parentId, sheet: true });
-    this.books.set(id, this.freshBook());
+    this.books.set(id, new Map([["Sheet1", { sheetId: this.defaultSheetId, rows: [], protections: [] }]]));
     return id;
+  }
+
+  /** Cortex Memory folders, oldest first. */
+  folders(): string[] {
+    return [...this.files].filter(([, file]) => !file.sheet && file.name === "Cortex Memory").map(([id]) => id);
   }
 
   async untrashFile(id: string): Promise<void> {
@@ -76,14 +87,18 @@ export class FakeSheets implements DriveApi {
     if (file) file.trashed = false;
   }
 
-  /** Understands the two queries Cortex sends: files in a folder, and the Cortex Memory sheet by name. */
+  /**
+   * Understands the queries Cortex sends: files in a folder, and the Cortex Memory sheet or
+   * folder by name. Files come back in creation order, as orderBy=createdTime returns them.
+   */
   async listFiles(query: string): Promise<DriveFileInfo[]> {
     this.lists += 1;
     const parent = /^'([^']+)' in parents/.exec(query)?.[1];
     const name = /name = '([^']+)'/.exec(query)?.[1];
+    const folder = query.includes(FOLDER_MIME);
     return [...this.files]
       .filter(([, file]) => !file.trashed)
-      .filter(([, file]) => (parent ? file.parent === parent : file.sheet && file.name === name))
+      .filter(([, file]) => (parent ? file.parent === parent : !!file.sheet !== folder && file.name === name))
       .map(([id, file]) => ({ id, name: file.name, trashed: file.trashed, parents: file.parent ? [file.parent] : [] }));
   }
 
@@ -97,15 +112,20 @@ export class FakeSheets implements DriveApi {
     if (file) file.trashed = true;
   }
 
-  /** Mirrors FetchDriveApi.formatHeaders: one batch with the header format and the edit warning on every tab. */
-  async formatHeaders(fileId: string): Promise<void> {
-    await this.batchUpdate(fileId, [...headerFormatRequests(), ...SHEET_TABS.map((_, sheetId) => protectTabRequest(sheetId))]);
+  private failure(outcome: BatchOutcome): Error {
+    if (outcome.googleStatus == null && outcome.message == null) return new Error(`google_${outcome.status}`);
+    return new GoogleCallError({
+      call: "batchUpdate",
+      http_status: outcome.status,
+      status: outcome.googleStatus ?? "",
+      message: outcome.message ?? "",
+    });
   }
 
   async batchUpdate(fileId: string, requests: object[]): Promise<void> {
     this.writes += 1;
     const outcome = this.outcomes.shift();
-    if (outcome && !outcome.lost) throw new Error(`google_${outcome.status}`);
+    if (outcome && !outcome.lost) throw this.failure(outcome);
     const book = this.books.get(fileId);
     if (!book) throw new Error("google_404");
     const draft = new Map(
@@ -162,14 +182,23 @@ export class FakeSheets implements DriveApi {
         if (warningOnly !== true) throw new Error("google_400");
         byId(range.sheetId).protections.push(description);
       } else if (request.updateSheetProperties) {
-        // Frozen header row: no effect on values.
+        // A rename moves the tab to its new title; a frozen header row has no effect on values.
+        const { sheetId, title } = request.updateSheetProperties.properties;
+        if (title != null) {
+          const entry = [...draft].find(([, tab]) => tab.sheetId === sheetId);
+          if (!entry || (draft.has(title) && entry[0] !== title)) throw new Error("google_400");
+          draft.delete(entry[0]);
+          draft.set(title, entry[1]);
+        }
       } else {
         throw new Error("google_400");
       }
     }
-    this.books.set(fileId, draft);
+    // Keep sheet order: About first, then the rest by the index they were given.
+    const order = (name: string) => (SHEET_TABS as readonly string[]).indexOf(name);
+    this.books.set(fileId, new Map([...draft].sort(([a], [b]) => order(a) - order(b))));
     this.batches.push(requests);
-    if (outcome?.lost) throw new Error(`google_${outcome.status}`);
+    if (outcome?.lost) throw this.failure(outcome);
   }
 
   async getSheetInfo(fileId: string): Promise<SheetInfo> {
@@ -179,6 +208,7 @@ export class FakeSheets implements DriveApi {
     return {
       sheetIds: Object.fromEntries([...book].map(([name, tab]) => [name, tab.sheetId])),
       protectedIds: [...book.values()].filter((tab) => tab.protections.includes(PROTECTED_DESCRIPTION)).map((tab) => tab.sheetId),
+      tabs: [...book].map(([title, tab]) => ({ sheetId: tab.sheetId, title })),
     };
   }
 

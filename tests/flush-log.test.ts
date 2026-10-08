@@ -12,8 +12,15 @@ describe("flush log", () => {
   it("keeps the retry time and a short error", () => {
     const entry = flushLogEntry("now", { ok: false, status: "backoff", retryAt: NOW + 60_000, error: "x".repeat(500) }, NOW);
     expect(entry.retryAt).toBe("2026-10-08T12:01:00.000Z");
-    expect(entry.error).toHaveLength(200);
+    expect(entry.error).toHaveLength(400);
     expect(entry.reads).toBeNull();
+  });
+
+  it("records which Google call failed and what Google said as error_detail", () => {
+    const detail = { call: "sheet create", http_status: 403, status: "PERMISSION_DENIED", message: "The caller does not have permission" };
+    const entry = flushLogEntry("enable", { ok: false, error: "x", errorDetail: detail }, NOW);
+    expect(entry.error_detail).toEqual(detail);
+    expect(flushLogEntry("alarm", { ok: true }, NOW)).not.toHaveProperty("error_detail");
   });
 
   it("keeps only the newest entries", () => {

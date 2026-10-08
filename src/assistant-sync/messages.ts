@@ -42,6 +42,15 @@ export const SyncWorkReplySchema = v.object({
   writes: v.optional(v.number()),
   /** Enable stopped to ask: the stored sheet is in the trash, or was deleted. */
   confirm: v.optional(v.picklist(["missing", "trashed"])),
+  /** Which Google call failed and what Google said. */
+  errorDetail: v.optional(
+    v.object({
+      call: v.pipe(v.string(), v.maxLength(32)),
+      http_status: v.number(),
+      status: v.pipe(v.string(), v.maxLength(64)),
+      message: v.pipe(v.string(), v.maxLength(300)),
+    })
+  ),
   ids: v.optional(
     v.object({
       folderId: v.optional(v.nullable(v.string())),

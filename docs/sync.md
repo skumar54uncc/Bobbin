@@ -68,9 +68,21 @@ read), and adds the edit warning below to every tab, all in the same single writ
 
 Every tab carries a warning-only protected range ("Managed by Cortex"): Sheets asks before a manual edit
 but never blocks one, and Cortex's own writes are unaffected. It is added in the formatting batch when
-the sheet is created, when a deleted tab is re-added, and in the upgrade pass. Verification reads the
+the sheet is set up, when a deleted tab is re-added, and in the upgrade pass. Verification reads the
 existing protections, so a tab is never protected twice. About also says: "This sheet is managed by
 Cortex. Editing or deleting rows can cause wrong answers."
+
+Topics: when a page is captured, the offscreen document embeds its title and the first 1,200 characters
+of its text with the on-device search model (all-MiniLM-L6-v2, mean pooled, normalized). Cortex compares
+that vector by cosine similarity with 40 topic labels embedded the same way (`topic-catalog.ts`, stored as
+int8) and keeps up to 3 labels scoring 0.42 or more. Nothing leaves the device. A page with no text gets
+no topics; a page nothing clears 0.42 for stays blank rather than getting a guess. Visits imported from
+history without page text have none.
+
+Never captured: the Cortex Memory sheet and folder (by their stored Drive ids, and on docs.google.com or
+drive.google.com by a "Cortex Memory" title), and sites on the block list. The block list starts with
+myaccount.google.com, accounts.google.com, one.google.com, photos.google.com, payments.google.com, and
+pay.google.com; users can remove them.
 
 Imported browser history pages are parsed (DOMParser and Readability) in the offscreen document, since a
 service worker has no DOM. The service worker only fetches the page and sends the HTML across.
@@ -85,6 +97,28 @@ Enable uses the stored sheet. With no stored ids it first looks for a Cortex Mem
 none exists. When the stored sheet is in the trash, Settings offers Restore from trash. When it was
 deleted, Settings offers Create a new sheet, in the old folder if that is still there. Nothing is created
 or restored without that click, so there is never a second Cortex Memory file.
+
+Creating the sheet:
+
+1. Folder: the oldest Cortex Memory folder Cortex made that is not in the trash (`files.list`, ordered by
+   `createdTime`). A folder is created only when there is none, so an Enable that failed halfway never
+   leaves a second folder behind. Extra empty folders from earlier attempts are left in place.
+2. Spreadsheet: Drive `files.create` with mimeType `application/vnd.google-apps.spreadsheet`, name
+   "Cortex Memory", parents the folder. Never Sheets `spreadsheets.create`, which returned 403
+   PERMISSION_DENIED with drive.file in live testing.
+3. Setup: one `spreadsheets.get` for the id of the file's default tab, then one `spreadsheets.batchUpdate`
+   that renames that tab to About, adds the six data tabs, writes the headers and About, bolds and
+   freezes the header rows, and adds the edit warning to every tab.
+
+A Cortex Memory sheet found with only its default tab (an Enable that stopped after step 2) is set up the
+same way instead of creating another file.
+
+## Errors
+
+A 403 shows under Last error as "Google did not allow Cortex to create or edit the sheet." followed by
+"Google said:" and Google's `error.message`. The flush log entry gets `error_detail`: `call` (search,
+folder create, sheet create, batchUpdate, read, file check, trash, restore), `http_status`, `status`
+(Google's `error.status`), and `message`.
 
 Older builds wrote a JSON backup and monthly archive sheets. The first successful sync on this build lists
 the folder once (one `files.list`) and, if any are there, Settings asks Move to trash or Keep them. The

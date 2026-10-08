@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createMemoryFile,
   DRIVE_FILE_SCOPE,
   FetchDriveApi,
   findLegacyFiles,
+  googleErrorDetail,
   googleStatus,
   inspectMemory,
   resolveMemory,
@@ -60,7 +63,7 @@ describe("sheet layout", () => {
     for (const needle of needles) expect(ids).toContain(needle);
     expect(cellWarning(CELL_WARN_AT)).toContain("10 million");
     expect(cellWarning(10)).toBeNull();
-    expect(headerFormatRequests()).toHaveLength(14);
+    expect(headerFormatRequests(SHEET_TABS.map((_, i) => i))).toHaveLength(14);
   });
 });
 
@@ -176,12 +179,20 @@ describe("drive memory", () => {
           ],
         });
       }
-      if (url.endsWith("/spreadsheets") && init?.method === "POST") return Response.json({ spreadsheetId: "sheet-1" });
+      if (init?.method === "POST" && url.includes("/drive/v3/files")) {
+        return Response.json({ id: JSON.parse(String(init.body)).parents ? "sheet-1" : "folder-1" });
+      }
       return Response.json({ id: "folder-1" });
     };
     const api = new FetchDriveApi("token", fetchImpl);
     expect(await api.getFile("missing")).toBeNull();
     expect(await api.createSpreadsheet("Cortex Memory", "folder-1")).toBe("sheet-1");
+    expect(calls.at(-1)!.url).toBe("https://www.googleapis.com/drive/v3/files?fields=id");
+    expect(JSON.parse(calls.at(-1)!.body)).toEqual({
+      name: "Cortex Memory",
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      parents: ["folder-1"],
+    });
 
     calls.length = 0;
     await api.batchUpdate("sheet-1", [appendCellsRequest(1, [["v2", "2026-10-02"]])]);
@@ -191,7 +202,14 @@ describe("drive memory", () => {
     await api.batchUpdate("sheet-1", []);
     expect(calls).toHaveLength(1);
 
-    expect(await api.getSheetInfo("sheet-1")).toEqual({ sheetIds: { About: 0, Visits: 1 }, protectedIds: [0] });
+    expect(await api.getSheetInfo("sheet-1")).toEqual({
+      sheetIds: { About: 0, Visits: 1 },
+      protectedIds: [0],
+      tabs: [
+        { sheetId: 0, title: "About" },
+        { sheetId: 1, title: "Visits" },
+      ],
+    });
     expect(await api.readColumns("sheet-1", ["Visits!A:B", "Daily!A:A"])).toEqual([
       [
         ["id", "date"],
@@ -208,19 +226,98 @@ describe("drive memory", () => {
     await expect(api.getSheetInfo("x")).rejects.toThrow("google_bad_response");
   });
 
-  it("formats a new sheet and adds a warning-only protection to every tab in one batchUpdate", async () => {
-    const bodies: string[] = [];
-    const api = new FetchDriveApi("token", async (_url, init) => {
-      bodies.push(String(init?.body ?? ""));
-      return Response.json({});
+  it("creates the sheet with Drive files.create, never POST /v4/spreadsheets, then sets it up in one batchUpdate", async () => {
+    const calls: { method: string; url: string; body: string }[] = [];
+    const api = new FetchDriveApi("token", async (url, init) => {
+      const method = init?.method ?? "GET";
+      calls.push({ method, url, body: String(init?.body ?? "") });
+      if (method === "GET" && url.includes("/drive/v3/files?")) return Response.json({ files: [] });
+      if (method === "POST" && url.includes("/drive/v3/files")) {
+        return Response.json({ id: JSON.parse(String(init!.body)).parents ? "sheet-1" : "folder-1" });
+      }
+      if (method === "GET" && url.includes("/v4/spreadsheets/sheet-1?")) {
+        return Response.json({ sheets: [{ properties: { sheetId: 0, title: "Sheet1" } }] });
+      }
+      if (url.endsWith("/v4/spreadsheets/sheet-1:batchUpdate")) return Response.json({});
+      return new Response("{}", { status: 500 });
     });
-    await api.formatHeaders("sheet-1");
-    expect(bodies).toHaveLength(1);
-    const requests = JSON.parse(bodies[0]!).requests as Record<string, any>[];
+    expect(await createMemoryFile(api, "Cortex Memory")).toEqual({ folderId: "folder-1", fileId: "sheet-1" });
+
+    expect(calls.some((c) => c.method === "POST" && /\/v4\/spreadsheets\/?(\?|$)/.test(c.url))).toBe(false);
+    const sheetCreate = calls.find((c) => c.method === "POST" && JSON.parse(c.body || "{}").mimeType === "application/vnd.google-apps.spreadsheet");
+    expect(sheetCreate?.url).toMatch(/^https:\/\/www\.googleapis\.com\/drive\/v3\/files/);
+    expect(JSON.parse(sheetCreate!.body).parents).toEqual(["folder-1"]);
+
+    const batches = calls.filter((c) => c.url.endsWith(":batchUpdate"));
+    expect(batches).toHaveLength(1);
+    const requests = JSON.parse(batches[0]!.body).requests as Record<string, any>[];
+    expect(requests[0]).toEqual({
+      updateSheetProperties: { properties: { sheetId: 0, title: "About", index: 0 }, fields: "title,index" },
+    });
+    expect(requests.filter((r) => r.addSheet).map((r) => r.addSheet.properties.title)).toEqual(SHEET_TABS.slice(1));
+    const headerRows = requests.filter((r) => r.updateCells).map((r) => r.updateCells.rows[0].values.map((c: any) => c.userEnteredValue.stringValue));
+    expect(headerRows[0]).toEqual(["Cortex Memory"]);
+    expect(headerRows[1]).toEqual([...VISIT_HEADERS]);
     const protections = requests.filter((r) => r.addProtectedRange).map((r) => r.addProtectedRange.protectedRange);
     expect(protections).toHaveLength(SHEET_TABS.length);
     expect(protections.every((p) => p.warningOnly === true && p.description === "Managed by Cortex")).toBe(true);
-    expect(protections.map((p) => p.range.sheetId)).toEqual(SHEET_TABS.map((_, i) => i));
+    expect(new Set(protections.map((p) => p.range.sheetId)).size).toBe(SHEET_TABS.length);
+    expect(calls.map((c) => `${c.method} ${c.url.split("?")[0]}`)).toEqual([
+      "GET https://www.googleapis.com/drive/v3/files",
+      "POST https://www.googleapis.com/drive/v3/files",
+      "POST https://www.googleapis.com/drive/v3/files",
+      "GET https://sheets.googleapis.com/v4/spreadsheets/sheet-1",
+      "POST https://sheets.googleapis.com/v4/spreadsheets/sheet-1:batchUpdate",
+    ]);
+  });
+
+  it("never posts to the Sheets create endpoint anywhere in the Drive client", () => {
+    const source = readFileSync(join(__dirname, "..", "src", "assistant-sync", "drive-api.ts"), "utf8");
+    expect(source).not.toMatch(/sheets\.googleapis\.com\/v4\/spreadsheets["'`]/);
+  });
+
+  it("does not reuse the default tab's id for a new tab, whatever id Google gave it", async () => {
+    const api = new FakeSheets(false);
+    api.defaultSheetId = 3;
+    const ids = await createMemoryFile(api, "Cortex Memory");
+    const info = await api.getSheetInfo(ids.fileId!);
+    expect(info.tabs.map((t) => t.title)).toEqual([...SHEET_TABS]);
+    expect(info.sheetIds.About).toBe(3);
+    expect(new Set(Object.values(info.sheetIds)).size).toBe(SHEET_TABS.length);
+    expect(info.protectedIds).toHaveLength(SHEET_TABS.length);
+    expect(api.writes).toBe(1);
+  });
+
+  it("reuses a Cortex Memory folder left by a failed Enable and creates only the sheet", async () => {
+    const api = new FakeSheets(false);
+    api.files.set("old-folder", { name: "Cortex Memory", trashed: false });
+    api.files.set("newer-folder", { name: "Cortex Memory", trashed: false });
+    const made = await resolveMemory(api, { folderId: null, fileId: null });
+    expect(made).toMatchObject({ created: true, ids: { folderId: "old-folder" } });
+    expect(api.creates).toBe(1);
+    expect(api.folders()).toEqual(["old-folder", "newer-folder"]);
+    const fileId = "ids" in made ? made.ids.fileId! : "";
+    expect(api.files.get(fileId)).toMatchObject({ parent: "old-folder", sheet: true });
+    expect(api.tab("About", fileId)[0]).toEqual(["Cortex Memory"]);
+    expect(api.tab("Visits", fileId)[0]).toEqual([...VISIT_HEADERS]);
+
+    // The next Enable finds that sheet: no new folder or sheet.
+    expect(await resolveMemory(api, { folderId: null, fileId: null })).toEqual({ ids: { folderId: "old-folder", fileId }, created: false });
+    expect(api.creates).toBe(1);
+  });
+
+  it("finishes setting up a sheet an earlier Enable created but never set up, without a second file", async () => {
+    const api = new FakeSheets(false);
+    api.files.set("folder", { name: "Cortex Memory", trashed: false });
+    const fileId = await api.createSpreadsheet("Cortex Memory", "folder");
+    api.creates = 0;
+    expect(await resolveMemory(api, { folderId: null, fileId: null })).toEqual({ ids: { folderId: "folder", fileId }, created: false });
+    expect(api.creates).toBe(0);
+    expect((await api.getSheetInfo(fileId)).tabs.map((t) => t.title)).toEqual([...SHEET_TABS]);
+    // Already set up: a later Enable reads and leaves it alone.
+    const writes = api.writes;
+    await resolveMemory(api, { folderId: null, fileId: null });
+    expect(api.writes).toBe(writes);
   });
 
   it("reads the HTTP status from Google errors", async () => {
@@ -228,5 +325,29 @@ describe("drive memory", () => {
     const error = await api.batchUpdate("x", [{}]).catch((e: unknown) => e);
     expect(googleStatus(error)).toBe(429);
     expect(googleStatus(new Error("other"))).toBeNull();
+  });
+
+  it("keeps Google's status and message and names the call that failed", async () => {
+    const body = { error: { code: 403, message: "The caller does not have permission", status: "PERMISSION_DENIED" } };
+    const api = new FetchDriveApi("token", async () => Response.json(body, { status: 403 }));
+    const error = await api.createSpreadsheet("Cortex Memory", "folder-1").catch((e: unknown) => e);
+    expect(googleStatus(error)).toBe(403);
+    expect(googleErrorDetail(error)).toEqual({
+      call: "sheet create",
+      http_status: 403,
+      status: "PERMISSION_DENIED",
+      message: "The caller does not have permission",
+    });
+    expect(googleErrorDetail(await api.createFolder("Cortex Memory").catch((e: unknown) => e))?.call).toBe("folder create");
+    expect(googleErrorDetail(await api.listFiles("q").catch((e: unknown) => e))?.call).toBe("search");
+    expect(googleErrorDetail(await api.batchUpdate("x", [{}]).catch((e: unknown) => e))?.call).toBe("batchUpdate");
+    expect(googleErrorDetail(await api.readColumns("x", ["A:A"]).catch((e: unknown) => e))?.call).toBe("read");
+    const empty = new FetchDriveApi("token", async () => new Response("not json", { status: 403 }));
+    expect(googleErrorDetail(await empty.batchUpdate("x", [{}]).catch((e: unknown) => e))).toEqual({
+      call: "batchUpdate",
+      http_status: 403,
+      status: "",
+      message: "",
+    });
   });
 });

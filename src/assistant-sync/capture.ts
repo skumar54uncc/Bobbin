@@ -1,6 +1,6 @@
 import { canonicalizeUrl, domainFromUrl } from "./canonical-url";
 import { assistantSyncDb } from "./db";
-import { syncDenyReason } from "./denylist";
+import { syncDenyReason, type OwnFileIds } from "./denylist";
 import { buildExcerpt } from "./excerpt";
 import { COMPANY_SECTIONS, HOW_FOUND, type CompanySection, type HowFound } from "./linkedin-selectors";
 import { linkedInSyncRow } from "./linkedin-sync";
@@ -39,6 +39,13 @@ export interface FinalizedVisitInput {
   excerptMinDwellMinutes?: number;
   /** Writes nothing unless the user has turned sync on. */
   syncEnabled: boolean;
+  /** Stored Drive ids of the Cortex Memory sheet and folder. Those pages are never captured. */
+  ownIds?: OwnFileIds | null;
+  /**
+   * On-device embedding (the search model) used for topics when `pageEmbedding` is not given.
+   * Runs only after the privacy checks pass.
+   */
+  embed?: (text: string) => Promise<number[] | null>;
   /**
    * The tab is still on this page. The row waits for `finalizeVisit`, which adds the
    * measured dwell and decides on the excerpt. Page text is held locally until then.
@@ -62,6 +69,24 @@ function clampScroll(value: number | null): number | null {
 function blankToNull(value: number | null): number | null {
   if (value == null || !Number.isFinite(value) || value < 0) return null;
   return value;
+}
+
+/**
+ * Title and the start of the page, embedded the way the topic threshold was tuned: a paragraph
+ * of page text (eval/queries/topic-fixtures.ts). The model reads about 256 tokens, so more is wasted.
+ */
+export const TOPIC_TEXT_CHARS = 1200;
+
+export function topicText(title: string, pageText: string | null): string {
+  const body = (pageText ?? "").replace(/\s+/g, " ").trim();
+  if (!body) return "";
+  return `${title}. ${body}`.slice(0, TOPIC_TEXT_CHARS);
+}
+
+async function embedForTopics(input: FinalizedVisitInput, title: string): Promise<number[] | null> {
+  const text = topicText(title, redactForSync(input.pageText ?? ""));
+  if (!text || !input.embed) return null;
+  return input.embed(text).catch(() => null);
 }
 
 function isLinkedInProfileOrCompany(url: string): boolean {
@@ -88,6 +113,8 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
   const denied = syncDenyReason(input.url, {
     userDomains: input.userDenylist,
     hasPasswordInput: input.hasPasswordInput,
+    title: input.title,
+    ownIds: input.ownIds,
   });
   if (denied) return { stored: false, reason: denied };
 
@@ -95,9 +122,10 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
   if (input.open && previous?.finalizedAt != null) return { stored: false, reason: "final" };
 
   const title = redactForSync(input.title.replace(/\s+/g, " ").trim());
-  const topics = input.pageEmbedding?.length
-    ? tagTopics(input.pageEmbedding, TOPIC_SIMILARITY_THRESHOLD, await loadTopicVectors())
-    : [];
+  const embedding = input.pageEmbedding?.length ? input.pageEmbedding : await embedForTopics(input, title);
+  const tagged = embedding?.length ? tagTopics(embedding, TOPIC_SIMILARITY_THRESHOLD, await loadTopicVectors()) : [];
+  // A re-read of the same visit without page text keeps the topics found earlier.
+  const topics = tagged.length ? tagged : (previous?.topics ?? []);
   const dwellMinutes = blankToNull(input.dwellMinutes);
   const maxScrollPct = clampScroll(input.maxScrollPct);
 

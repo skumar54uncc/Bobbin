@@ -118,6 +118,14 @@ async function embedQueryForSearch(text: string): Promise<number[] | null> {
 }
 
 
+/** Page embedding for Assistant Sync topics. Same model and pooling as the topic label vectors. */
+async function embedForTopics(text: string): Promise<number[] | null> {
+  const pipe = await getPipe();
+  const output = await pipe(text.replace(/\s+/g, " ").trim().slice(0, MAX_EMBED_CHARS), { pooling: "mean", normalize: true });
+  const data = output?.data as Float32Array | undefined;
+  return data?.length ? Array.from(data) : null;
+}
+
 // ------------------------------------------------- export and backup (6.7)
 
 const SERVICE_WORKER_URL = chrome.runtime.getURL("service-worker.js");
@@ -329,7 +337,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
         company?: string;
         profileUrl?: string;
       } | null;
+      ownIds?: { fileId?: unknown; folderId?: unknown } | null;
     } | undefined;
+    const idOf = (value: unknown) => (typeof value === "string" && value ? value : null);
     const fields = visit?.linkedInFields;
     const linkedInFields =
       fields &&
@@ -354,7 +364,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
           pageText: typeof visit?.pageText === "string" ? visit.pageText : null,
           open: visit?.open === true,
           linkedInFields,
-        })
+          ownIds: { fileId: idOf(visit?.ownIds?.fileId), folderId: idOf(visit?.ownIds?.folderId) },
+        }, embedForTopics)
       )
       .then((result) => sendResponse(result))
       .catch(() => sendResponse({ ok: false, error: "capture_failed" }));

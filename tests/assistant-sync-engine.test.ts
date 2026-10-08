@@ -358,6 +358,63 @@ describe("backfill and enable", () => {
     expect(sheets.ids("Visits", ids.fileId!)).toEqual(["h1"]);
     expect(sheets.tab("About", ids.fileId!).length).toBeGreaterThan(3);
   });
+
+  it("folder exists, sheet missing: Enable reuses the folder and creates one sheet, set up in one batch", async () => {
+    const sheets = new FakeSheets(false);
+    sheets.files.set("left-over", { name: "Cortex Memory", trashed: false });
+    let ids: StoredMemoryIds = { folderId: null, fileId: null };
+    const enable = () =>
+      enableAssistantSync({
+        api: sheets,
+        ids,
+        now: NOW,
+        timeZone: ZONE,
+        history: [{ id: "h1", url: "https://example.com/h1", title: "History", visitedAt: NOW - DAY_MS }],
+        saveIds: async (next) => {
+          ids = next;
+        },
+        random: () => 0,
+      });
+    const result = await enable();
+    if ("confirm" in result) throw new Error("enable asked a question");
+    expect(result.flush.status).toBe("ready");
+    expect(ids.folderId).toBe("left-over");
+    expect(sheets.folders()).toEqual(["left-over"]);
+    expect(sheets.creates).toBe(1);
+    const spreadsheets = [...sheets.files.values()].filter((file) => file.sheet);
+    expect(spreadsheets).toHaveLength(1);
+    expect(spreadsheets[0]?.parent).toBe("left-over");
+    // Setup is the first batch: tabs, headers, About, and the edit warning together.
+    const setup = sheets.batches[0]!.map((r) => Object.keys(r)[0]);
+    expect(setup.filter((k) => k === "addSheet")).toHaveLength(6);
+    expect(setup.filter((k) => k === "addProtectedRange")).toHaveLength(7);
+    expect(sheets.ids("Visits", ids.fileId!)).toEqual(["h1"]);
+
+    // Enable again, as after a reinstall with no stored ids: same folder, same sheet.
+    ids = { folderId: null, fileId: null };
+    await enable();
+    expect(sheets.creates).toBe(1);
+    expect(sheets.folders()).toEqual(["left-over"]);
+    expect(sheets.ids("Visits", ids.fileId!)).toEqual(["h1"]);
+  });
+
+  it("reports a 403 as a permission problem with Google's message, never as APIs to enable", async () => {
+    const sheets = new FakeSheets();
+    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true, verifyNext: true });
+    await assistantSyncDb.visits.put(visit("v1", NOW - 10 * MIN));
+    sheets.outcomes.push({ status: 403, googleStatus: "PERMISSION_DENIED", message: "The caller does not have permission" });
+    const result = await runFlush(deps(sheets, NOW, { mode: "user" }));
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Google did not allow Cortex to create or edit the sheet. Google said: The caller does not have permission");
+    expect(result.errorDetail).toEqual({
+      call: "batchUpdate",
+      http_status: 403,
+      status: "PERMISSION_DENIED",
+      message: "The caller does not have permission",
+    });
+    expect((await readSyncEngineState()).lastError).toBe(result.error);
+    expect(result.error).not.toMatch(/enable the/i);
+  });
 });
 
 describe("service worker boundaries", () => {
@@ -380,6 +437,15 @@ describe("service worker boundaries", () => {
     expect(syncGate).toContain("isOptionsPageSender(sender)");
     expect(syncGate).toContain("AssistantSyncMessageSchema");
     expect(syncGate).toContain("DwellMessageSchema");
+  });
+
+  it("keeps one open visit while the tab stays on the same canonical page", () => {
+    const source = readFileSync(join(__dirname, "..", "src", "background", "service-worker.ts"), "utf8");
+    const capture = source.slice(source.indexOf("async function captureAssistantSyncVisit"), source.indexOf("chrome.tabs.onRemoved"));
+    expect(capture).toContain("canonicalizeUrl(visit.url)");
+    expect(capture).toContain("canonicalizeUrl(current.url)");
+    expect(capture).not.toContain("current.url === visit.url");
+    expect(capture).toContain("ownIds");
   });
 
   it("parses imported history pages in the offscreen document, which has a DOM", () => {

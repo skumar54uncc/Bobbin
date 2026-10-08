@@ -40,8 +40,12 @@ When capture is on, Cortex records:
 Cortex does not collect anything in Incognito windows, on pages that
 contain a password field, or on sites in the block list (banking,
 health portals, webmail, password managers, LinkedIn Messaging, and any
-site you add). Cortex removes email addresses, phone numbers, and long
-card-like numbers from captured text.
+site you add). Your block list starts with Google account, storage,
+billing, and photo pages (myaccount.google.com, accounts.google.com,
+one.google.com, photos.google.com, payments.google.com, pay.google.com);
+you can remove any of them in Settings. Assistant Sync never records
+its own Cortex Memory sheet or folder. Cortex removes email addresses,
+phone numbers, and long card-like numbers from captured text.
 
 ## Where your data is stored
 

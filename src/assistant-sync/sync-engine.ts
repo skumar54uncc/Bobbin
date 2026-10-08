@@ -17,12 +17,14 @@ import {
 import { syncDenyReason } from "./denylist";
 import {
   findLegacyFiles,
+  googleErrorDetail,
   googleStatus,
   inspectMemory,
   resolveMemory,
   syncedKey,
   type DriveApi,
   type DriveMemoryStatus,
+  type GoogleErrorDetail,
   type MemoryChoice,
   type StoredMemoryIds,
 } from "./drive-api";
@@ -78,8 +80,13 @@ export const SYNC_ABSENT_MESSAGE =
   "Cortex Memory has not been created in Drive yet. Turn sync on to create it.";
 export const SYNC_REJECTED_MESSAGE =
   "Google did not accept the last update. Cortex will check the sheet and try again.";
-export const SYNC_FORBIDDEN_MESSAGE =
-  "Google refused the Drive call. Enable the Google Drive API and the Google Sheets API in this Cloud project, then press Enable again.";
+export const SYNC_FORBIDDEN_MESSAGE = "Google did not allow Cortex to create or edit the sheet.";
+
+/** The 403 message, with Google's own words when the reply had them. */
+export function forbiddenMessage(error: unknown): string {
+  const said = googleErrorDetail(error)?.message.trim();
+  return said ? `${SYNC_FORBIDDEN_MESSAGE} Google said: ${said}` : SYNC_FORBIDDEN_MESSAGE;
+}
 
 type DataTab = Exclude<SheetTabName, "About">;
 const DATA_TABS: DataTab[] = ["Visits", "Content", "Searches", "People", "Companies", "Daily"];
@@ -132,6 +139,8 @@ export interface FlushResult {
   /** Earliest epoch ms for the next attempt. */
   retryAt?: number;
   error?: string;
+  /** The failed Google call, for the flush log. */
+  errorDetail?: GoogleErrorDetail;
   warning?: string;
 }
 
@@ -711,18 +720,20 @@ async function recordFailure(
   state.nextAttemptAt = deps.now + retryDelayMs(state.backoffFailures, deps.random);
   state.lastError =
     status === 403
-      ? SYNC_FORBIDDEN_MESSAGE
+      ? forbiddenMessage(error)
       : status === 404
         ? SYNC_MISSING_MESSAGE
         : status === 400
           ? SYNC_REJECTED_MESSAGE
           : "";
   await writeSyncEngineState(state);
+  const detail = googleErrorDetail(error);
   return {
     status: "error",
     appended: 0,
     retryAt: state.nextAttemptAt,
     ...(state.lastError ? { error: state.lastError } : {}),
+    ...(detail ? { errorDetail: detail } : {}),
   };
 }
 
@@ -800,6 +811,8 @@ export async function backfillHistory(input: {
   retentionDays: number;
   timeZone: string;
   userDenylist?: string[];
+  /** The Cortex Memory sheet and folder. Visits to them are skipped. */
+  ownIds?: StoredMemoryIds;
   onProgress?: (progress: BackfillProgress) => Promise<void> | void;
 }): Promise<{ stored: number; skipped: number; total: number }> {
   const cutoff = retentionCutoffMs(input.now, input.retentionDays);
@@ -822,7 +835,9 @@ export async function backfillHistory(input: {
   let skipped = 0;
   for (const visit of inWindow) {
     const canonical = canonicalizeUrl(visit.url);
-    const denied = !canonical || syncDenyReason(visit.url, { userDomains: input.userDenylist }) != null;
+    const denied =
+      !canonical ||
+      syncDenyReason(visit.url, { userDomains: input.userDenylist, title: visit.title, ownIds: input.ownIds }) != null;
     const duplicate = canonical != null && seen.has(`${canonical}\t${visit.visitedAt}`);
     if (denied || duplicate || !canonical) {
       skipped += 1;
@@ -904,7 +919,13 @@ export async function enableAssistantSync(input: {
 > {
   const previous = await readSyncEngineState();
   const retentionDays = clampRetentionDays(input.retentionDays ?? previous.retentionDays);
-  const resolved = await resolveMemory(input.api, input.ids, input.choice);
+  const emptyTabs = Object.fromEntries(DATA_TABS.map((tab) => [tab, [[...TAB_HEADERS[tab]]]])) as Tabs;
+  const { about } = sizedAbout(emptyTabs, {
+    timeZone: input.timeZone,
+    syncedAt: syncedAtLabel(input.now, input.timeZone),
+    detail: previous.sheetDetail,
+  });
+  const resolved = await resolveMemory(input.api, input.ids, input.choice, about);
   if ("confirm" in resolved) {
     await writeSyncEngineState({ ...previous, lastError: statusMessage(resolved.confirm) });
     return resolved;
@@ -938,6 +959,7 @@ export async function enableAssistantSync(input: {
     retentionDays,
     timeZone: input.timeZone,
     userDenylist: previous.userDenylist,
+    ownIds: ids,
     onProgress: input.onProgress,
   });
   const flush = await runFlush({

@@ -390,9 +390,9 @@ export function protectTabRequest(sheetId: number): object {
 }
 
 /** Bold row 1 and freeze it on every tab. Dates stay text because writes use RAW. */
-export function headerFormatRequests(tabCount = SHEET_TABS.length): object[] {
+export function headerFormatRequests(sheetIds: readonly number[]): object[] {
   const requests: object[] = [];
-  for (let sheetId = 0; sheetId < tabCount; sheetId++) {
+  for (const sheetId of sheetIds) {
     requests.push({
       repeatCell: {
         range: { sheetId, startRowIndex: 0, endRowIndex: 1 },

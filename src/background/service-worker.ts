@@ -124,6 +124,7 @@ import { deletePerson, listPeople, upsertPerson } from "../lib/people";
 import { cacheProfilePhoto, getProfilePhoto, profilesWithPhotos } from "../lib/profile-photos";
 import { applyDwellReport, readingTimeFor, type DwellLedger } from "../lib/reading-time";
 import { FLUSH_LOG_KEY, appendFlushLog, flushLogEntry } from "../assistant-sync/flush-log";
+import { canonicalizeUrl } from "../assistant-sync/canonical-url";
 import { resolveEnteredUrl, toSuggestions } from "../lib/omnibox";
 import { saveHighlight } from "../lib/highlights";
 import { sanitizeExtraChunks, sanitizeImageInputs, type ImageInput } from "../lib/capture/extra-chunks";
@@ -691,12 +692,16 @@ async function captureAssistantSyncVisit(visit: {
   const state = await readSyncEngineState();
   if (!state.syncEnabled) return;
   const { tabId, ...rest } = visit;
-  let row: Record<string, unknown> = { ...rest, open: false };
+  const launch = await readAssistantSyncLaunch();
+  const ownIds = { fileId: launch.fileId, folderId: launch.folderId };
+  let row: Record<string, unknown> = { ...rest, ownIds, open: false };
   let previous: OpenVisit | undefined;
   if (tabId != null) {
+    // A hash or a dropped query key is the same page, not a new visit.
+    const page = canonicalizeUrl(visit.url) ?? visit.url;
     const id = await withOpenVisits((visits) => {
       const current = visits[tabId];
-      if (current && current.url === visit.url) {
+      if (current && (canonicalizeUrl(current.url) ?? current.url) === page) {
         current.seenAt = Date.now();
         return current.id;
       }
@@ -704,7 +709,7 @@ async function captureAssistantSyncVisit(visit: {
       visits[tabId] = { id: visit.id, url: visit.url, activeMs: null, maxScrollPct: null, seenAt: Date.now() };
       return visit.id;
     });
-    row = { ...rest, id, open: true };
+    row = { ...rest, ownIds, id, open: true };
   }
   await ensureOffscreen();
   await sendToOffscreen({ type: "CORTEX_ASSISTANT_SYNC_CAPTURE", visit: row });

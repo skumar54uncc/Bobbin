@@ -31,12 +31,24 @@ everyday profile and Drive stay untouched.
 ## Minute 0: enable
 
 1. Settings > Assistant Sync > Enable. Sign in, allow.
-2. Check Drive: one folder "Cortex Memory" with one spreadsheet "Cortex
-   Memory". Tabs in order: About, Visits, Content, Searches, People,
-   Companies, Daily.
+2. Check Drive: one spreadsheet "Cortex Memory", inside a folder "Cortex
+   Memory". If earlier attempts left Cortex Memory folders, the sheet is
+   in the oldest one and no new folder appears. Tabs in order: About,
+   Visits, Content, Searches, People, Companies, Daily. There is no
+   "Sheet1" tab.
 3. Flush log: one `enable` row, status `ready`. The Enable pass reads the
    sheet first, so reads is above 0 here. That is expected.
-4. Write down the time. About row 2 shows "Last synced" with that time.
+4. If Enable fails, Settings, Last error starts with "Google did not allow
+   Cortex to create or edit the sheet." for a 403, followed by Google's
+   message. In the console, print what failed:
+
+   ```js
+   (await chrome.storage.local.get("cortex_assist_flush_log")).cortex_assist_flush_log.at(-1).error_detail
+   ```
+
+   `call` is search, folder create, sheet create, batchUpdate, or read.
+   Send that object as it is.
+5. Write down the time. About row 2 shows "Last synced" with that time.
 
 ## Minutes 1 to 4: browse
 
@@ -49,6 +61,8 @@ Do each item in a new tab and close the tab when done.
 | Search Google twice | 2 Searches rows |
 | Open one LinkedIn profile for 20 seconds (if signed in) | 1 People row, no photo column, no photo URL |
 | Open a site in your block list, or a bank site | No row |
+| Open one.google.com or myaccount.google.com | No row (on the block list by default) |
+| Open the Cortex Memory sheet itself, and its Drive folder | No row |
 | Open one article and leave the tab open | No row yet |
 | Reopen one of the 5 articles, read 20 seconds, close it | Still one row for it, visit_count 2, dwell is the total |
 
@@ -70,7 +84,8 @@ The first activity flush comes 5 minutes after the Enable pass, plus 0 to
      and last_time. Search pages
      and the LinkedIn profile also get a Visits row, with the same id as
      their Searches or People row. The short read, the blocked site, and
-     the open tab are absent.
+     the open tab are absent. Article rows have 1 to 3 labels in topics
+     (a page that matches no topic stays blank).
    - Searches: 2. People: 1 if you opened a profile.
    - Content: empty. Excerpts are written only for pages read 5 minutes or more.
    - About row 2: "Last synced" moved to this flush.

@@ -31,10 +31,17 @@ What the page states, and what Cortex relies on:
 | Call | Kind | When |
 | --- | --- | --- |
 | `spreadsheets.batchUpdate` | 1 write | Each flush that has something to send. A flush with nothing to send makes no request. |
-| `spreadsheets.get` (sheet ids only) | 1 read | Verification only |
+| `spreadsheets.get` (sheet ids only) | 1 read | Verification, and once on Enable to find the new file's default tab |
 | `spreadsheets.values:batchGet` (columns A:B) | 1 read | Verification only |
-| `spreadsheets.create` | 1 write | Enable when no file exists |
+| `spreadsheets.batchUpdate` (setup) | 1 write | Enable when no file exists: tabs, headers, About, edit warnings |
+| Drive `files.list` | Drive API, not Sheets | Enable with no stored ids: finds the existing sheet, then the existing folder |
+| Drive `files.create` | Drive API, not Sheets | Enable when no file exists: the folder (only if none exists), then the spreadsheet |
 | Drive `files.get` x2 | Drive API, not Sheets | Verification only |
+
+Cortex never calls Sheets `spreadsheets.create`. With only the drive.file scope it returned
+`403 PERMISSION_DENIED` ("The caller does not have permission") in live testing on 2026-10-08, so the
+spreadsheet is created with Drive `files.create` (mimeType `application/vnd.google-apps.spreadsheet`,
+parents the Cortex Memory folder).
 
 Verification runs on Enable, on the first flush after a browser start when the last check is 24 hours old or
 more, and after a flush whose outcome is unknown (a 5xx, a dropped connection, or a crash mid-flush).
