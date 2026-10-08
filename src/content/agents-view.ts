@@ -1,5 +1,5 @@
 /**
- * Connect AI Agents tab: how-to + one shared copyable prompt.
+ * Connect AI Agents: pick an assistant, copy its prompt, open Assist Sync.
  */
 import {
   AGENT_PROMPT_TEMPLATES,
@@ -10,23 +10,20 @@ import {
   SHARED_AGENT_PROMPT,
   type AgentPromptId,
 } from "../shared/agent-prompts";
+import { mascotHtml } from "./mascot";
 
 export interface AgentsViewDeps {
   openAssistSyncSettings: () => void;
   announce?: (msg: string) => void;
 }
 
-const AGENTS_CSS = `.cortex-agents-host{flex:1;min-height:0;display:flex;flex-direction:column}.cortex-agents{flex:1;min-height:0;display:flex;flex-direction:column}.cortex-agents-scroll{flex:1;min-height:0;overflow-y:auto;padding:16px 20px 24px;display:flex;flex-direction:column;gap:16px}.cortex-agents-section{display:flex;flex-direction:column;gap:8px}.cortex-agents-title{margin:0;font-size:18px;font-weight:700;line-height:1.3;color:var(--cx-text)}.cortex-agents-h{margin:0;font-size:15px;font-weight:600;color:var(--cx-text)}.cortex-agents-lead{margin:0;font-size:15px;line-height:1.55;color:var(--cx-text);max-width:62ch}.cortex-agents-actions,.cortex-agents-pills{display:flex;flex-wrap:wrap;gap:8px}.cortex-agents-primary,.cortex-agents-copy,.cortex-agents-pill{font:inherit;font-size:13px;font-weight:600;border-radius:var(--cx-radius-sm);cursor:pointer;min-height:34px;padding:0 12px}.cortex-agents-primary{background:var(--cx-accent);color:#fffef9;border:0}.cortex-agents-copy,.cortex-agents-pill{background:var(--cx-bg);color:var(--cx-text);border:1px solid var(--cx-border)}.cortex-agents-pill.is-active{border-color:var(--cx-accent);background:var(--cx-accent-soft)}.cortex-agents-primary:focus-visible,.cortex-agents-copy:focus-visible,.cortex-agents-pill:focus-visible{outline:2px solid var(--cx-accent);outline-offset:2px}.cortex-agents-steps,.cortex-agents-rules{margin:0;padding-left:1.2rem;font-size:15px;line-height:1.55;max-width:62ch}.cortex-agents-steps li,.cortex-agents-rules li{margin:0 0 5px}.cortex-agents-prompt{margin:0;padding:10px 12px;border-radius:var(--cx-radius-sm);background:var(--cx-bg);border:1px solid var(--cx-border);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:150px;overflow:auto;user-select:text;-webkit-user-select:text}.cortex-agents-copy-status{margin:0;font-size:12px}`;
-
-function ensureAgentsStyles(container: HTMLElement): void {
-  const root = container.getRootNode();
-  const scope: ParentNode = root instanceof ShadowRoot ? root : document.documentElement;
-  if (scope.querySelector("style[data-cortex-agents-css]")) return;
-  const style = document.createElement("style");
-  style.setAttribute("data-cortex-agents-css", "");
-  style.textContent = AGENTS_CSS;
-  scope.appendChild(style);
-}
+const AGENT_NOTE: Record<AgentPromptId, string> = {
+  claude: "Drive connector",
+  chatgpt: "Connected Drive",
+  gemini: "Drive extension",
+  cursor: "Sheet in the repo chat",
+  generic: "Any assistant",
+};
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -65,91 +62,106 @@ function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 export function renderAgentsView(container: HTMLElement, deps: AgentsViewDeps): void {
-  ensureAgentsStyles(container);
   container.replaceChildren();
 
   const root = el("div", "cortex-agents");
   const scroll = el("div", "cortex-agents-scroll");
 
-  const intro = el("section", "cortex-agents-section");
-  intro.appendChild(el("h2", "cortex-agents-title", AGENTS_INTRO_TITLE));
-  intro.appendChild(el("p", "cortex-agents-lead", AGENTS_INTRO_BODY));
+  const hero = el("div", "cortex-agents-hero");
+  const mascotHost = el("div", "cortex-agents-mascot");
+  mascotHost.innerHTML = mascotHtml("wave", 96);
+  const intro = el("div");
+  intro.append(el("h2", "cortex-agents-title", AGENTS_INTRO_TITLE), el("p", "cortex-agents-lead", AGENTS_INTRO_BODY));
   const enableBtn = el("button", "cortex-agents-primary") as HTMLButtonElement;
   enableBtn.type = "button";
-  enableBtn.textContent = "Open Assist Sync settings";
+  enableBtn.textContent = "Open Assistant Sync";
   enableBtn.setAttribute("data-cortex-open-assist-sync", "1");
   enableBtn.addEventListener("click", () => deps.openAssistSyncSettings());
-  const actions = el("div", "cortex-agents-actions");
-  actions.appendChild(enableBtn);
-  intro.appendChild(actions);
-  scroll.appendChild(intro);
+  hero.append(mascotHost, intro, enableBtn);
+  if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+    void chrome.runtime.sendMessage({ type: "CORTEX_SYNC_LABEL" }, (resp?: { phase?: string }) => {
+      if (chrome.runtime.lastError) return;
+      const phase = resp?.phase;
+      if (phase !== "wave" && phase !== "syncing" && phase !== "connected" && phase !== "lost") return;
+      mascotHost.innerHTML = mascotHtml(phase, 96);
+      if (phase === "lost") enableBtn.textContent = "Fix Assistant Sync";
+    });
+  }
 
-  const stepsSec = el("section", "cortex-agents-section");
-  stepsSec.appendChild(el("h3", "cortex-agents-h", "Steps"));
-  const ol = el("ol", "cortex-agents-steps");
-  for (const step of AGENTS_STEPS) ol.appendChild(el("li", undefined, step));
-  stepsSec.appendChild(ol);
-  scroll.appendChild(stepsSec);
-
-  const rulesSec = el("section", "cortex-agents-section");
-  rulesSec.appendChild(el("h3", "cortex-agents-h", "How agents should query"));
-  const ul = el("ul", "cortex-agents-rules");
-  for (const rule of AGENTS_SHEET_RULES) ul.appendChild(el("li", undefined, rule));
-  rulesSec.appendChild(ul);
-  scroll.appendChild(rulesSec);
-
-  const promptSec = el("section", "cortex-agents-section");
-  promptSec.appendChild(el("h3", "cortex-agents-h", "Prompt template"));
-  const howto = el("p", "cortex-agents-lead cortex-muted");
-  const pills = el("div", "cortex-agents-pills");
-  pills.setAttribute("role", "group");
-  pills.setAttribute("aria-label", "Assistant");
-  let active: AgentPromptId = "claude";
+  const layout = el("div", "cortex-agents-layout");
+  const rail = el("div", "cortex-agents-rail");
+  rail.setAttribute("role", "tablist");
+  rail.setAttribute("aria-label", "Assistant");
+  const stage = el("section", "cortex-agents-stage");
+  const stageHead = el("div", "cortex-agents-stage-head");
+  const howto = el("p", "cortex-agents-howto");
+  const copyBtn = el("button", "cortex-agents-copy") as HTMLButtonElement;
+  copyBtn.type = "button";
+  copyBtn.textContent = "Copy prompt";
+  stageHead.append(howto, copyBtn);
   const pre = el("pre", "cortex-agents-prompt");
   pre.setAttribute("tabindex", "0");
+  const status = el("p", "cortex-agents-copy-status");
+  status.setAttribute("role", "status");
+  status.hidden = true;
+  stage.append(stageHead, pre, status);
 
+  let active: AgentPromptId = "claude";
+  const cards = new Map<AgentPromptId, HTMLButtonElement>();
   const apply = (id: AgentPromptId): void => {
     active = id;
     const t = AGENT_PROMPT_TEMPLATES.find((x) => x.id === id)!;
     howto.textContent = t.howto;
     pre.textContent = t.prompt;
-    for (const btn of pills.querySelectorAll("button")) {
-      btn.classList.toggle("is-active", btn.getAttribute("data-agent") === id);
+    for (const [key, btn] of cards) {
+      const on = key === id;
+      btn.classList.toggle("is-active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
     }
   };
 
   for (const t of AGENT_PROMPT_TEMPLATES) {
-    const btn = el("button", "cortex-agents-pill") as HTMLButtonElement;
+    const btn = el("button", "cortex-agents-card") as HTMLButtonElement;
     btn.type = "button";
-    btn.textContent = t.label;
+    btn.setAttribute("role", "tab");
     btn.setAttribute("data-agent", t.id);
+    btn.append(el("span", "cortex-agents-card-name", t.label), el("span", "cortex-agents-card-note", AGENT_NOTE[t.id]));
     btn.addEventListener("click", () => apply(t.id));
-    pills.appendChild(btn);
+    cards.set(t.id, btn);
+    rail.appendChild(btn);
   }
 
-  const copyRow = el("div", "cortex-agents-actions");
-  const copyBtn = el("button", "cortex-agents-copy") as HTMLButtonElement;
-  copyBtn.type = "button";
-  copyBtn.className = "cortex-agents-copy";
-  copyBtn.textContent = "Copy prompt";
-  const status = el("p", "cortex-agents-copy-status cortex-muted");
-  status.setAttribute("role", "status");
-  status.hidden = true;
   copyBtn.addEventListener("click", () => {
     const text = pre.textContent || SHARED_AGENT_PROMPT;
     void copyText(text).then((ok) => {
       status.hidden = false;
-      status.textContent = ok ? "Copied to clipboard." : "Could not copy. Select the text manually.";
+      status.textContent = ok ? "Copied." : "Could not copy. Select the prompt and copy it yourself.";
       deps.announce?.(ok ? "Prompt copied." : "Copy failed.");
       window.setTimeout(() => {
         status.hidden = true;
       }, 2000);
     });
   });
-  copyRow.append(copyBtn, status);
 
-  promptSec.append(howto, pills, pre, copyRow);
-  scroll.appendChild(promptSec);
+  layout.append(rail, stage);
+
+  const more = el("details", "cortex-agents-more");
+  const summary = el("summary", undefined, "Setup and sheet rules");
+  const moreBody = el("div", "cortex-agents-more-body");
+  const stepsCol = el("div");
+  stepsCol.appendChild(el("h3", "cortex-agents-h", "Setup"));
+  const ol = el("ol", "cortex-agents-steps");
+  for (const step of AGENTS_STEPS) ol.appendChild(el("li", undefined, step));
+  stepsCol.appendChild(ol);
+  const rulesCol = el("div");
+  rulesCol.appendChild(el("h3", "cortex-agents-h", "What the prompt already says"));
+  const ul = el("ul", "cortex-agents-rules");
+  for (const rule of AGENTS_SHEET_RULES) ul.appendChild(el("li", undefined, rule));
+  rulesCol.appendChild(ul);
+  moreBody.append(stepsCol, rulesCol);
+  more.append(summary, moreBody);
+
+  scroll.append(hero, layout, more);
   root.appendChild(scroll);
   container.appendChild(root);
   apply(active);

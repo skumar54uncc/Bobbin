@@ -23,8 +23,16 @@ export function looksSensitiveHostname(hostname: string, pathname: string): bool
   if (h.includes("accounts.google") && p.includes("signin")) return true;
   if (h.endsWith(".gov") || h.includes(".mil")) return true;
 
+  // A public LinkedIn profile or company page is not a bank login, even when
+  // the slug contains "bank" (linkedin.com/company/fifth-third-bank/).
+  const publicLinkedIn =
+    (h === "linkedin.com" || h.endsWith(".linkedin.com")) &&
+    /^\/(in|company|school|showcase)\//.test(p);
+
   for (const x of DEFAULT_SENSITIVE_DOMAIN_HINTS) {
-    if (h.includes(x) || p.includes(x)) return true;
+    if (h.includes(x)) return true;
+    if (publicLinkedIn) continue;
+    if (p.includes(x)) return true;
   }
 
   return false;

@@ -39,6 +39,16 @@ export function applyManagedLockout(doc: Document, eff: EffectiveSettings): void
       key.disabled = true;
       key.placeholder = "Cloud chat is disabled by your organization";
     }
+    for (const id of [
+      "cx-opt-cloud-provider",
+      "cx-opt-cloud-model",
+      "cx-opt-cloud-model-pick",
+      "cx-opt-cloud-models-load",
+      "cx-opt-cloud-base",
+    ]) {
+      const field = doc.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
+      if (field) field.disabled = true;
+    }
   }
   if (locked.has("chatMode")) {
     const cloudOnly = doc.querySelector<HTMLInputElement>(
@@ -124,6 +134,11 @@ export function stripLockedFields(
   const out: Partial<CortexUserSettings> = { ...partial };
   for (const f of ["cloudChatEnabled", "geminiApiKey", "indexingPaused", "retentionDays", "allowlistOnly", "allowlist", "imageDescriptionsEnabled"] as const) {
     if (locked.has(f)) delete out[f];
+  }
+  if (locked.has("geminiApiKey")) {
+    delete out.cloudProvider;
+    delete out.cloudModel;
+    delete out.cloudBaseUrl;
   }
   if (locked.has("chatMode") && out.chatMode !== undefined) {
     // The form shows the forced fallback (cloud-only -> on-device-only); only a

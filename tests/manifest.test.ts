@@ -39,7 +39,8 @@ describe("manifest.json", () => {
     expect(manifest.web_accessible_resources).toHaveLength(1);
     const [entry] = manifest.web_accessible_resources;
     expect(entry.use_dynamic_url).toBe(true);
-    expect([...entry.resources].sort()).toEqual(["fonts/*.woff2", "icons/icon-48.png"]);
+    // The overlay links mascot.css and draws mascot/*.webp inside its shadow root on the page.
+    expect([...entry.resources].sort()).toEqual(["fonts/*.woff2", "icons/icon-48.png", "mascot.css", "mascot/*.webp"]);
     expect(entry.matches).toEqual(["http://*/*", "https://*/*"]);
   });
 

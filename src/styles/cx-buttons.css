@@ -11,19 +11,19 @@
   gap: 8px;
   position: relative;
   min-height: 36px;
-  padding: 0 16px;
+  padding: 0 18px;
   font-family: inherit;
-  font: var(--cx-ts-small, 500 13px/1.45 system-ui, sans-serif);
+  font: var(--cx-ts-small, 600 14px/1.45 "Nunito", sans-serif);
   font-weight: 600;
   line-height: 1;
-  border-radius: 8px;
+  border-radius: var(--radius-pill, 999px);
   cursor: pointer;
   border: 1px solid transparent;
   transition:
     background 0.15s ease,
     border-color 0.15s ease,
     opacity 0.15s ease,
-    transform 80ms ease-out;
+    box-shadow 80ms ease-out;
 }
 
 .cx-btn[hidden] {
@@ -31,7 +31,7 @@
 }
 
 .cx-btn:active:not(:disabled) {
-  transform: translateY(1px);
+  box-shadow: var(--shadow-pressed, inset 0 2px 4px rgba(46, 35, 29, 0.18));
 }
 
 .cx-btn:disabled {
@@ -41,25 +41,39 @@
 }
 
 .cx-btn:focus-visible {
-  outline: 2px solid var(--cx-focus, var(--focus-ring, rgba(199, 42, 9, 0.45)));
+  outline: 2px solid var(--felt, var(--cx-focus, #cd5f3e));
   outline-offset: 2px;
 }
 
 .cx-btn-primary {
-  border-color: var(--cx-accent, var(--accent, #a82207));
-  background: var(--cx-accent, var(--accent, #a82207));
-  color: #fffef9;
+  border-color: transparent;
+  background: var(--brick, var(--cx-accent, #9c3b21));
+  color: #fff;
+  font-weight: 700;
+}
+
+.cx-btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 1.5px dashed color-mix(in srgb, var(--thread, #fff9ef) 40%, transparent);
+  border-radius: var(--radius-pill, 999px);
+  pointer-events: none;
 }
 
 .cx-btn-primary:hover:not(:disabled) {
-  background: var(--cx-accent-hover, var(--accent-hover, #8a1c05));
-  border-color: var(--cx-accent-hover, var(--accent-hover, #8a1c05));
+  background: var(--cx-accent-hover, #7f3019);
+  border-color: transparent;
+}
+
+.cx-btn-primary:active:not(:disabled) {
+  box-shadow: var(--shadow-pressed, inset 0 2px 4px rgba(46, 35, 29, 0.18));
 }
 
 .cx-btn-secondary {
-  border-color: var(--cx-border, var(--border-strong, rgba(28, 25, 23, 0.14)));
-  background: var(--cx-surface, var(--surface, #f0eee9));
-  color: var(--cx-text, var(--text, #1c1917));
+  border-color: var(--stitch, var(--cx-border, rgba(156, 59, 33, 0.35)));
+  background: var(--oat, var(--cx-surface, #efe4d2));
+  color: var(--ink, var(--cx-text, #2e231d));
 }
 
 .cx-btn-secondary:hover:not(:disabled) {
@@ -90,7 +104,7 @@
 .cx-btn-sm {
   min-height: 28px;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .cx-btn-link {

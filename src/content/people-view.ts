@@ -2,6 +2,7 @@
  * People tab in the overlay (Phase 5.1). DOM APIs only: names and headlines
  * come from LinkedIn pages and are rendered with textContent.
  */
+import { mascotHtml } from "./mascot";
 export interface PersonRow {
   id: number;
   kind: "person" | "company";
@@ -25,8 +26,9 @@ export interface PersonRow {
   connectionCount?: number;
   industry?: string;
   companySize?: string;
-  /** LinkedIn CDN photo, when a later visit captured one. */
-  photoUrl?: string;
+  tagline?: string;
+  /** A photo is saved on this device for this profile and photos are on. */
+  hasPhoto?: boolean;
 }
 
 function norm(s: string): string {
@@ -176,7 +178,30 @@ export function personCardPlace(p: PersonRow): string {
  * whole. Page chrome (degree chips, Contact info, buttons) is removed, and
  * a clause that only repeats an earlier one is kept once, at its longest.
  */
+/** Card label. A long surname keeps its start and an ellipsis, so one letter is not left on its own line. */
+export function personCardName(name: string): string {
+  const clean = name.replace(/\s+,/g, ",").replace(/\s+/g, " ").trim();
+  const parts = clean.split(" ").filter(Boolean);
+  if (parts.length <= 1) return clean.length > 22 ? `${clean.slice(0, 21)}…` : clean;
+  const first = parts[0]!;
+  const rest = parts.slice(1).join(" ");
+  if (rest.length <= 16 && `${first} ${rest}`.length <= 32) return `${first} ${rest}`;
+  return `${first} ${rest.slice(0, 15)}…`;
+}
+
+function chromeStat(line: string): boolean {
+  return (
+    /^(show all|see all|show more|see more|follow|following|message|connect|more)$/i.test(line) ||
+    /^\d+([.,]\d+)?%?$/.test(line)
+  );
+}
+
 export function personHeadlineLine(p: PersonRow): string {
+  if (p.kind === "company") {
+    const line = String(p.tagline || p.headline || "").replace(/\s+/g, " ").trim();
+    if (line && !isLinkedInChromeDump(line) && !chromeStat(line) && !/^(of|at|in)\b/i.test(line)) return line;
+    return "";
+  }
   const headline = String(p.headline ?? "").replace(/\s+/g, " ").trim();
   const summary = String(p.summary ?? "").replace(/\s+/g, " ").trim();
   const headlineOk = !!headline && !isLinkedInChromeDump(headline);
@@ -187,7 +212,11 @@ export function personHeadlineLine(p: PersonRow): string {
   } else if (headlineOk) source = headline;
   else if (summaryOk) source = summary;
   else source = `${headline} ${summary}`.trim();
-  const tidy = scrubProfileNoise(source, p.name);
+  const tidy = scrubProfileNoise(source, p.name).replace(
+    /,\s*based in\s+([^,.]+)/gi,
+    (all, place: string, offset: number, whole: string) =>
+      whole.slice(0, offset).toLowerCase().includes(String(place).trim().toLowerCase()) ? "" : all
+  );
   const parts = tidy.split(/\s*·\s*|\.\s+/).map((s) => s.trim()).filter(Boolean);
   const kept: string[] = [];
   for (const part of parts) {
@@ -207,36 +236,97 @@ export function personHeadlineLine(p: PersonRow): string {
 }
 
 /**
- * Larger LinkedIn renditions of the same photo, then the URL we stored.
- * The card tries them in order and keeps the first one that loads.
+ * Unsharp mask with a threshold. Real edges differ from their blurred copy by
+ * more than `threshold`; JPEG noise in skin and backdrops does not, so it stays
+ * smooth. Values clamp in the array. Alpha is left alone.
  */
-export function personPhotoCandidates(raw: string | undefined): string[] {
-  const accepted = acceptedPhotoUrl(raw);
-  if (!accepted) return [];
-  const sized = [800, 400, 200].map((n) =>
-    accepted.replace(/(?:shrink|scale)_\d+_\d+/gi, `shrink_${n}_${n}`)
-  );
-  const out: string[] = [];
-  for (const href of [...sized, accepted]) {
-    if (!out.includes(href)) out.push(href);
+export function unsharpMask(data: Uint8ClampedArray, blurred: Uint8ClampedArray, amount: number, threshold: number): void {
+  for (let i = 0; i < data.length; i += 4) {
+    for (let c = i; c < i + 3; c++) {
+      const diff = data[c]! - blurred[c]!;
+      if (diff > threshold || diff < -threshold) data[c] = data[c]! + diff * amount;
+    }
   }
-  return out;
 }
 
-/** https photo on LinkedIn's image host, or null. The sharpest rendition to try first. */
-export function personPhotoUrl(raw: string | undefined): string | null {
-  return personPhotoCandidates(raw)[0] ?? null;
+/** The copy saved on this device when the profile was open. Never a request to LinkedIn. */
+function savedPhoto(profileUrl: string): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const runtime = typeof chrome !== "undefined" ? chrome.runtime : undefined;
+    if (!runtime?.sendMessage) {
+      resolve(null);
+      return;
+    }
+    runtime.sendMessage({ type: "CORTEX_PHOTO_GET", profileUrl }, (res: { ok?: boolean; mime?: string; b64?: unknown } | undefined) => {
+      if (runtime.lastError || !res?.ok || typeof res.b64 !== "string" || res.b64.length < 32) {
+        resolve(null);
+        return;
+      }
+      try {
+        const bin = atob(res.b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+        const mime = res.mime && res.mime.startsWith("image/") ? res.mime : "image/jpeg";
+        resolve(new Blob([bytes], { type: mime }));
+      } catch {
+        resolve(null);
+      }
+    });
+  });
 }
 
-/** The stored photo URL, unchanged, when it is safe to request. */
-function acceptedPhotoUrl(raw: string | undefined): string | null {
+/** The photo's bytes, enlarged and sharpened on this device when the canvas allows it. */
+export async function clearPhoto(profileUrl: string, logo: boolean): Promise<Blob | null> {
+  const blob = await savedPhoto(profileUrl);
+  if (!blob) return null;
+  return (await sharpenBlob(blob, logo)) ?? blob;
+}
+
+function blobAsDataUrl(blob: Blob): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function sharpenBlob(blob: Blob, logo: boolean): Promise<Blob | null> {
   try {
-    const u = new URL(String(raw ?? "").trim());
-    if (u.protocol !== "https:") return null;
-    const host = u.hostname.toLowerCase();
-    if (host !== "media.licdn.com" && host !== "static.licdn.com" && host !== "avatars.githubusercontent.com") return null;
-    if (/ghost-person|ghost-company/i.test(u.pathname)) return null;
-    return u.href;
+    const bitmap = await createImageBitmap(blob);
+    const longest = Math.max(bitmap.width, bitmap.height);
+    // Sharpen at the card's pixel size. A later browser downscale would hide the mask.
+    const scale = logo ? 1 : Math.min(4, 720 / longest);
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      bitmap.close();
+      return null;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const frame = ctx.getImageData(0, 0, w, h);
+    const soft = document.createElement("canvas");
+    soft.width = w;
+    soft.height = h;
+    const sctx = soft.getContext("2d", { willReadFrequently: true });
+    if (!sctx) {
+      bitmap.close();
+      return null;
+    }
+    // Blur radius follows the enlargement, so the mask lands on the edges the upscale softened.
+    sctx.filter = `blur(${Math.max(1, Math.min(4, scale * 1.1)).toFixed(2)}px)`;
+    sctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    const blurred = sctx.getImageData(0, 0, w, h).data;
+    unsharpMask(frame.data, blurred, logo ? 0.35 : longest < 420 ? 1.5 : 0.8, logo ? 10 : 4);
+    ctx.putImageData(frame, 0, 0);
+    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
   } catch {
     return null;
   }
@@ -287,23 +377,7 @@ function httpUrl(u: string): string | null {
   }
 }
 
-/** A light unsharp mask. It runs in the card, so a small photo stays crisp. */
-function sharpenFilter(): SVGSVGElement {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "cortex-sharpen");
-  svg.setAttribute("aria-hidden", "true");
-  const filter = document.createElementNS("http://www.w3.org/2000/svg", "filter");
-  filter.setAttribute("id", "cortex-photo-sharpen");
-  const conv = document.createElementNS("http://www.w3.org/2000/svg", "feConvolveMatrix");
-  conv.setAttribute("order", "3");
-  conv.setAttribute("preserveAlpha", "true");
-  conv.setAttribute("kernelMatrix", "0 -0.35 0 -0.35 2.4 -0.35 0 -0.35 0");
-  filter.appendChild(conv);
-  svg.appendChild(filter);
-  return svg;
-}
-
-export async function renderPeopleView(container: HTMLElement, deps: PeopleViewDeps): Promise<void> {
+export async function renderPeopleView(container: HTMLElement, deps: PeopleViewDeps): Promise<() => void> {
   container.replaceChildren();
   const wrap = document.createElement("div");
   wrap.className = "cortex-people";
@@ -319,24 +393,45 @@ export async function renderPeopleView(container: HTMLElement, deps: PeopleViewD
   list.className = "cortex-people-list";
   list.setAttribute("aria-label", "People you viewed");
 
-  wrap.append(sharpenFilter(), input, list);
+  wrap.append(input, list);
   container.appendChild(wrap);
 
+  const cleared: string[] = [];
+  let drawGen = 0;
+  const dropCleared = (): void => {
+    for (const u of cleared) URL.revokeObjectURL(u);
+    cleared.length = 0;
+  };
   const draw = (rows: PersonRow[]): void => {
+    drawGen += 1;
+    const generation = drawGen;
+    dropCleared();
     list.replaceChildren();
     if (!rows.length) {
       const empty = document.createElement("li");
       empty.className = "cortex-people-empty cortex-muted";
-      empty.textContent = input.value.trim()
-        ? "Nobody matches that filter."
-        : "People appear here after you open a profile on LinkedIn.";
+      if (input.value.trim()) {
+        empty.textContent = "Nobody matches that filter.";
+      } else {
+        empty.insertAdjacentHTML("beforeend", mascotHtml("sleepy", 96));
+        const note = document.createElement("p");
+        note.textContent = "People memory saves profiles and company pages you open on LinkedIn.";
+        const setting = document.createElement("button");
+        setting.type = "button";
+        setting.className = "cx-m-action";
+        setting.setAttribute("data-cortex-open-options", "");
+        setting.setAttribute("data-options-section", "cx-sec-capture");
+        setting.textContent = "People memory setting";
+        empty.append(note, setting);
+      }
       list.appendChild(empty);
       return;
     }
     for (const p of rows) {
       const li = document.createElement("li");
       li.className = input.value.trim() ? "cortex-person is-match" : "cortex-person";
-      const displayName = p.name.replace(/\s+,/g, ",").replace(/\s+/g, " ").trim();
+      const fullName = p.name.replace(/\s+,/g, ",").replace(/\s+/g, " ").trim();
+      const displayName = personCardName(fullName);
       const href = httpUrl(p.profileUrl);
 
       const scene = document.createElement("div");
@@ -350,29 +445,47 @@ export async function renderPeopleView(container: HTMLElement, deps: PeopleViewD
       turn.type = "button";
       turn.className = "cortex-person-turn";
       turn.setAttribute("aria-expanded", "false");
-      turn.setAttribute("aria-label", `Show details for ${displayName}`);
+      turn.setAttribute("aria-label", `Show details for ${fullName}`);
 
       const mark = document.createElement("span");
       mark.className = "cortex-person-mark";
       mark.setAttribute("aria-hidden", "true");
       mark.textContent = personInitials(displayName);
-      const photos = personPhotoCandidates(p.photoUrl);
-      if (photos.length) {
+      if (p.hasPhoto) {
         const img = document.createElement("img");
-        img.className = "cortex-person-photo";
+        img.className = p.kind === "company" ? "cortex-person-photo is-logo" : "cortex-person-photo";
         img.alt = "";
-        img.referrerPolicy = "no-referrer";
-        let photoTry = 0;
-        img.src = photos[0]!;
-        img.addEventListener("error", () => {
-          photoTry += 1;
-          const next = photos[photoTry];
-          if (next) {
-            img.src = next;
-            return;
-          }
+        // blob first, then data: for pages whose policy blocks blob: images.
+        let stage: "blob" | "data" | "done" = "blob";
+        let copy: Blob | null = null;
+        const live = (): boolean => generation === drawGen;
+        const drop = (): void => {
+          stage = "done";
           img.remove();
           front.classList.remove("has-photo");
+        };
+        img.addEventListener("error", () => {
+          if (stage === "blob" && copy) {
+            stage = "data";
+            void blobAsDataUrl(copy).then((url) => {
+              if (!live()) return;
+              if (url) img.src = url;
+              else drop();
+            });
+            return;
+          }
+          drop();
+        });
+        void clearPhoto(p.profileUrl, p.kind === "company").then((blob) => {
+          if (!live() || !img.isConnected) return;
+          if (!blob) {
+            drop();
+            return;
+          }
+          copy = blob;
+          const url = URL.createObjectURL(blob);
+          cleared.push(url);
+          img.src = url;
         });
         front.classList.add("has-photo");
         front.appendChild(img);
@@ -382,6 +495,7 @@ export async function renderPeopleView(container: HTMLElement, deps: PeopleViewD
       const name = document.createElement(href ? "a" : "span") as HTMLAnchorElement | HTMLSpanElement;
       name.className = "cortex-person-name";
       name.textContent = displayName;
+      name.title = fullName;
       if (href && name instanceof HTMLAnchorElement) {
         name.href = href;
         name.target = "_blank";
@@ -393,11 +507,15 @@ export async function renderPeopleView(container: HTMLElement, deps: PeopleViewD
       const back = document.createElement("div");
       back.className = "cortex-person-face cortex-person-back";
       back.setAttribute("aria-hidden", "true");
+      const backName = document.createElement("p");
+      backName.className = "cortex-person-back-name";
+      backName.textContent = displayName;
+      backName.title = fullName;
       const headline = document.createElement("button");
       headline.type = "button";
       headline.className = "cortex-person-headline";
       headline.tabIndex = -1;
-      headline.setAttribute("aria-label", `Show photo for ${displayName}`);
+      headline.setAttribute("aria-label", `Show photo for ${fullName}`);
       headline.textContent = personHeadlineLine(p) || "No headline saved for this profile.";
       const meta = document.createElement("div");
       meta.className = "cortex-person-meta";
@@ -441,7 +559,7 @@ export async function renderPeopleView(container: HTMLElement, deps: PeopleViewD
       });
       if (profile) backActions.appendChild(profile);
       backActions.appendChild(del);
-      back.append(headline, meta, backActions);
+      back.append(backName, headline, meta, backActions);
 
       const setFlipped = (on: boolean): void => {
         li.classList.toggle("is-flipped", on);
@@ -475,12 +593,30 @@ export async function renderPeopleView(container: HTMLElement, deps: PeopleViewD
   };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let alive = true;
+  const load = (): void => {
+    const q = input.value.trim();
+    void deps.list(q).then((rows) => {
+      if (alive) draw(rows);
+    });
+  };
   input.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      void deps.list(input.value.trim()).then(draw);
-    }, 120);
+    timer = setTimeout(load, 120);
   });
 
+  const onStore = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
+    if (area === "session" && changes.cortexPeopleTick) load();
+  };
+  const storage = typeof chrome !== "undefined" ? chrome.storage?.onChanged : undefined;
+  storage?.addListener(onStore);
+
   draw(await deps.list(""));
+  return () => {
+    alive = false;
+    drawGen += 1;
+    dropCleared();
+    clearTimeout(timer);
+    storage?.removeListener(onStore);
+  };
 }

@@ -73,7 +73,7 @@ function isLinkedInHost(host: string): boolean {
   return h === "linkedin.com" || h.endsWith(".linkedin.com");
 }
 
-/** https://www.linkedin.com/in/<slug>/ or /company/<slug>/, else null. */
+/** https://www.linkedin.com/in/<slug>/ or a company, school, or showcase page, else null. */
 export function canonicalLinkedInUrl(url: string): string | null {
   let u: URL;
   try {
@@ -83,11 +83,20 @@ export function canonicalLinkedInUrl(url: string): string | null {
   }
   if (u.protocol !== "https:" && u.protocol !== "http:") return null;
   if (!isLinkedInHost(u.hostname)) return null;
-  const m = u.pathname.match(/^\/(in|company)\/([^/?#]+)/i);
+  const m = u.pathname.match(/^\/(in|company|school|showcase)\/([^/?#]+)/i);
   if (!m) return null;
   const slug = decodeURIComponent(m[2]!).toLowerCase();
   if (!/^[\p{L}\p{N}._%-]{1,100}$/u.test(slug)) return null;
   return `https://www.linkedin.com/${m[1]!.toLowerCase()}/${encodeURIComponent(slug).toLowerCase()}/`;
+}
+
+/**
+ * True when both URLs are the same LinkedIn profile or company. Tracking
+ * queries and /overlay/ paths do not make them different people.
+ */
+export function sameLinkedInProfile(a: string, b: string): boolean {
+  const left = canonicalLinkedInUrl(a);
+  return left != null && left === canonicalLinkedInUrl(b);
 }
 
 /* ------------------------------------------------------------------ names */
@@ -226,12 +235,17 @@ function titleCasePart(part: string): string {
 export function nameFromProfileUrl(url: string): string {
   const canonical = canonicalLinkedInUrl(String(url ?? ""));
   if (!canonical) return "";
+  const company = /\/(company|school|showcase)\//i.test(canonical);
   const slug = decodeURIComponent(canonical.split("/").filter(Boolean).pop() ?? "");
   const parts = slug.split(/[-._%+\s]+/).filter(Boolean);
-  // Drop the trailing id segments LinkedIn appends to keep slugs unique.
-  while (parts.length > 1 && isIdPart(parts[parts.length - 1]!)) parts.pop();
-  if (!parts.length || parts.length > MAX_NAME_PARTS) return "";
-  if (parts.some((p) => isIdPart(p) || !/\p{L}/u.test(p))) return "";
+  if (!company) {
+    // Drop the trailing id segments LinkedIn appends to keep profile slugs unique.
+    while (parts.length > 1 && isIdPart(parts[parts.length - 1]!)) parts.pop();
+    if (!parts.length || parts.length > MAX_NAME_PARTS) return "";
+    if (parts.some((p) => isIdPart(p) || !/\p{L}/u.test(p))) return "";
+  } else if (!parts.length || parts.length > 8 || !parts.some((p) => /\p{L}/u.test(p))) {
+    return "";
+  }
   const name = parts.map(titleCasePart).join(" ");
   if (name.length < 2 || isJunkProfileName(name)) return "";
   return name;
@@ -373,7 +387,10 @@ function titleParts(doc: Document): { name: string; rest: string } {
  */
 function isChromeElement(el: Element): boolean {
   const tag = el.tagName.toLowerCase();
-  if (tag === "nav" || tag === "header" || tag === "footer" || tag === "aside") return true;
+  if (tag === "nav" || tag === "footer" || tag === "aside") return true;
+  // The profile card has its own header. Only the site header, outside the
+  // profile column, is chrome.
+  if (tag === "header" && !el.closest("main, [role='main']")) return true;
   const role = (el.getAttribute("role") ?? "").toLowerCase();
   if (role === "navigation" || role === "banner" || role === "contentinfo" || role === "dialog") return true;
   const cls = typeof el.className === "string" ? el.className : "";
@@ -401,20 +418,45 @@ function ogTitleName(doc: Document): string {
  * Every heading that could be the profile subject's name, best first and with
  * the page chrome left out.
  */
+/** A post on a company home tab. Its heading is not the company name. */
+function inFeedPost(el: Element): boolean {
+  return Boolean(
+    el.closest("article, .feed-shared-update-v2, .update-components-actor, [data-urn*='activity'], [data-id*='urn:li:activity']")
+  );
+}
+
 function headingCandidates(main: Element, isCompany: boolean): string[] {
   const selectors = isCompany
-    ? [".org-top-card-summary__title", ".org-top-card h1", "h1"]
-    : [".pv-top-card h1", ".pv-text-details__left-panel h1", "h1.text-heading-xlarge", "h1"];
+    ? [".org-top-card-summary__title", ".org-top-card h1", ".org-top-card h2", "h1"]
+    : [
+        "section[data-member-id] h1",
+        "section[data-member-id] h2",
+        ".pv-top-card h1",
+        ".pv-top-card h2",
+        ".pv-text-details__left-panel h1",
+        ".top-card-layout__title",
+        "h1.text-heading-xlarge",
+        "h1",
+      ];
   const out: string[] = [];
   const seen = new Set<Element>();
-  for (const sel of selectors) {
-    for (const el of Array.from(main.querySelectorAll(sel))) {
-      if (seen.has(el) || inChrome(el)) continue;
-      seen.add(el);
-      out.push(clean(el.textContent, MAX_NAME));
-    }
+  const push = (el: Element): void => {
+    if (seen.has(el) || inChrome(el) || inFeedPost(el)) return;
+    seen.add(el);
+    const text = clean(el.textContent, MAX_NAME)
+      .replace(/\s*[·|]\s*(?:1st|2nd|3rd)\b.*$/i, "")
+      .trim();
+    if (text) out.push(text);
+  };
+  const card = topCardOf(main);
+  if (card !== main) {
+    for (const el of Array.from(card.querySelectorAll("h1, h2"))) push(el);
   }
-  return out.filter(Boolean);
+  for (const el of Array.from(main.querySelectorAll("header h1, header h2"))) push(el);
+  for (const sel of selectors) {
+    for (const el of Array.from(main.querySelectorAll(sel))) push(el);
+  }
+  return out;
 }
 
 function companyFromHeadline(headline: string): string {
@@ -422,15 +464,74 @@ function companyFromHeadline(headline: string): string {
   return m ? m[1]!.trim() : "";
 }
 
+function looksLikePlace(line: string): boolean {
+  return /^[\p{L}].{1,48},\s*[\p{L}]/u.test(line) && !/\bat\b/i.test(line);
+}
+
+/** "Show all", "10%", "37": buttons and stats, never a headline. */
+export function isChromeSnippet(raw: string | null | undefined): boolean {
+  const s = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!s) return true;
+  if (/^(show all|see all|show more|see more|follow|following|message|connect|more|visit website|view page|learn more)$/i.test(s)) return true;
+  if (/^\d+([.,]\d+)?%?$/.test(s)) return true;
+  if (/^\d[\d,.\s]*[kmb]?\+?$/i.test(s)) return true;
+  return false;
+}
+
+/** A line that can be the headline. Long role lines stay; names, places and buttons do not. */
+function usableHeadline(t: string, name: string): boolean {
+  if (t.length < 2 || t.toLowerCase() === name.toLowerCase()) return false;
+  if (isChromeSnippet(t)) return false;
+  if (/^(1st|2nd|3rd)$/i.test(t) || /^united states$/i.test(t)) return false;
+  if (/\b(contact info|connections?|followers?|mutual|open to work)\b/i.test(t)) return false;
+  if (looksLikePlace(t)) return false;
+  return true;
+}
+
+/** The line under the name. The old class is preferred; current pages have neither that class nor a headline in the tab title. */
+function headlineFrom(card: Element, name: string, titleRest: string): string {
+  const classic = clean(
+    card.querySelector(".text-body-medium, .top-card-layout__headline")?.textContent,
+    MAX_HEADLINE
+  );
+  if (usableHeadline(classic, name)) return classic;
+  const fromTitle = clean(titleRest, MAX_HEADLINE);
+  if (usableHeadline(fromTitle, name) && !isJunkProfileName(fromTitle)) return fromTitle;
+  const lines: string[] = [];
+  for (const el of Array.from(card.querySelectorAll("h1, h2, span, p, div"))) {
+    if (el.tagName !== "H1" && el.tagName !== "H2" && el.querySelector("h1, h2, span, div, p")) continue;
+    const t = clean(el.textContent, MAX_HEADLINE);
+    if (usableHeadline(t, name)) lines.push(t);
+  }
+  return lines.find((t) => t.includes("|") || t.length > 48) ?? lines[0] ?? "";
+}
+
 /**
  * The card a profile section sits in. LinkedIn marks each section with an
  * empty anchor div (`<div id="experience">`) inside the card; older markup
  * puts the id on the section itself.
  */
+const SECTION_LABEL: Record<string, RegExp> = {
+  about: /^about(?:\s+us)?$/i,
+  experience: /^experience$/i,
+  education: /^education$/i,
+};
+
+/**
+ * LinkedIn used to mark sections with an empty anchor (`<div id="experience">`).
+ * The current profile drops those anchors and keeps a plain heading.
+ */
 function sectionFor(main: Element, id: string): Element | null {
   const anchor = main.querySelector(`#${id}`);
-  if (!anchor) return null;
-  return anchor.closest("section") ?? anchor.parentElement ?? anchor;
+  if (anchor) return anchor.closest("section") ?? anchor.parentElement ?? anchor;
+  const label = SECTION_LABEL[id];
+  if (!label) return null;
+  for (const h of Array.from(main.querySelectorAll("h2, h3"))) {
+    if (inChrome(h)) continue;
+    if (!label.test(clean(h.textContent, 40))) continue;
+    return h.closest("section") ?? h.parentElement;
+  }
+  return null;
 }
 
 /** List rows of a section, skipping rows that only wrap other rows. */
@@ -487,8 +588,9 @@ function rolesFrom(main: Element): LinkedInRole[] {
   for (const item of leafItems(section)) {
     const lines = entryLines(item).filter((l) => !isDateLine(l));
     const title = lines[0] ?? "";
-    if (!title) continue;
-    roles.push({ title, company: companyOfLine(lines[1] ?? "") });
+    if (!title || /^(about|experience|education|activity|skills|featured)$/i.test(title)) continue;
+    const linked = clean(item.querySelector('a[href*="/company/"]')?.textContent, MAX_COMPANY);
+    roles.push({ title, company: companyOfLine(lines[1] ?? "") || linked });
   }
   return roles;
 }
@@ -580,24 +682,163 @@ function bestListedPhoto(img: Element): string | undefined {
   return (face ?? ranked[0])?.href;
 }
 
-function profilePhotoFrom(card: Element): string | undefined {
-  for (const img of Array.from(card.querySelectorAll("img"))) {
-    const href = bestListedPhoto(img);
-    if (href && /profile-displayphoto|company-logo|displayphoto/i.test(href)) return href;
+function pathKey(url: string): string {
+  try {
+    return new URL(url, "https://www.linkedin.com").pathname.replace(/\/+$/, "").toLowerCase();
+  } catch {
+    return "";
   }
-  for (const img of Array.from(card.querySelectorAll("img"))) {
-    const href = bestListedPhoto(img);
-    if (href) return href;
+}
+
+/** Another profile or company. /in/x/overlay/photo/ is still x. */
+function linksElsewhere(href: string, selfUrl: string): boolean {
+  if (!/\/(?:in|company|school|showcase)\//i.test(href)) return false;
+  let abs = "";
+  try {
+    abs = new URL(href, "https://www.linkedin.com").href;
+  } catch {
+    return false;
   }
-  return undefined;
+  const self = canonicalLinkedInUrl(selfUrl) ?? pathKey(selfUrl);
+  const theirs = canonicalLinkedInUrl(abs) ?? pathKey(abs);
+  return Boolean(self && theirs && self !== theirs);
+}
+
+/** A face or logo that belongs to a different profile than the page open now. */
+function otherEntityPhoto(img: Element, selfUrl: string): boolean {
+  return linksElsewhere(img.closest("a[href]")?.getAttribute("href") ?? "", selfUrl);
+}
+
+/** Drawn width on the live page. 0 when the page has no layout (tests, hidden tab). */
+function shownWidth(img: Element): number {
+  try {
+    return Math.round(img.getBoundingClientRect().width) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** The label on the photo itself, not a section that happens to contain it. */
+function localLabel(img: Element): string {
+  const bits = [img.getAttribute("alt") ?? "", img.getAttribute("aria-label") ?? ""];
+  const btn = img.closest("button, a");
+  if (btn) bits.push(btn.getAttribute("aria-label") ?? "");
+  return bits.join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function isProfilePhotoWidget(img: Element): boolean {
+  let node: Element | null = img;
+  for (let i = 0; i < 4 && node; i += 1, node = node.parentElement) {
+    if (/profile-photo|profile-picture|pv-top-card-profile|presence-entity/i.test(node.getAttribute("class") ?? "")) return true;
+  }
+  return false;
+}
+
+const LATER_SECTION = /^(about|experience|education|activity|featured|highlights|interests|skills|licenses|recommendations|more profiles for you|people also viewed|people you may know|analytics)$/i;
+
+/** A face that sits under Experience, Featured, or More profiles, not in the identity block. */
+function afterLaterSection(img: Element, card: Element): boolean {
+  for (const h of Array.from(card.querySelectorAll("h2, h3"))) {
+    const label = clean(h.textContent, 60);
+    if (!LATER_SECTION.test(label)) continue;
+    if ((h.compareDocumentPosition(img) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) return true;
+  }
+  return false;
+}
+
+/** The picture lives in a card that links to a different profile, even when the img is not inside the anchor. */
+function inOtherProfileCard(img: Element, selfUrl: string): boolean {
+  const box = img.closest("li, article");
+  if (!box) return false;
+  const link = box.querySelector("a[href*='/in/'], a[href*='/company/'], a[href*='/school/']");
+  return linksElsewhere(link?.getAttribute("href") ?? "", selfUrl);
+}
+
+/** Alt text that names someone else, so a recommendation cannot replace this profile. */
+function altNamesSomeoneElse(img: Element, name: string): boolean {
+  const alt = (img.getAttribute("alt") ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (alt.length < 3 || /logo|icon|cover|background|banner|premium/i.test(alt)) return false;
+  const who = name.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!who) return false;
+  return !alt.includes(who) && !who.includes(alt);
+}
+
+function inRecommendationRail(img: Element): boolean {
+  return Boolean(
+    img.closest('aside, [role="complementary"], .scaffold-layout__aside, [data-view-name*="browse-map"], [data-view-name*="pymk"]')
+  );
+}
+
+function profilePhotoFrom(
+  root: Element,
+  kind: "person" | "company",
+  name = "",
+  selfUrl = ""
+): string | undefined {
+  const card = topCardOf(root);
+  const who = name.replace(/\s+/g, " ").trim().toLowerCase();
+  let best = "";
+  let bestScore = -1;
+  for (const img of Array.from(card.querySelectorAll("img"))) {
+    if (inChrome(img) || inFeedPost(img) || inRecommendationRail(img) || otherEntityPhoto(img, selfUrl)) continue;
+    if (inOtherProfileCard(img, selfUrl)) continue;
+    if (kind === "person" && altNamesSomeoneElse(img, name)) continue;
+    // Mutual-connection faces and the viewer's own avatar are drawn at 24 to 48px. The profile photo is far larger.
+    const drawn = shownWidth(img);
+    if (drawn > 0 && drawn < 64) continue;
+    const href = bestListedPhoto(img);
+    if (!href) continue;
+    const listed = href.match(/(?:shrink|scale)_(\d+)_\d+/i);
+    const px = listed ? Number(listed[1]) : 0;
+    const school = img.closest('a[href*="/company/"], a[href*="/school/"]');
+    const isLogo = /company-logo|school-logo|displaybackground|backgroundimage/i.test(href) || (kind === "person" && Boolean(school));
+    if (kind === "person" && isLogo) continue;
+    if (kind === "company" && !/company-logo|school-logo/i.test(href)) continue;
+    const label = localLabel(img);
+    let score = px;
+    if (/profile-displayphoto/i.test(href) && !/framed/i.test(href)) score += 2000;
+    else if (/framedphoto/i.test(href)) score += 800;
+    else if (/company-logo|school-logo/i.test(href)) score += 2000;
+    if (who && label.includes(who)) score += 6000;
+    if (isProfilePhotoWidget(img)) score += 4000;
+    if (/\/overlay\/photo/i.test(img.closest("a[href]")?.getAttribute("href") ?? "")) score += 5000;
+    score += drawn * 10;
+    // A larger face under "More profiles" must not replace the person at the top.
+    if (afterLaterSection(img, card)) score -= 9000;
+    if (score > bestScore) {
+      best = href;
+      bestScore = score;
+    }
+  }
+  return best || undefined;
+}
+
+/** Company identity block. On current pages it sits above <main>, not inside the posts column. */
+function orgSurface(doc: Document, main: Element): Element {
+  const found = doc.querySelector(".org-top-card, .org-top-card-summary, [class*='org-top-card']");
+  if (found && !inChrome(found)) return found;
+  return topCardOf(main);
 }
 
 /** The top card, where the location and the network line live. */
 function topCardOf(main: Element): Element {
-  for (const sel of [".pv-top-card", ".org-top-card", ".pv-text-details__left-panel"]) {
+  for (const sel of [
+    "section[data-member-id]",
+    ".pv-top-card",
+    ".org-top-card",
+    ".pv-text-details__left-panel",
+    ".top-card-layout",
+  ]) {
     for (const el of Array.from(main.querySelectorAll(sel))) {
       if (!inChrome(el)) return el;
     }
+  }
+  const header = main.querySelector("header");
+  if (header && !inChrome(header)) return header;
+  const first = main.querySelector("section");
+  if (first && !inChrome(first)) {
+    const label = clean(first.querySelector("h1, h2")?.textContent, 40);
+    if (label && !/^(about|experience|education)$/i.test(label)) return first;
   }
   return main;
 }
@@ -612,6 +853,11 @@ function locationFrom(card: Element): string {
     if (/\b(connections?|followers?|contact info|mutual|employees)\b/i.test(t)) continue;
     if (/^\d/.test(t)) continue;
     return t;
+  }
+  for (const el of Array.from(card.querySelectorAll("span, p"))) {
+    if (el.children.length) continue;
+    const t = clean(el.textContent, MAX_LOCATION);
+    if (looksLikePlace(t) && !/\b(connections?|followers?|employees)\b/i.test(t)) return t;
   }
   return "";
 }
@@ -642,10 +888,68 @@ function companyInfoItems(main: Element): string[] {
     .filter(Boolean);
 }
 
+function companyMetaLine(t: string): boolean {
+  return (
+    t.includes("·") ||
+    /\b(followers?|employees|connections? follow)\b/i.test(t) ||
+    /^(home|about|about us|posts|jobs|people|overview|life|insights)$/i.test(t)
+  );
+}
+
+/** The line under the company name. A campus caption or the about paragraph is not the tagline. */
+function companyHeadlineFrom(main: Element, name: string): string {
+  const classic = clean(
+    main.querySelector(".org-top-card-summary__tagline, [class*='tagline']")?.textContent,
+    MAX_HEADLINE
+  );
+  if (classic && !isChromeSnippet(classic) && classic.toLowerCase() !== name.toLowerCase() && !companyMetaLine(classic)) return classic;
+  const card = topCardOf(main);
+  const heading = Array.from(card.querySelectorAll("h1, h2")).find((el) => !inChrome(el) && clean(el.textContent, 80));
+  const headingText = heading ? clean(heading.textContent, 80).toLowerCase() : "";
+  const lines: string[] = [];
+  let afterHeading = !heading;
+  for (const el of Array.from(card.querySelectorAll("p, span, div"))) {
+    if (heading && (el === heading || heading.contains(el))) continue;
+    if (!afterHeading && heading) {
+      afterHeading = (heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      if (!afterHeading) continue;
+    }
+    if (inChrome(el) || inFeedPost(el) || el.querySelector("p, span, div, h1, h2, a, button, li")) continue;
+    const t = clean(el.textContent, MAX_HEADLINE);
+    const low = t.toLowerCase();
+    if (t.length < 2 || t.length > 160) continue;
+    if (low === name.toLowerCase() || (headingText && low === headingText)) continue;
+    if (isChromeSnippet(t) || companyMetaLine(t) || looksLikePlace(t) || /^(of|at|in)\b/i.test(t)) continue;
+    lines.push(t);
+  }
+  // The tagline is the first real line under the name. The shortest line on a jobs tab is "37" or "Show all".
+  const tagline = lines.find((t) => t.length <= 90 && !/[.!?]$/.test(t));
+  return tagline ?? lines[0] ?? "";
+}
+
+/** How much of the company slug this name explains. The tab title often matches the slug. */
+function slugAffinity(name: string, profileUrl: string): number {
+  const slug = (profileUrl.match(/\/(?:company|school|showcase)\/([^/]+)/i)?.[1] ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  const tokens = name.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  if (!slug || !tokens.length) return 0;
+  if (tokens.join("") === slug) return 100;
+  let rest = slug;
+  let covered = 0;
+  for (const token of tokens) {
+    const at = rest.indexOf(token);
+    if (at < 0) continue;
+    covered += token.length;
+    rest = rest.slice(at + token.length);
+  }
+  return Math.round((covered / slug.length) * 80);
+}
+
 export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | null {
   const profileUrl = canonicalLinkedInUrl(url);
   if (!profileUrl) return null;
-  const isCompany = profileUrl.includes("/company/");
+  const isCompany = /\/(company|school|showcase)\//.test(profileUrl);
   const main = doc.querySelector("main") ?? doc.body;
   if (!main) return null;
   const title = titleParts(doc);
@@ -653,21 +957,33 @@ export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | 
   const profileText = profileTextFrom(main);
 
   if (isCompany) {
-    const name = resolveProfileName(
-      [...headingCandidates(main, true), ogTitleName(doc), title.name],
-      profileUrl
-    );
+    const surface = orgSurface(doc, main);
+    const nameCandidates = [...headingCandidates(surface, true), title.name, ogTitleName(doc)];
+    let name = resolveProfileName(nameCandidates, profileUrl);
+    let nameScore = slugAffinity(name, profileUrl);
+    for (const candidate of nameCandidates) {
+      const shown = String(candidate ?? "").replace(/\s+/g, " ").trim();
+      if (!shown || isJunkProfileName(shown)) continue;
+      const next = shown.slice(0, MAX_NAME);
+      const score = slugAffinity(next, profileUrl);
+      if (score > nameScore) {
+        name = next;
+        nameScore = score;
+      }
+    }
+    // A post heading or a tab that still says "Feed" must not replace the company.
+    if (nameScore < 55) {
+      const fromSlug = nameFromProfileUrl(profileUrl);
+      if (fromSlug) name = fromSlug;
+    }
     if (!name) return null;
-    const headline = clean(
-      main.querySelector(".org-top-card-summary__tagline, [class*='tagline']")?.textContent,
-      MAX_HEADLINE
-    );
-    const items = companyInfoItems(main);
+    const headline = companyHeadlineFrom(surface, name);
+    const items = companyInfoItems(surface.closest("main") ?? doc.body);
     const size = items.find((i) => /\bemployees\b/i.test(i)) ?? "";
     const rest = items.filter((i) => !/\b(employees|followers?)\b/i.test(i));
     const industry = rest[0] ?? "";
     const location = rest[1] ?? "";
-    const photoUrl = profilePhotoFrom(main);
+    const photoUrl = profilePhotoFrom(surface, "company", name, profileUrl);
     const entity: LinkedInEntity = {
       kind: "company",
       name,
@@ -687,14 +1003,12 @@ export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | 
   }
 
   const name = resolveProfileName(
-    [...headingCandidates(main, false), ogTitleName(doc), title.name],
+    [...headingCandidates(main, false), title.name, ogTitleName(doc)],
     profileUrl
   );
   if (!name) return null;
-  const headline = clean(
-    main.querySelector(".text-body-medium")?.textContent || title.rest,
-    MAX_HEADLINE
-  );
+  const card = topCardOf(main);
+  const headline = headlineFrom(card, name, title.rest);
   const companyButton = main
     .querySelector('[aria-label^="Current company"]')
     ?.getAttribute("aria-label")
@@ -705,13 +1019,12 @@ export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | 
     companyButton || companyFromHeadline(headline) || current?.company || "",
     MAX_COMPANY
   );
-  const card = topCardOf(main);
   const location = locationFrom(card);
   const { degree, count } = connectionsFrom(card);
   const education = educationFrom(main);
   const pastRoles = roles.slice(1, 1 + MAX_PAST_ROLES);
 
-  const photoUrl = profilePhotoFrom(topCardOf(main));
+  const photoUrl = profilePhotoFrom(main, "person", name, profileUrl);
   const entity: LinkedInEntity = {
     kind: "person",
     name,

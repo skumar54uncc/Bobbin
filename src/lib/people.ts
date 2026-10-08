@@ -10,7 +10,7 @@
  */
 import { db, type PersonRecord } from "../db/schema";
 import { parseQuestion } from "./chat/question-parser";
-import { buildProfileSummary, resolveProfileName } from "./capture/linkedin";
+import { buildProfileSummary, isChromeSnippet, resolveProfileName } from "./capture/linkedin";
 import { cleanProfileSummary } from "./capture/text-noise";
 import type { LinkedInEntity, LinkedInRole } from "./capture/linkedin";
 
@@ -63,8 +63,7 @@ function detailPatch(e: LinkedInEntity): Partial<PersonRecord> {
     ...(count !== undefined ? { connectionCount: count } : {}),
     ...(s(e.industry) ? { industry: s(e.industry) } : {}),
     ...(s(e.companySize) ? { companySize: s(e.companySize) } : {}),
-    ...(s(e.tagline) ? { tagline: s(e.tagline) } : {}),
-    ...(e.photoUrl ? { photoUrl: e.photoUrl } : {}),
+    ...(s(e.tagline) && !isChromeSnippet(e.tagline) ? { tagline: s(e.tagline) } : {}),
     ...(s(e.profileText) ? { profileText: s(e.profileText).slice(0, 4000) } : {}),
     ...(summary ? { summary } : {}),
   };
@@ -76,6 +75,15 @@ function detailPatch(e: LinkedInEntity): Partial<PersonRecord> {
  * nothing usable the profile slug supplies the name. A profile with no
  * plausible name at all is not recorded, and null says so.
  */
+/** A later visit's "Show all" or "37" must not replace a real headline. */
+function keptLine(next: string | undefined, prev: string | undefined): string {
+  const n = String(next ?? "").replace(/\s+/g, " ").trim();
+  if (n && !isChromeSnippet(n)) return n;
+  const p = String(prev ?? "").replace(/\s+/g, " ").trim();
+  if (p && !isChromeSnippet(p)) return p;
+  return "";
+}
+
 export async function upsertPerson(e: LinkedInEntity, now: number = Date.now()): Promise<number | null> {
   const name = resolveProfileName([e.name], e.profileUrl);
   if (!name) return null;
@@ -85,7 +93,7 @@ export async function upsertPerson(e: LinkedInEntity, now: number = Date.now()):
     await db.people.update(existing.id, {
       kind: e.kind,
       name,
-      headline: e.headline || existing.headline,
+      headline: keptLine(e.headline, existing.headline),
       company: e.company || existing.company,
       // Detail the page carried wins; anything it did not show is untouched.
       ...detail,
@@ -97,7 +105,7 @@ export async function upsertPerson(e: LinkedInEntity, now: number = Date.now()):
   return (await db.people.add({
     kind: e.kind,
     name,
-    headline: e.headline,
+    headline: isChromeSnippet(e.headline) ? "" : e.headline,
     company: e.company,
     profileUrl: e.profileUrl,
     ...detail,
@@ -251,7 +259,9 @@ export async function listPeople(f: PeopleFilter): Promise<PersonRecord[]> {
 }
 
 export async function deletePerson(id: number): Promise<void> {
+  const row = await db.people.get(id);
   await db.people.delete(id);
+  if (row) await db.photos.delete(row.profileUrl);
 }
 
 export interface PeopleQuery {

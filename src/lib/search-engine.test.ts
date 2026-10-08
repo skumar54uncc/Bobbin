@@ -199,6 +199,38 @@ describe("runAdvancedSearch", () => {
     expect(res.timeWindow).toBe("applied");
   });
 
+  it("keeps a date the user picked empty when nothing was visited then", async () => {
+    mocks.docs = [doc(1, "https://old.test/topic", "Orbital cargo", now)];
+    mocks.chunks = [ch(1, 1, "orbital cargo logistics details and routes")];
+    mocks.urlsInRange = new Set();
+    const res = await runAdvancedSearch("orbital cargo logistics", async () => null, {
+      forceTimeRange: { start: now - 86_400_000, end: now },
+      strictTimeRange: true,
+      now,
+      abstainFloor: 0,
+    });
+    expect(res.hits).toEqual([]);
+    expect(res.timeRelaxed).toBe(false);
+    expect(res.evidence).toMatch(/date range/i);
+  });
+
+  it("drops a page that does not contain the exact phrase", async () => {
+    mocks.docs = [
+      doc(1, "https://a.test/one", "Fifth Third Bank", now),
+      doc(2, "https://b.test/two", "Charlotte notes", now),
+    ];
+    mocks.chunks = [
+      ch(1, 1, "Fifth Third Bank home page and branches"),
+      ch(2, 2, "A sidebar mentions Fifth Third Bank in passing"),
+    ];
+    const res = await runAdvancedSearch("Fifth Third", async () => null, {
+      requirePhrase: "home page and branches",
+      abstainFloor: 0,
+      now,
+    });
+    expect(res.hits.map((h) => h.url)).toEqual(["https://a.test/one"]);
+  });
+
   it("relaxes and says so when the date window has no visits", async () => {
     mocks.docs = [doc(1, "https://old.test/topic", "Orbital cargo", now)];
     mocks.chunks = [ch(1, 1, "orbital cargo logistics details and routes")];

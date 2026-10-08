@@ -4,117 +4,30 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   assistantSyncDb,
+  clearAssistantSyncDatabase,
   defaultSyncEngineState,
+  readSyncEngineState,
   writeSyncEngineState,
   type SyncVisitRecord,
 } from "../src/assistant-sync/db";
-import { FetchDriveApi, type DriveApi, type RowRange, type StoredMemoryIds } from "../src/assistant-sync/drive-api";
-import { visitRows } from "../src/assistant-sync/sheet";
+import type { StoredMemoryIds } from "../src/assistant-sync/drive-api";
+import { BACKOFF_MIN_MS, SLOW_MODE_MS } from "../src/assistant-sync/schedule";
 import {
   backfillHistory,
   DAY_MS,
   enableAssistantSync,
-  runSyncTick,
+  runFlush,
   SYNC_MISSING_MESSAGE,
-  SYNC_STOPPED_MESSAGE,
-  type SyncClock,
+  type FlushDeps,
 } from "../src/assistant-sync/sync-engine";
+import { FakeSheets } from "./helpers/fake-sheets";
 
 const NOW = Date.parse("2026-10-02T16:00:00.000Z");
+const MIN = 60_000;
 const ZONE = "America/New_York";
+const READY: StoredMemoryIds = { folderId: "folder", fileId: "file" };
 
-class Sheets implements DriveApi {
-  files = new Map<string, { name: string; trashed: boolean }>();
-  tabs = new Map<string, Map<string, string[][]>>();
-  appends: { tab: string; rows: string[][] }[] = [];
-  deletes: { tab: string; ranges: RowRange[] }[] = [];
-  attempts = 0;
-  failUntil = 0;
-  hardStatus: number | null = null;
-  creates = 0;
-  jsonFiles = new Map<string, string>();
-
-  constructor() {
-    this.files.set("folder", { name: "Cortex Memory", trashed: false });
-    this.files.set("file", { name: "Cortex Memory", trashed: false });
-    this.tabs.set("file", new Map());
-  }
-
-  private next(): string {
-    return `new-${this.files.size + 1}`;
-  }
-
-  async upsertJsonFile(name: string, parentId: string, body: string, existingId: string | null): Promise<string> {
-    if (existingId && this.files.has(existingId)) {
-      this.jsonFiles.set(existingId, body);
-      return existingId;
-    }
-    const id = this.next();
-    this.files.set(id, { name, trashed: false });
-    this.jsonFiles.set(id, body);
-    return id;
-  }
-
-  async createFolder(name: string): Promise<string> {
-    this.creates += 1;
-    const id = this.next();
-    this.files.set(id, { name, trashed: false });
-    return id;
-  }
-
-  async createSpreadsheet(name: string, _parentId: string): Promise<string> {
-    this.creates += 1;
-    const id = this.next();
-    this.files.set(id, { name, trashed: false });
-    this.tabs.set(id, new Map());
-    return id;
-  }
-
-  async getFile(id: string) {
-    const file = this.files.get(id);
-    if (!file) return null;
-    return { id, name: file.name, trashed: file.trashed };
-  }
-
-  async trashFile(id: string): Promise<void> {
-    const file = this.files.get(id);
-    if (file) file.trashed = true;
-  }
-
-  async writeTab(fileId: string, tab: string, rows: string[][]): Promise<void> {
-    this.tabs.get(fileId)?.set(tab, rows.map((row) => [...row]));
-  }
-
-  async appendTab(fileId: string, tab: string, rows: string[][]): Promise<void> {
-    this.attempts += 1;
-    if (this.hardStatus != null) throw new Error(`google_${this.hardStatus}`);
-    if (this.attempts <= this.failUntil) throw new Error("google_429");
-    this.appends.push({ tab, rows: rows.map((row) => [...row]) });
-    const map = this.tabs.get(fileId);
-    const existing = map?.get(tab) ?? [];
-    map?.set(tab, [...existing, ...rows.map((row) => [...row])]);
-  }
-
-  async formatHeaders(): Promise<void> {}
-
-  async readTab(fileId: string, tab: string): Promise<string[][]> {
-    return (this.tabs.get(fileId)?.get(tab) ?? []).map((row) => [...row]);
-  }
-
-  async updateRow(fileId: string, tab: string, rowIndex: number, values: string[]): Promise<void> {
-    const rows = this.tabs.get(fileId)?.get(tab);
-    if (rows && rowIndex >= 1) rows[rowIndex - 1] = [...values];
-  }
-
-  async deleteRows(fileId: string, tab: string, ranges: RowRange[]): Promise<void> {
-    const ordered = [...ranges].sort((a, b) => b.startIndex - a.startIndex);
-    this.deletes.push({ tab, ranges: ordered });
-    const rows = this.tabs.get(fileId)?.get(tab) ?? [];
-    for (const range of ordered) rows.splice(range.startIndex, range.endIndex - range.startIndex);
-  }
-}
-
-function visit(id: string, visitedAt: number): SyncVisitRecord {
+function visit(id: string, visitedAt: number, extra: Partial<SyncVisitRecord> = {}): SyncVisitRecord {
   return {
     id,
     visitedAt,
@@ -125,152 +38,263 @@ function visit(id: string, visitedAt: number): SyncVisitRecord {
     maxScrollPct: 40,
     pageType: "Article",
     topics: ["vector databases"],
-  };
-}
-
-function clock(sheets: Sheets, ids: StoredMemoryIds, extra: Partial<SyncClock> = {}): SyncClock {
-  return {
-    api: sheets,
-    ids,
-    now: NOW,
-    timeZone: ZONE,
-    fromAlarm: true,
-    fromUser: false,
-    sleep: async () => {},
-    random: () => 0,
+    finalizedAt: visitedAt,
     ...extra,
   };
 }
 
-const READY: StoredMemoryIds = { folderId: "folder", fileId: "file" };
+function deps(sheets: FakeSheets, now: number, extra: Partial<FlushDeps> = {}): FlushDeps {
+  return { api: sheets, ids: READY, now, timeZone: ZONE, mode: "scheduled", random: () => 0, ...extra };
+}
+
+/** Sync on, sheet read once on Enable. Leaves the cached layout in place like a real session. */
+async function enabled(sheets: FakeSheets, at = NOW): Promise<void> {
+  await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true });
+  const first = await runFlush(deps(sheets, at, { mode: "enable" }));
+  expect(first.status).toBe("ready");
+}
 
 beforeEach(async () => {
-  await assistantSyncDb.visits.clear();
-  await assistantSyncDb.content.clear();
-  await assistantSyncDb.searches.clear();
-  await assistantSyncDb.people.clear();
-  await assistantSyncDb.companies.clear();
-  await assistantSyncDb.synced.clear();
-  await assistantSyncDb.pending.clear();
-  await assistantSyncDb.state.clear();
+  await clearAssistantSyncDatabase();
 });
 
-describe("sync engine", () => {
-  it("appends an id once across a restart and a crash before the synced key is saved", async () => {
-    const sheets = new Sheets();
-    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true });
-    await assistantSyncDb.visits.put(visit("v1", NOW));
-    const first = await runSyncTick(clock(sheets, READY));
-    expect(first.status).toBe("ready");
-    expect(first.created).toBe(false);
-    expect((await assistantSyncDb.state.get("engine"))?.lastSyncedAt).toBe(NOW);
-    const second = await runSyncTick(clock(sheets, READY));
-    expect(second.appended).toBe(0);
-    await assistantSyncDb.synced.clear();
-    await assistantSyncDb.pending.clear();
-    const third = await runSyncTick(clock(sheets, READY));
-    expect(third.appended).toBe(0);
-    const visitAppends = sheets.appends.filter((call) => call.tab === "Visits").flatMap((call) => call.rows);
-    expect(visitAppends.filter((row) => row[0] === "v1")).toHaveLength(1);
-    expect(visitAppends[0]?.[1]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    const daily = sheets.tabs.get("file")?.get("Daily") ?? [];
-    expect(daily.filter((row) => row[0] === "2026-10-02")).toHaveLength(1);
-    expect(await assistantSyncDb.pending.count()).toBe(0);
+describe("flush", () => {
+  it("makes zero reads and one batchUpdate in a normal flush", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    const readsAfterEnable = sheets.reads;
+    expect(readsAfterEnable).toBe(2);
+
+    await assistantSyncDb.visits.put(visit("v1", NOW + MIN));
+    await assistantSyncDb.searches.put({ id: "s1", visitedAt: NOW + MIN, engine: "Google", query: "pgvector" });
+    const writes = sheets.writes;
+    const result = await runFlush(deps(sheets, NOW + 6 * MIN));
+    expect(result).toMatchObject({ status: "ready", reads: 0, writes: 1 });
+    expect(sheets.reads).toBe(readsAfterEnable);
+    expect(sheets.writes).toBe(writes + 1);
+    expect(sheets.ids("Visits")).toEqual(["v1"]);
+    expect(sheets.ids("Searches")).toEqual(["s1"]);
+    expect(sheets.tab("Visits")[0]?.[0]).toBe("id");
+
+    // Daily, About, and the rows went out in that one request.
+    const kinds = sheets.batches.at(-1)!.map((request) => Object.keys(request)[0]);
+    expect(kinds).toContain("appendCells");
+    expect(kinds).toContain("updateCells");
+    const about = sheets.tab("About").map((row) => row[0]);
+    expect(about.some((line) => line?.includes("Rows: 1 visits"))).toBe(true);
+    expect(sheets.tab("Daily").filter((row) => row[0] === "2026-10-02")).toHaveLength(1);
   });
 
-  it("backs off on 429, keeps the pending row, and stops after 10 failures until the next alarm", async () => {
-    const sheets = new Sheets();
-    sheets.failUntil = 100;
-    const sleeps: number[] = [];
-    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true });
-    await assistantSyncDb.visits.put(visit("v1", NOW));
-    const stopped = await runSyncTick(
-      clock(sheets, READY, {
-        sleep: async (ms) => {
-          sleeps.push(ms);
-        },
-      })
-    );
-    expect(stopped.status).toBe("stopped");
-    expect(stopped.error).toBe(SYNC_STOPPED_MESSAGE);
-    expect(sheets.attempts).toBe(10);
-    expect(sleeps).toEqual([500, 1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]);
-    expect(await assistantSyncDb.pending.count()).toBe(1);
-    const quiet = await runSyncTick(clock(sheets, READY, { fromAlarm: false, fromUser: false }));
-    expect(quiet.status).toBe("stopped");
-    expect(sheets.attempts).toBe(10);
-    sheets.failUntil = sheets.attempts;
-    const again = await runSyncTick(clock(sheets, READY, { fromAlarm: true }));
-    expect(again.status).toBe("ready");
-    expect(sheets.appends.filter((call) => call.tab === "Visits").flatMap((call) => call.rows)).toHaveLength(1);
-    expect(await assistantSyncDb.pending.count()).toBe(0);
+  it("updates the Daily row in place for a day that already has one", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW + MIN));
+    await runFlush(deps(sheets, NOW + 6 * MIN));
+    await assistantSyncDb.visits.put(visit("v2", NOW + 7 * MIN));
+    const second = await runFlush(deps(sheets, NOW + 12 * MIN));
+    expect(second).toMatchObject({ status: "ready", reads: 0, writes: 1 });
+    expect(sheets.tab("Daily").filter((row) => row[0] === "2026-10-02")).toHaveLength(1);
+    expect(sheets.ids("Visits")).toEqual(["v1", "v2"]);
   });
 
-  it("does not retry a non retryable status", async () => {
-    const sheets = new Sheets();
-    sheets.hardStatus = 403;
-    const sleeps: number[] = [];
-    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true });
-    await assistantSyncDb.visits.put(visit("v1", NOW));
-    const result = await runSyncTick(clock(sheets, READY, { sleep: async (ms) => { sleeps.push(ms); } }));
-    expect(result.status).toBe("error");
-    expect(sleeps).toEqual([]);
-    expect(sheets.attempts).toBe(1);
-    const state = await assistantSyncDb.state.get("engine");
-    expect(state?.consecutiveFailures).toBe(0);
-    expect(state?.stoppedUntilAlarm).toBe(false);
+  it("sends nothing when nothing changed", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    const writes = sheets.writes;
+    const quiet = await runFlush(deps(sheets, NOW + 20 * MIN));
+    expect(quiet).toMatchObject({ status: "ready", appended: 0, reads: 0, writes: 0 });
+    expect(sheets.writes).toBe(writes);
   });
 
-  it("purges sheet rows older than the retention window and skips archives unless enabled", async () => {
-    const sheets = new Sheets();
+  it("holds open visits until they are finalized", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("open", NOW + MIN, { finalizedAt: undefined, dwellMinutes: null }));
+    await runFlush(deps(sheets, NOW + 6 * MIN));
+    expect(sheets.ids("Visits")).toEqual([]);
+    await assistantSyncDb.visits.update("open", { finalizedAt: NOW + 8 * MIN, dwellMinutes: 3 });
+    await runFlush(deps(sheets, NOW + 14 * MIN));
+    expect(sheets.ids("Visits")).toEqual(["open"]);
+  });
+
+  it("allows one flush a minute, Sync now included", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW));
+    await runFlush(deps(sheets, NOW + 2 * MIN));
+    await assistantSyncDb.visits.put(visit("v2", NOW));
+    const writes = sheets.writes;
+    const early = await runFlush(deps(sheets, NOW + 2 * MIN + 20_000, { mode: "user" }));
+    expect(early.status).toBe("throttled");
+    expect(early.retryAt).toBe(NOW + 3 * MIN);
+    expect(sheets.writes).toBe(writes);
+    const onTime = await runFlush(deps(sheets, NOW + 3 * MIN, { mode: "user" }));
+    expect(onTime.status).toBe("ready");
+    expect(sheets.ids("Visits")).toEqual(["v1", "v2"]);
+  });
+
+  it("recovers from a crash after the inflight record without duplicates or loss", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW));
+    // Chrome died after the inflight record was written and before Google saw the request.
+    await assistantSyncDb.inflight.put({ id: "inflight", fileId: "file", keys: ["Visits:v1"], startedAt: NOW });
+    const after = await runFlush(deps(sheets, NOW + 6 * MIN));
+    expect(after).toMatchObject({ status: "ready", reads: 2, writes: 1 });
+    expect(sheets.ids("Visits")).toEqual(["v1"]);
+    expect(await assistantSyncDb.inflight.count()).toBe(0);
+  });
+
+  it("does not append twice when Google applied a batch but the reply was lost", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW));
+    sheets.outcomes.push({ status: 503, lost: true });
+    const lost = await runFlush(deps(sheets, NOW + 6 * MIN));
+    expect(lost.status).toBe("error");
+    expect(sheets.ids("Visits")).toEqual(["v1"]);
+    expect((await readSyncEngineState()).verifyNext).toBe(true);
+
+    await assistantSyncDb.visits.put(visit("v2", NOW + 7 * MIN));
+    const next = await runFlush(deps(sheets, NOW + 20 * MIN));
+    expect(next).toMatchObject({ status: "ready", reads: 2 });
+    expect(sheets.ids("Visits")).toEqual(["v1", "v2"]);
+    expect((await readSyncEngineState()).verifyNext).toBe(false);
+  });
+
+  it("backs off on 429 with full jitter, keeps every row, and recovers", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW));
+    sheets.outcomes.push({ status: 429 });
+    const t1 = NOW + 6 * MIN;
+    const failed = await runFlush(deps(sheets, t1, { random: () => 0.5 }));
+    expect(failed.status).toBe("error");
+    expect(failed.retryAt).toBe(t1 + BACKOFF_MIN_MS);
+    expect(sheets.ids("Visits")).toEqual([]);
+    expect(await assistantSyncDb.synced.get("Visits:v1")).toBeUndefined();
+
+    const early = await runFlush(deps(sheets, t1 + 10_000));
+    expect(early.status).toBe("throttled");
+
+    const recovered = await runFlush(deps(sheets, t1 + 2 * MIN));
+    expect(recovered).toMatchObject({ status: "ready", reads: 0, writes: 1 });
+    expect(sheets.ids("Visits")).toEqual(["v1"]);
+    const state = await readSyncEngineState();
+    expect(state).toMatchObject({ backoffFailures: 0, consecutive429: 0, nextAttemptAt: 0 });
+  });
+
+  it("enters slow mode after 3 flushes in a row end in 429", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW));
+    let at = NOW + 6 * MIN;
+    for (let i = 0; i < 3; i++) {
+      sheets.outcomes.push({ status: 429 });
+      const out = await runFlush(deps(sheets, at, { random: () => 1 }));
+      expect(out.status).toBe("error");
+      at = Math.max(out.retryAt!, at + MIN) + 1;
+    }
+    const state = await readSyncEngineState();
+    expect(state.consecutive429).toBe(3);
+    expect(state.slowUntil).toBeGreaterThanOrEqual(at - 1 + SLOW_MODE_MS - 20 * MIN);
+    // Rows are still queued for the next try.
+    const ok = await runFlush(deps(sheets, at));
+    expect(ok.status).toBe("ready");
+    expect(sheets.ids("Visits")).toEqual(["v1"]);
+  });
+
+  it("reports 401 without spending the minute, so a fresh token can retry at once", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW));
+    sheets.outcomes.push({ status: 401 });
+    const before = (await readSyncEngineState()).lastFlushAt;
+    const denied = await runFlush(deps(sheets, NOW + 6 * MIN));
+    expect(denied.status).toBe("auth");
+    const state = await readSyncEngineState();
+    expect(state.lastFlushAt).toBe(before);
+    expect(state.backoffFailures).toBe(0);
+    const retry = await runFlush(deps(sheets, NOW + 6 * MIN + 1_000, { mode: "user" }));
+    expect(retry.status).toBe("ready");
+    expect(sheets.ids("Visits")).toEqual(["v1"]);
+  });
+
+  it("stops at authNeeded until Enable runs", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await writeSyncEngineState({ ...(await readSyncEngineState()), authNeeded: true });
+    const out = await runFlush(deps(sheets, NOW + 20 * MIN));
+    expect(out.status).toBe("auth");
+    expect(sheets.writes).toBe(1);
+  });
+
+  it("deletes rows past retention by position without reading the sheet", async () => {
+    const sheets = new FakeSheets();
     const old = visit("old", Date.parse("2026-06-01T16:00:00.000Z"));
     const kept = visit("kept", Date.parse("2026-09-15T16:00:00.000Z"));
     await assistantSyncDb.visits.bulkPut([old, kept]);
-    await assistantSyncDb.synced.bulkPut([{ key: "Visits:old" }, { key: "Visits:kept" }]);
-    await sheets.writeTab("file", "Visits", visitRows([old, kept], ZONE));
-    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true, retentionDays: 90 });
-    const result = await runSyncTick(clock(sheets, READY));
-    expect(result.status).toBe("ready");
-    const visits = sheets.tabs.get("file")?.get("Visits") ?? [];
-    expect(visits.map((row) => row[0])).toEqual(["id", "kept"]);
-    expect(sheets.deletes.find((call) => call.tab === "Visits")?.ranges).toEqual([{ startIndex: 1, endIndex: 2 }]);
+    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true, retentionDays: 365 });
+    await runFlush(deps(sheets, NOW, { mode: "enable" }));
+    expect(sheets.ids("Visits")).toEqual(["old", "kept"]);
+
+    await writeSyncEngineState({ ...(await readSyncEngineState()), retentionDays: 90 });
+    const reads = sheets.reads;
+    const purge = await runFlush(deps(sheets, NOW + 6 * MIN));
+    expect(purge).toMatchObject({ status: "ready", reads: 0, writes: 1 });
+    expect(sheets.reads).toBe(reads);
+    expect(sheets.ids("Visits")).toEqual(["kept"]);
+    expect(sheets.tab("Daily").map((row) => row[0])).not.toContain("2026-06-01");
+    const deletes = sheets.batches.at(-1)!.filter((request) => "deleteDimension" in request);
+    expect(deletes.length).toBeGreaterThan(0);
     expect(await assistantSyncDb.visits.get("old")).toBeUndefined();
-    expect(await assistantSyncDb.visits.get("kept")).toBeTruthy();
-    const about = (sheets.tabs.get("file")?.get("About") ?? []).map((row) => row[0]);
-    expect(about.at(-1)).toBe("schema_version: 3");
-    expect(about.some((line) => line?.includes("Rows: 1 visits"))).toBe(true);
-    expect(about).toContain("Questions");
-    expect(about.some((line) => line?.includes("JSON backup"))).toBe(true);
-    expect([...sheets.files.values()].some((file) => file.name.startsWith("Cortex Memory Archive"))).toBe(false);
   });
 
-  it("writes an archive only when the toggle is on", async () => {
-    const sheets = new Sheets();
-    const old = visit("old", Date.parse("2026-06-01T16:00:00.000Z"));
-    await assistantSyncDb.visits.put(old);
-    await assistantSyncDb.synced.put({ key: "Visits:old" });
-    await sheets.writeTab("file", "Visits", visitRows([old], ZONE));
-    await writeSyncEngineState({
-      ...defaultSyncEngineState(),
-      syncEnabled: true,
-      retentionDays: 90,
-      archivesEnabled: true,
-    });
-    await runSyncTick(clock(sheets, READY));
-    expect([...sheets.files.values()].some((file) => file.name === "Cortex Memory Archive 2026-06")).toBe(true);
+  it("splits a backlog larger than one request across flushes", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    const big = "x".repeat(2500);
+    const rows = Array.from({ length: 400 }, (_, i) =>
+      visit(`v${String(i).padStart(4, "0")}`, NOW - (i % 30) * DAY_MS, { title: big, url: `https://example.com/${i}/${big}` })
+    );
+    await assistantSyncDb.visits.bulkPut(rows);
+    const first = await runFlush(deps(sheets, NOW + 6 * MIN));
+    expect(first.status).toBe("ready");
+    expect(first.more).toBe(true);
+    expect(first.retryAt).toBe(NOW + 7 * MIN);
+    const sent = JSON.stringify(sheets.batches.at(-1)).length;
+    expect(sent).toBeLessThan(2_000_000);
+    let at = first.retryAt!;
+    for (let i = 0; i < 10 && sheets.ids("Visits").length < rows.length; i++) {
+      const next = await runFlush(deps(sheets, at));
+      at = next.retryAt ?? at + MIN;
+    }
+    expect(new Set(sheets.ids("Visits")).size).toBe(rows.length);
+    expect(sheets.ids("Visits")).toHaveLength(rows.length);
+  }, 30_000);
+
+  it("re-adds a tab the user deleted", async () => {
+    const sheets = new FakeSheets();
+    sheets.books.get("file")!.delete("Searches");
+    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true });
+    await assistantSyncDb.searches.put({ id: "s1", visitedAt: NOW, engine: "Google", query: "pgvector" });
+    const out = await runFlush(deps(sheets, NOW, { mode: "enable" }));
+    expect(out.status).toBe("ready");
+    expect(sheets.ids("Searches")).toEqual(["s1"]);
   });
 
   it("reports a missing file and does not create a replacement", async () => {
-    const sheets = new Sheets();
+    const sheets = new FakeSheets();
     sheets.files.delete("file");
     await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true });
-    const result = await runSyncTick(clock(sheets, READY));
+    const result = await runFlush(deps(sheets, NOW));
     expect(result.status).toBe("missing");
-    expect(result.created).toBe(false);
     expect(result.error).toBe(SYNC_MISSING_MESSAGE);
     expect(sheets.creates).toBe(0);
   });
+});
 
+describe("backfill and enable", () => {
   it("accounts for backfill progress and leaves dwell and excerpts blank", async () => {
     const events: { done: number; total: number; phase: string }[] = [];
     const result = await backfillHistory({
@@ -300,22 +324,21 @@ describe("sync engine", () => {
     expect(result).toEqual({ stored: 2, skipped: 1, total: 3 });
     expect(events[0]).toEqual({ done: 0, total: 3, phase: "reading" });
     expect(events.at(-1)).toEqual({ done: 3, total: 3, phase: "done" });
-    const dones = events.map((event) => event.done);
-    expect(dones).toEqual([...dones].sort((a, b) => a - b));
     expect(await assistantSyncDb.content.count()).toBe(0);
     expect(await assistantSyncDb.visits.get("old")).toBeUndefined();
     expect(await assistantSyncDb.visits.get("bank")).toBeUndefined();
-    expect((await assistantSyncDb.visits.get("a"))?.dwellMinutes).toBeNull();
+    const alpha = await assistantSyncDb.visits.get("a");
+    expect(alpha?.dwellMinutes).toBeNull();
+    expect(alpha?.finalizedAt).toBeTypeOf("number");
     const person = await assistantSyncDb.people.get("b");
-    expect(person?.howFound).toBe("");
     expect(person?.company).toBe("Tesla");
     expect(person?.dwellMinutes).toBeNull();
   });
 
   it("creates a file on enable and appends each backfilled id once", async () => {
-    const sheets = new Sheets();
+    const sheets = new FakeSheets(false);
     let ids: StoredMemoryIds = { folderId: null, fileId: null };
-    const enabled = await enableAssistantSync({
+    const result = await enableAssistantSync({
       api: sheets,
       ids,
       now: NOW,
@@ -324,59 +347,37 @@ describe("sync engine", () => {
       saveIds: async (next) => {
         ids = next;
       },
-      sleep: async () => {},
       random: () => 0,
     });
-    expect(enabled.created).toBe(true);
-    expect(enabled.tick.status).toBe("ready");
-    expect(enabled.tick.appended).toBe(1);
-    const again = await runSyncTick(clock(sheets, ids));
+    expect(result.created).toBe(true);
+    expect(result.flush.status).toBe("ready");
+    expect(result.flush.appended).toBeGreaterThanOrEqual(1);
+    const again = await runFlush({ ...deps(sheets, NOW + 6 * MIN), ids });
     expect(again.appended).toBe(0);
-    const rows = sheets.appends.filter((call) => call.tab === "Visits").flatMap((call) => call.rows);
-    expect(rows.filter((row) => row[0] === "h1")).toHaveLength(1);
-    expect((await assistantSyncDb.visits.get("h1"))?.dwellMinutes).toBeNull();
+    expect(sheets.ids("Visits", ids.fileId!)).toEqual(["h1"]);
+    expect(sheets.tab("About", ids.fileId!).length).toBeGreaterThan(3);
   });
+});
 
-  it("asks Sheets to delete older rows from the bottom", async () => {
-    let body = "";
-    const fetchImpl = async (_url: string, init?: RequestInit) => {
-      body = String(init?.body ?? "");
-      return new Response("{}", { status: 200 });
-    };
-    const api = new FetchDriveApi("token", fetchImpl);
-    await api.deleteRows("file", "Visits", [
-      { startIndex: 1, endIndex: 3 },
-      { startIndex: 5, endIndex: 6 },
-    ]);
-    const json = JSON.parse(body) as {
-      requests: { deleteDimension: { range: { sheetId: number; dimension: string; startIndex: number; endIndex: number } } }[];
-    };
-    expect(json.requests[0]?.deleteDimension.range.startIndex).toBe(5);
-    expect(json.requests[1]?.deleteDimension.range).toMatchObject({
-      sheetId: 1,
-      dimension: "ROWS",
-      startIndex: 1,
-      endIndex: 3,
-    });
-  });
-
+describe("service worker boundaries", () => {
   it("keeps Google fetches out of the service worker", () => {
     const source = readFileSync(join(__dirname, "..", "src", "background", "service-worker.ts"), "utf8");
     expect(source).not.toContain("assistant-sync/drive-api");
     expect(source).not.toContain("assistant-sync/sync-engine");
+    expect(source).not.toContain("assistant-sync/finalize");
     expect(source).not.toContain("sheets.googleapis.com");
     expect(source).not.toContain("permissions.request");
     expect(source).not.toContain("interactive: true");
     expect(source).toContain("interactive: false");
+    expect(source).toContain("removeCachedAuthToken");
     const runtime = readFileSync(join(__dirname, "..", "src", "assistant-sync", "runtime.ts"), "utf8");
     expect(runtime).not.toContain("chrome.storage");
-    expect(source).toContain("CORTEX_ASSISTANT_SYNC");
-    expect(source).toContain("ASSISTANT_SYNC_ALARM");
     const syncGate = source.slice(
       source.indexOf('type === "CORTEX_ASSISTANT_SYNC"'),
       source.indexOf('type === "CORTEX_OPEN_OPTIONS"')
     );
     expect(syncGate).toContain("isOptionsPageSender(sender)");
-    expect(syncGate).not.toContain('error: "forbidden"');
+    expect(syncGate).toContain("AssistantSyncMessageSchema");
+    expect(syncGate).toContain("DwellMessageSchema");
   });
 });

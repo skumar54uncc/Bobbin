@@ -136,7 +136,7 @@ describe("collectBackup", () => {
   it("writes every library store, drops embeddings, and never carries settings or the Gemini key", async () => {
     await seed();
     const backup = await collectBackup(T + 5);
-    expect(backup).toMatchObject({ format: BACKUP_FORMAT, version: BACKUP_VERSION, schemaVersion: 6, exportedAt: T + 5 });
+    expect(backup).toMatchObject({ format: BACKUP_FORMAT, version: BACKUP_VERSION, schemaVersion: 7, exportedAt: T + 5 });
     expect(Object.keys(backup.stores).sort()).toEqual([...BACKUP_STORES].sort());
     expect(backup.stores.documents).toHaveLength(2);
     expect(backup.stores.chunks).toHaveLength(4);

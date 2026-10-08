@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { assistantSyncDb, readSyncEngineState } from "../src/assistant-sync/db";
 import { applyAssistantSyncPreferences } from "../src/assistant-sync/preferences";
-import { ASSISTANT_SYNC_ARCHIVES_KEY, ASSISTANT_SYNC_RETENTION_KEY } from "../src/assistant-sync/preference-keys";
+import { ASSISTANT_SYNC_RETENTION_KEY } from "../src/assistant-sync/preference-keys";
 import { mountAssistantSyncPanel } from "../src/options/assistant-sync-panel";
 
 const html = readFileSync(join(__dirname, "..", "src", "options", "options.html"), "utf8");
@@ -32,7 +32,12 @@ describe("assistant sync options", () => {
     expect(consentNode).toBeTruthy();
     const position = consentNode && enable ? consentNode.compareDocumentPosition(enable) : 0;
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(document.getElementById("cx-assistant-archives-note")?.textContent).toMatch(/personal backups/);
+    expect(consent).toMatch(/about every 5 minutes while you browse, and at least every 15 minutes/);
+    expect(consent).not.toMatch(/30 seconds/);
+    expect(document.getElementById("cx-assistant-archives")).toBeNull();
+    const warn = document.getElementById("cx-assistant-retention-warn")?.textContent ?? "";
+    expect(warn).toMatch(/deleted from the sheet permanently/);
+    expect(warn).toMatch(/Download backup/);
     expect(document.getElementById("cx-assistant-retention")?.getAttribute("min")).toBe("7");
     expect(document.getElementById("cx-assistant-retention")?.getAttribute("max")).toBe("365");
     const guides = [...document.querySelectorAll("[data-assistant-guide]")];
@@ -121,14 +126,64 @@ describe("assistant sync options", () => {
     expect((await readSyncEngineState()).syncEnabled).toBe(false);
   });
 
-  it("saves retention and the archive toggle for the next sync", async () => {
+  it("shows the status line and counts down when Sync now lands inside the minute", async () => {
+    const { writeSyncEngineState, defaultSyncEngineState } = await import("../src/assistant-sync/db");
+    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true });
+    const sent: string[] = [];
+    (globalThis as { chrome?: unknown }).chrome = {
+      storage: { local: { get: async () => ({}), set: async () => {} } },
+      runtime: {
+        lastError: undefined,
+        sendMessage: async (msg: { action?: string }) => {
+          sent.push(msg.action ?? "");
+          if (msg.action === "status") {
+            return { ok: true, state: await readSyncEngineState(), statusLine: "Synced 2 min ago. Updates about every 5 minutes while you browse, and at least every 15 minutes." };
+          }
+          return { ok: true, status: "waiting", waitMs: 23_000 };
+        },
+      },
+    };
+    mountAssistantSyncPanel();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const line = document.getElementById("cx-assistant-line");
+    expect(line?.textContent).toMatch(/^Synced 2 min ago\./);
+    const now = document.getElementById("cx-assistant-now") as HTMLButtonElement;
+    expect(now.disabled).toBe(false);
+    now.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sent).toContain("now");
+    expect(line?.textContent).toBe("Syncing in 23s");
+    expect(now.disabled).toBe(true);
+  });
+
+  it("offers Reconnect Google Drive when Google refused the token", async () => {
+    const { writeSyncEngineState, defaultSyncEngineState } = await import("../src/assistant-sync/db");
+    await writeSyncEngineState({ ...defaultSyncEngineState(), syncEnabled: true, authNeeded: true });
+    (globalThis as { chrome?: unknown }).chrome = {
+      storage: { local: { get: async () => ({}), set: async () => {} } },
+      runtime: {
+        lastError: undefined,
+        sendMessage: async () => ({ ok: true, state: await readSyncEngineState(), statusLine: "Sync paused: reconnect Google Drive." }),
+      },
+    };
+    mountAssistantSyncPanel();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const enable = document.getElementById("cx-assistant-enable") as HTMLButtonElement;
+    expect(enable.hidden).toBe(false);
+    expect(enable.textContent).toBe("Reconnect Google Drive");
+    expect((document.getElementById("cx-assistant-now") as HTMLButtonElement).disabled).toBe(true);
+    expect((document.getElementById("cx-assistant-lost") as HTMLImageElement).src).toContain("felt-lost");
+    expect(document.getElementById("cx-assistant-line")?.textContent).toBe("Sync paused: reconnect Google Drive.");
+  });
+
+  it("saves retention for the next sync", async () => {
     const stored: Record<string, unknown> = {};
     (globalThis as { chrome?: unknown }).chrome = {
       storage: {
         local: {
-          get: async (keys: string[]) => {
+          get: async (keys: string | string[]) => {
             const out: Record<string, unknown> = {};
-            for (const key of keys) if (key in stored) out[key] = stored[key];
+            for (const key of typeof keys === "string" ? [keys] : keys) if (key in stored) out[key] = stored[key];
             return out;
           },
           set: async (values: Record<string, unknown>) => {
@@ -149,19 +204,10 @@ describe("assistant sync options", () => {
     retention.value = "30";
     retention.dispatchEvent(new Event("change"));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    const archives = document.getElementById("cx-assistant-archives") as HTMLInputElement;
-    archives.checked = true;
-    archives.dispatchEvent(new Event("change"));
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(stored[ASSISTANT_SYNC_RETENTION_KEY]).toBe(30);
-    expect(stored[ASSISTANT_SYNC_ARCHIVES_KEY]).toBe(true);
-    await applyAssistantSyncPreferences({
-      retentionDays: stored[ASSISTANT_SYNC_RETENTION_KEY],
-      archivesEnabled: stored[ASSISTANT_SYNC_ARCHIVES_KEY],
-    });
+    await applyAssistantSyncPreferences({ retentionDays: stored[ASSISTANT_SYNC_RETENTION_KEY] });
     const state = await readSyncEngineState();
     expect(state.retentionDays).toBe(30);
-    expect(state.archivesEnabled).toBe(true);
     expect(state.syncEnabled).toBe(false);
   });
 });

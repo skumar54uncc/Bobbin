@@ -6,6 +6,7 @@ import {
   parseLinkedInPage,
   canonicalLinkedInUrl,
   profilePhotoUrl,
+  sameLinkedInProfile,
 } from "../src/lib/capture/linkedin";
 
 function doc(name: string): Document {
@@ -24,9 +25,39 @@ describe("canonicalLinkedInUrl", () => {
     expect(canonicalLinkedInUrl("https://de.linkedin.com/company/tidora/about/")).toBe(
       "https://www.linkedin.com/company/tidora/"
     );
+    expect(canonicalLinkedInUrl("https://www.linkedin.com/school/unc-charlotte/about/")).toBe(
+      "https://www.linkedin.com/school/unc-charlotte/"
+    );
+    expect(canonicalLinkedInUrl("https://www.linkedin.com/showcase/acme-labs/")).toBe(
+      "https://www.linkedin.com/showcase/acme-labs/"
+    );
     expect(canonicalLinkedInUrl("https://www.linkedin.com/feed/")).toBeNull();
     expect(canonicalLinkedInUrl("https://evil.example/in/mira/")).toBeNull();
     expect(canonicalLinkedInUrl("https://linkedin.com.evil.example/in/mira/")).toBeNull();
+  });
+
+  it("treats tracking queries and overlay paths as the same profile", () => {
+    expect(
+      sameLinkedInProfile(
+        "https://www.linkedin.com/in/nairobi-toombs-574667213/",
+        "https://www.linkedin.com/in/nairobi-toombs-574667213/?trk=public_profile&lipi=abc"
+      )
+    ).toBe(true);
+    expect(
+      sameLinkedInProfile(
+        "https://www.linkedin.com/in/nairobi-toombs-574667213/overlay/contact-info/",
+        "https://www.linkedin.com/in/nairobi-toombs-574667213/"
+      )
+    ).toBe(true);
+    expect(
+      sameLinkedInProfile(
+        "https://www.linkedin.com/in/nairobi-toombs-574667213/",
+        "https://www.linkedin.com/in/someone-else/"
+      )
+    ).toBe(false);
+    expect(
+      sameLinkedInProfile("https://www.linkedin.com/feed/", "https://www.linkedin.com/in/nairobi-toombs-574667213/")
+    ).toBe(false);
   });
 });
 
@@ -92,6 +123,135 @@ describe("parseLinkedInPage", () => {
     expect(parseLinkedInPage(doc("profile.html"), "https://evil.example/in/mira/")).toBeNull();
     const empty = new DOMParser().parseFromString("<html><head><title>LinkedIn</title></head><body></body></html>", "text/html");
     expect(parseLinkedInPage(empty, "https://www.linkedin.com/in/x/")).toBeNull();
+  });
+
+  it("reads a current profile: name in a header, no section anchors, company link", () => {
+    const html = `<html><head>
+      <title>Nairobi Toombs | LinkedIn</title>
+      <meta property="og:title" content="Feed | LinkedIn" />
+    </head><body>
+      <header class="global-nav"><h1>LinkedIn</h1></header>
+      <main>
+        <section data-member-id="99">
+          <header><h2>Nairobi Toombs</h2></header>
+          <div><span>Product designer</span></div>
+          <span>Charlotte, North Carolina</span>
+          <img src="https://media.licdn.com/dms/image/v2/D4E/profile-displayphoto-shrink_400_400/0/1" />
+        </section>
+        <section>
+          <h2>Experience</h2>
+          <ul><li>
+            <span aria-hidden="true">Product designer</span>
+            <a href="https://www.linkedin.com/company/acme/">Acme</a>
+            <span aria-hidden="true">Jan 2024 to Present</span>
+          </li></ul>
+        </section>
+      </main></body></html>`;
+    const d = new DOMParser().parseFromString(html, "text/html");
+    const p = parseLinkedInPage(d, "https://www.linkedin.com/in/nairobi-toombs-574667213/?trk=x");
+    expect(p).toMatchObject({
+      kind: "person",
+      name: "Nairobi Toombs",
+      headline: "Product designer",
+      company: "Acme",
+      roleTitle: "Product designer",
+      location: "Charlotte, North Carolina",
+      profileUrl: "https://www.linkedin.com/in/nairobi-toombs-574667213/",
+    });
+    expect(p?.photoUrl).toContain("profile-displayphoto-shrink_400_400");
+  });
+
+  it("reads a long headline and the person's photo, not the school logo", () => {
+    const headline =
+      "Seeking AI Internship or Full-Time Opportunities in USA | MS in CS | Experienced RPA developer | Process Automation | AI automation";
+    const html = `<html><head><title>Gokul Krishna A | LinkedIn</title></head><body><main>
+      <section>
+        <a href="https://www.linkedin.com/school/binghamton-university/">
+          <img src="https://media.licdn.com/dms/image/v2/D560BAQ/company-logo_200_200/0/1" />
+          <span>Binghamton University</span>
+        </a>
+        <h2>Gokul Krishna A</h2>
+        <div><span>${headline}</span></div>
+        <span>United States</span>
+        <a>Contact info</a>
+        <img src="https://media.licdn.com/dms/image/v2/D4E03AQ/profile-displayphoto-shrink_100_100/0/1" />
+        <img src="https://media.licdn.com/dms/image/v2/D4E03AQ/profile-displayphoto-shrink_400_400/0/2" />
+      </section>
+    </main></body></html>`;
+    const p = parseLinkedInPage(
+      new DOMParser().parseFromString(html, "text/html"),
+      "https://www.linkedin.com/in/gokulkrishna/"
+    );
+    expect(p?.headline).toBe(headline);
+    expect(p?.photoUrl).toContain("profile-displayphoto-shrink_400_400");
+    expect(p?.photoUrl).not.toContain("company-logo");
+  });
+
+  it("keeps the profile photo when a larger face sits in the recommendation rail", () => {
+    const html = `<html><head><title>Laura Yang | LinkedIn</title></head><body><main>
+      <section data-member-id="7">
+        <h2>Laura Yang</h2>
+        <div><span>Aspiring CPA | Accounting Student at University of North Carolina at Charlotte</span></div>
+        <img alt="Laura Yang" src="https://media.licdn.com/dms/image/v2/LAURA/profile-displayphoto-shrink_200_200/0/1" />
+      </section>
+      <aside>
+        <a href="https://www.linkedin.com/in/bill-gates/">
+          <img alt="Bill Gates" src="https://media.licdn.com/dms/image/v2/BILL/profile-displayphoto-shrink_800_800/0/2" />
+        </a>
+      </aside>
+    </main></body></html>`;
+    const p = parseLinkedInPage(
+      new DOMParser().parseFromString(html, "text/html"),
+      "https://www.linkedin.com/in/laura-yang-741b1431a/"
+    );
+    expect(p?.name).toBe("Laura Yang");
+    expect(p?.photoUrl).toContain("LAURA");
+    expect(p?.photoUrl).not.toContain("BILL");
+  });
+
+  it("keeps the photo that links to this profile's own photo viewer", () => {
+    const html = `<html><head><title>Tabitha Hadley, M.S | LinkedIn</title></head><body><main>
+      <section>
+        <a href="/in/tabitha-hadley/overlay/photo/">
+          <img src="https://media.licdn.com/dms/image/v2/TABITHA/profile-displayphoto-shrink_400_400/0/1" />
+        </a>
+        <h1>Tabitha Hadley, M.S</h1>
+        <div><span>Manager, Early Talent Technology Programs | BRG Leadership</span></div>
+        <a href="/search/results/people/?facetConnectionOf=x">
+          <img src="https://media.licdn.com/dms/image/v2/MUTUAL/profile-displayphoto-shrink_800_800/0/2" />
+          <span>Abdul-Rahman and 235 other mutual connections</span>
+        </a>
+      </section>
+    </main></body></html>`;
+    const p = parseLinkedInPage(
+      new DOMParser().parseFromString(html, "text/html"),
+      "https://www.linkedin.com/in/tabitha-hadley/"
+    );
+    expect(p?.photoUrl).toContain("TABITHA");
+  });
+
+  it("keeps this profile's photo when a larger face is listed under more profiles", () => {
+    const html = `<html><head><title>Luckas Mejia Granadino | LinkedIn</title></head><body><main>
+      <section>
+        <button aria-label="Luckas Mejia Granadino">
+          <img alt="Luckas Mejia Granadino" src="https://media.licdn.com/dms/image/v2/LUCKAS/profile-displayphoto-shrink_800_800/0/1" />
+        </button>
+        <h1>Luckas Mejia Granadino</h1>
+        <div><span>Electrical Engineering Student at UNC Charlotte</span></div>
+        <h2>More profiles for you</h2>
+        <ul><li>
+          <img src="https://media.licdn.com/dms/image/v2/OTHER/profile-displayphoto-shrink_800_800/0/2" />
+          <a href="https://www.linkedin.com/in/someone-else/">Someone Else</a>
+        </li></ul>
+      </section>
+    </main></body></html>`;
+    const p = parseLinkedInPage(
+      new DOMParser().parseFromString(html, "text/html"),
+      "https://www.linkedin.com/in/luckas-mejia-granadino/"
+    );
+    expect(p?.headline).toBe("Electrical Engineering Student at UNC Charlotte");
+    expect(p?.photoUrl).toContain("LUCKAS");
+    expect(p?.photoUrl).not.toContain("OTHER");
   });
 
   it("caps field lengths (page-controlled text)", () => {
@@ -188,6 +348,94 @@ describe("parseLinkedInPage company detail", () => {
     expect(c.summary).toBe(
       "Tidal energy microgrids for island communities. Renewable Energy Semiconductor Manufacturing, Bergen, Vestland, 51-200 employees."
     );
+  });
+
+  it("saves a company from its address when the home tab is only a post", () => {
+    const html = `<html><head><title>Feed | LinkedIn</title></head><body>
+      <div class="org-top-card"><h1>Fifth Third Bank</h1><p>The curious bank</p></div>
+      <main><article><h2>We're hiring</h2><p>Join Fifth Third Bank today.</p></article></main>
+    </body></html>`;
+    const c = parseLinkedInPage(
+      new DOMParser().parseFromString(html, "text/html"),
+      "https://www.linkedin.com/company/fifth-third-bank/posts/?feedView=all"
+    );
+    expect(c?.kind).toBe("company");
+    expect(c?.name).toBe("Fifth Third Bank");
+    expect(c?.headline).toBe("The curious bank");
+    expect(c?.profileUrl).toBe("https://www.linkedin.com/company/fifth-third-bank/");
+  });
+
+  it("uses the tab title when it matches the company slug, and the short tagline as the headline", () => {
+    const html = `<html><head><title>Charlotte Center City Partners | LinkedIn</title></head><body>
+      <main>
+        <section>
+          <img alt="University of North Carolina at Charlotte" src="https://media.licdn.com/dms/image/v2/C4E/company-logo_200_200/0/1" />
+          <h1>University City Partners</h1>
+          <p>A City Within A City</p>
+          <span>Non-profit Organizations · Charlotte, North Carolina · 1.8K followers · 2-10 employees</span>
+        </section>
+        <section>
+          <h2>Overview</h2>
+          <p>Every day we have an opportunity to make University City, Charlotte North Carolina a little better.</p>
+        </section>
+      </main></body></html>`;
+    const c = parseLinkedInPage(
+      new DOMParser().parseFromString(html, "text/html"),
+      "https://www.linkedin.com/company/charlottecentercitypartners/home/"
+    );
+    expect(c?.name).toBe("Charlotte Center City Partners");
+    expect(c?.headline).toBe("A City Within A City");
+    expect(c?.tagline).toBe("A City Within A City");
+  });
+
+  it("reads a company tagline when the page has no tagline class", () => {
+    const tagline =
+      "The best cloud-based payments platform for banks to offer modern global transaction banking for the connected economy.";
+    const html = `<html><head><title>finzly | LinkedIn</title></head><body>
+      <header class="global-nav"></header>
+      <main>
+        <section>
+          <img src="https://media.licdn.com/dms/image/v2/C4E/company-logo_200_200/0/1" />
+          <h2>finzly</h2>
+          <p>${tagline}</p>
+          <span>Financial Services · Charlotte, North Carolina · 23K followers · 201-500 employees</span>
+        </section>
+        <section>
+          <h2>Overview</h2>
+          <p>We help banks to prepare for the embedded, connected and real-time demands of the new economy.</p>
+        </section>
+      </main></body></html>`;
+    const c = parseLinkedInPage(
+      new DOMParser().parseFromString(html, "text/html"),
+      "https://www.linkedin.com/company/finzly/home/"
+    );
+    expect(c?.kind).toBe("company");
+    expect(c?.name).toBe("finzly");
+    expect(c?.headline).toBe(tagline);
+    expect(c?.photoUrl).toContain("company-logo");
+  });
+
+  it("keeps the company tagline when a jobs tab also shows buttons and stats", () => {
+    const html = `<html><head><title>BioCytics Inc | LinkedIn</title></head><body>
+      <div class="org-top-card">
+        <img alt="BioCytics Inc" src="https://media.licdn.com/dms/image/v2/BIO/company-logo_200_200/0/1" />
+        <h1>BioCytics Inc</h1>
+        <p>Human Application Lab</p>
+        <span>Show all</span>
+        <span>10%</span>
+        <span>37</span>
+        <p>BioCytics is an R&amp;D incubator within Carolina BioOncology Institute</p>
+      </div>
+      <main><section><h2>Jobs</h2><button>Show all</button></section></main>
+    </body></html>`;
+    const c = parseLinkedInPage(
+      new DOMParser().parseFromString(html, "text/html"),
+      "https://www.linkedin.com/company/biocytics-inc./jobs/"
+    );
+    expect(c?.name).toBe("BioCytics Inc");
+    expect(c?.headline).toBe("Human Application Lab");
+    expect(c?.tagline).toBe("Human Application Lab");
+    expect(c?.photoUrl).toContain("company-logo");
   });
 
   it("reads a single bullet separated info line too", () => {

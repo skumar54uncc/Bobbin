@@ -36,64 +36,103 @@ function normalizedUrl(): string {
 }
 
 let running = false;
+/** A capture was requested while one was already reading the page. */
+let again = false;
 
-/** Which optional captures the service worker enabled for this page. */
-interface CaptureFlags {
-  tables: boolean;
-  images: boolean;
-  /** On-device descriptions: user setting and policy both allow it. */
-  imageDescriptions: boolean;
+async function extractOnce(flags: CaptureFlags, pass: number): Promise<void> {
+  const pageUrl = normalizedUrl();
+  const host = location.hostname;
+  const linkedIn = /(^|\.)linkedin\.com$/i.test(host);
+  const tables = flags.tables ? extractTables(document) : { chunks: [], capturedTableIndexes: [] };
+  if (normalizedUrl() !== pageUrl) {
+    again = true;
+    return;
+  }
+  const extraChunks: NewChunk[] = tables.chunks.map((c) => ({ ...c, text: redactPII(c.text).redacted }));
+  const images = flags.images ? extractImages(document, pageUrl) : null;
+  if (images) extraChunks.push({ ...images, text: redactPII(images.text).redacted });
+  const imageSrcs = (images?.locator as { images?: { src: string }[] } | undefined)?.images?.map((i) => i.src) ?? [];
+  const imageInputs = images && flags.imageDescriptions ? collectImageInputs(document, imageSrcs) : [];
+  const raw = extractPageText(document, undefined, { dropTableIndexes: tables.capturedTableIndexes });
+  if (normalizedUrl() !== pageUrl) {
+    again = true;
+    return;
+  }
+  const title = redactPII(raw.title).redacted;
+  const text = redactPII(raw.text).redacted;
+  const person = linkedIn ? parseLinkedInPage(document, pageUrl) : null;
+  const thinProfile = Boolean(
+    person && !person.headline && !person.roleTitle && !person.about && !person.company
+  );
+
+  const localMin =
+    host.includes("linkedin.com") ? 28 : host.includes("twitter.com") || host === "x.com" ? 38 : 72;
+  const textOk = text.length >= localMin;
+  if (!textOk && !person && !extraChunks.length) {
+    if (thinProfile && pass < 3) again = true;
+    return;
+  }
+
+  // The profile card is still the loading shell. Save the name now, then read
+  // the page again once the role and company have painted.
+  const summarize = textOk && !(thinProfile && pass < 3);
+  const summary = summarize ? await summarizeBestEffort(text) : "";
+  if (!isExtensionRuntimeAlive()) return;
+  if (normalizedUrl() !== pageUrl) {
+    again = true;
+    return;
+  }
+  const personNow = linkedIn ? parseLinkedInPage(document, pageUrl) : null;
+
+  await sendRuntimeMessage({
+    type: "CORTEX_INDEX",
+    payload: {
+      url: pageUrl,
+      title,
+      text: summarize && textOk ? text : "",
+      summary,
+      visitedAt: Date.now(),
+      ...(personNow ? { person: personNow } : {}),
+      ...(summarize && extraChunks.length ? { extraChunks } : {}),
+      ...(summarize && imageInputs.length ? { imageInputs } : {}),
+    },
+  });
+  if (thinProfile && pass < 3) again = true;
 }
 
 async function extractAndIndex(flags: CaptureFlags): Promise<void> {
-  if (running || !isExtensionRuntimeAlive()) return;
+  if (!isExtensionRuntimeAlive()) return;
+  if (running) {
+    again = true;
+    return;
+  }
   running = true;
   try {
-    // Tables first (Phase 5.7): captured tables are left out of the article text.
-    const tables = flags.tables ? extractTables(document) : { chunks: [], capturedTableIndexes: [] };
-    const extraChunks: NewChunk[] = tables.chunks.map((c) => ({ ...c, text: redactPII(c.text).redacted }));
-    // Images (Phase 5.8): alt, caption, title and heading text only.
-    const images = flags.images ? extractImages(document, location.href) : null;
-    if (images) extraChunks.push({ ...images, text: redactPII(images.text).redacted });
-    const imageSrcs = (images?.locator as { images?: { src: string }[] } | undefined)?.images?.map((i) => i.src) ?? [];
-    const imageInputs = images && flags.imageDescriptions ? collectImageInputs(document, imageSrcs) : [];
-    const raw = extractPageText(document, undefined, { dropTableIndexes: tables.capturedTableIndexes });
-    const title = redactPII(raw.title).redacted;
-    const text = redactPII(raw.text).redacted;
-
-    const host = location.hostname;
-    // LinkedIn profile / company pages also feed people memory (Phase 5.1).
-    const person = /(^|\.)linkedin\.com$/i.test(host)
-      ? parseLinkedInPage(document, location.href)
-      : null;
-
-    const localMin =
-      host.includes("linkedin.com") ? 28 : host.includes("twitter.com") || host === "x.com" ? 38 : 72;
-    const textOk = text.length >= localMin;
-    if (!textOk && !person && !extraChunks.length) return;
-
-    const summary = textOk ? await summarizeBestEffort(text) : "";
-    if (!isExtensionRuntimeAlive()) return;
-
-    await sendRuntimeMessage({
-      type: "CORTEX_INDEX",
-      payload: {
-        url: normalizedUrl(),
-        title,
-        text: textOk ? text : "",
-        summary,
-        visitedAt: Date.now(),
-        ...(person ? { person } : {}),
-        ...(extraChunks.length ? { extraChunks } : {}),
-        ...(imageInputs.length ? { imageInputs } : {}),
-      },
-    });
+    let pass = 0;
+    do {
+      again = false;
+      pass += 1;
+      await extractOnce(flags, pass);
+      if (again && isExtensionRuntimeAlive()) {
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+      }
+    } while (again && pass < 4 && isExtensionRuntimeAlive());
   } catch (e) {
     if (isInvalidatedExtensionError(e) || !isExtensionRuntimeAlive()) return;
     devLog.warn("[Cortex] extract:", e);
   } finally {
     running = false;
+    if (again && isExtensionRuntimeAlive()) {
+      again = false;
+      void extractAndIndex(flags);
+    }
   }
+}
+interface CaptureFlags {
+  tables: boolean;
+  images: boolean;
+  /** On-device descriptions: user setting and policy both allow it. */
+  imageDescriptions: boolean;
 }
 
 if (!window.__cortexExtractLoaded) {

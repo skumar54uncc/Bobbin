@@ -13,6 +13,7 @@ import {
 } from "../shared/embed-model";
 import { agentDebugLog } from "../lib/agent-debug-log";
 import { runChat } from "../lib/chat/chat-engine";
+import { browsePages } from "../lib/browse-pages";
 import { ChatRunRegistry } from "../lib/chat/chat-run-registry";
 import { findMostSimilarDocument } from "../lib/resurface";
 import { runImageDescriptions } from "../lib/capture/images";
@@ -285,18 +286,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     const token = typeof msg.token === "string" ? msg.token : "";
     const folderId = typeof msg.folderId === "string" ? msg.folderId : null;
     const fileId = typeof msg.fileId === "string" ? msg.fileId : null;
-    const backupFileId = typeof msg.backupFileId === "string" ? msg.backupFileId : null;
     const retentionDays = typeof msg.retentionDays === "number" ? msg.retentionDays : undefined;
-    const archivesEnabled = typeof msg.archivesEnabled === "boolean" ? msg.archivesEnabled : undefined;
     void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
-      .then((mod) =>
-        mod.runAssistantSyncFromChrome(action, token, {
-          ids: { folderId, fileId },
-          retentionDays,
-          archivesEnabled,
-          backupFileId,
-        })
-      )
+      .then((mod) => mod.runAssistantSyncFromChrome(action, token, { ids: { folderId, fileId }, retentionDays }))
       .then((result) => sendResponse(result))
       .catch((error: unknown) =>
         sendResponse({
@@ -317,6 +309,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       url?: string;
       title?: string;
       visitedAt?: number;
+      pageText?: unknown;
+      open?: unknown;
       linkedInFields?: {
         kind?: string;
         name?: string;
@@ -346,11 +340,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
           url: String(visit?.url ?? ""),
           title: String(visit?.title ?? ""),
           visitedAt: Number(visit?.visitedAt ?? 0),
+          pageText: typeof visit?.pageText === "string" ? visit.pageText : null,
+          open: visit?.open === true,
           linkedInFields,
         })
       )
       .then((result) => sendResponse(result))
       .catch(() => sendResponse({ ok: false, error: "capture_failed" }));
+    return true;
+  }
+
+  if (msg?.type === "CORTEX_ASSISTANT_SYNC_FINALIZE") {
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false, error: "foreign_sender" });
+      return true;
+    }
+    const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+    const ended = Array.isArray(msg.visits) ? (msg.visits as Array<Record<string, unknown>>) : [];
+    const keep = new Set(Array.isArray(msg.keep) ? (msg.keep as unknown[]).filter((id): id is string => typeof id === "string") : []);
+    const abandonedBefore = num(msg.abandonedBefore);
+    void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/finalize")
+      .then(async (mod) => {
+        const now = Date.now();
+        let finalized = 0;
+        for (const row of ended) {
+          if (typeof row.id !== "string") continue;
+          const outcome = await mod.finalizeVisit(row.id, { activeMs: num(row.activeMs), maxScrollPct: num(row.maxScrollPct) }, now);
+          if (outcome === "final") finalized += 1;
+        }
+        if (abandonedBefore != null) finalized += await mod.finalizeAbandoned(keep, abandonedBefore, now);
+        return { ok: true as const, finalized };
+      })
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false, error: "finalize_failed" }));
     return true;
   }
 
@@ -407,11 +429,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     void (async () => {
       try {
         const cid = (msg as { collectionId?: unknown }).collectionId;
-        const { hits, evidence } = await runAdvancedSearch(
-          q,
-          embedQueryForSearch,
-          typeof cid === "number" && Number.isFinite(cid) ? { collectionId: cid } : undefined
-        );
+        const from = Number((msg as { from?: unknown }).from);
+        const to = Number((msg as { to?: unknown }).to);
+        const exact = String((msg as { exact?: unknown }).exact ?? "").trim().slice(0, 120);
+        const site = String((msg as { site?: unknown }).site ?? "").trim().slice(0, 80);
+        if (!q.trim()) {
+          const listed = await browsePages({
+            ...(Number.isFinite(from) && Number.isFinite(to) ? { from, to } : {}),
+            ...(site ? { site } : {}),
+            ...(exact ? { exact } : {}),
+            ...(typeof cid === "number" && Number.isFinite(cid) ? { collectionId: cid } : {}),
+          });
+          sendResponse({ ok: true as const, ...listed });
+          return;
+        }
+        const { hits, evidence } = await runAdvancedSearch(q, embedQueryForSearch, {
+          ...(typeof cid === "number" && Number.isFinite(cid) ? { collectionId: cid } : {}),
+          ...(Number.isFinite(from) && Number.isFinite(to) ? { forceTimeRange: { start: from, end: to }, strictTimeRange: true } : {}),
+          ...(exact ? { requirePhrase: exact } : {}),
+          ...(site ? { site } : {}),
+        });
         sendResponse({ ok: true as const, hits, evidence });
       } catch (e: unknown) {
         sendResponse({
@@ -439,6 +476,11 @@ cortexExtBus.onmessage = (ev: MessageEvent<CortexBusInbound>) => {
     return;
   }
 
+  if (incoming.kind === "chat-warm") {
+    void getPipe().catch(() => undefined);
+    return;
+  }
+
   if (incoming.kind === "chat-run") {
     const { tabId, requestId } = incoming;
     const signal = chatRuns.start(tabId, requestId);
@@ -452,6 +494,10 @@ cortexExtBus.onmessage = (ev: MessageEvent<CortexBusInbound>) => {
           embedQueryForSearch,
           { signal, ...(incoming.collectionId != null ? { collectionId: incoming.collectionId } : {}) }
         )) {
+          // A runtime message wakes the service worker; the bus alone does not.
+          if (event.type === "progress") {
+            void chrome.runtime.sendMessage({ type: "CORTEX_KEEPALIVE" }).catch(() => undefined);
+          }
           const out: CortexBusOutbound = {
             kind: "chat-event",
             tabId,

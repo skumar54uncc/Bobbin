@@ -8,6 +8,8 @@ import {
   getUserSettingsFresh,
 } from "../shared/extension-settings";
 import { doubleShiftSwitch } from "./double-shift";
+import { ASSISTANT_SYNC_ON_KEY } from "../assistant-sync/preference-keys";
+import { createDwellTracker, DWELL_TICK_MS, pageScrollPct, videoPlaying, type DwellTracker } from "./dwell";
 import { shouldReindexAfterMutation } from "./mutation-throttle";
 import { devLog } from "../lib/extension-logger";
 
@@ -40,7 +42,8 @@ function scheduleIndex(delayMs: number): void {
 
 /** LinkedIn / heavy SPAs paint profile chrome after first paint: retry captures */
 function scheduleCaptureRetries(): void {
-  const delays = [900, 2600, 5800, 12000];
+  const linkedIn = /(^|\.)linkedin\.com$/i.test(location.hostname);
+  const delays = linkedIn ? [1400, 4200] : [900, 2600, 5800, 12000];
   for (const d of delays) {
     window.setTimeout(() => guardedIndexPage(), d);
   }
@@ -71,10 +74,60 @@ function guardedIndexPage(): void {
   });
 }
 
+// Dwell is measured only while Assistant Sync is on.
+const SYNC_ON_KEY = ASSISTANT_SYNC_ON_KEY;
+let dwell: DwellTracker | null = null;
+let dwellTimer: number | undefined;
+
+function sendDwell(report: { url: string; activeMs: number; maxScrollPct: number; final: boolean }): void {
+  if (!isExtensionRuntimeAlive()) return;
+  void sendRuntimeMessage({ type: "CORTEX_DWELL", ...report }).catch(() => undefined);
+}
+
+function startDwell(): void {
+  if (dwell) return;
+  dwell = createDwellTracker(normalizedUrl(), {
+    now: () => Date.now(),
+    visible: () => document.visibilityState === "visible",
+    focused: () => document.hasFocus(),
+    playing: videoPlaying,
+    scrollPct: pageScrollPct,
+    send: sendDwell,
+  });
+  dwellTimer = window.setInterval(() => {
+    if (!isExtensionRuntimeAlive()) return stopDwell();
+    dwell?.tick();
+  }, DWELL_TICK_MS);
+}
+
+function stopDwell(): void {
+  window.clearInterval(dwellTimer);
+  dwell = null;
+}
+
+const markInput = () => dwell?.input();
+for (const event of ["pointerdown", "pointermove", "keydown", "wheel", "scroll", "touchstart"]) {
+  window.addEventListener(event, markInput, { passive: true, capture: true });
+}
+window.addEventListener("pagehide", () => dwell?.end());
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted || !dwell) return;
+  stopDwell();
+  startDwell();
+});
+
+void chrome.storage?.local
+  ?.get(SYNC_ON_KEY)
+  .then((stored) => {
+    if (stored[SYNC_ON_KEY] === true) startDwell();
+  })
+  .catch(() => undefined);
+
 function onLocationLikeChange(reason: "spa" | "mutation"): void {
   const next = normalizedUrl();
   if (next !== currentUrl) {
     currentUrl = next;
+    dwell?.navigate(next);
     scheduleIndex(reason === "spa" ? 900 : 1400);
     scheduleCaptureRetries();
     return;
@@ -107,6 +160,16 @@ history.replaceState = function (
   return out;
 };
 window.addEventListener("popstate", () => onLocationLikeChange("spa"));
+
+// LinkedIn's app keeps the original history.pushState, so the hook above
+// never sees an in-app profile open. Watch the address instead.
+if (/(^|\.)linkedin\.com$/i.test(location.hostname)) {
+  window.setInterval(() => {
+    if (!isExtensionRuntimeAlive()) return;
+    if (normalizedUrl() === currentUrl) return;
+    onLocationLikeChange("spa");
+  }, 1000);
+}
 
 const mo = new MutationObserver(() => {
   window.clearTimeout(mutationTimer);
@@ -175,7 +238,12 @@ void getUserSettings()
 
 // Turning the setting off applies to open tabs, not only to the next load.
 chrome.storage?.onChanged?.addListener((changes, area) => {
-  if (area !== "local" || !changes[USER_SETTINGS_KEY]) return;
+  if (area !== "local") return;
+  if (changes[SYNC_ON_KEY]) {
+    if (changes[SYNC_ON_KEY].newValue === true) startDwell();
+    else stopDwell();
+  }
+  if (!changes[USER_SETTINGS_KEY]) return;
   void getUserSettingsFresh()
     .then((s) => setDoubleShift(s.doubleShiftShortcutEnabled))
     .catch(() => {

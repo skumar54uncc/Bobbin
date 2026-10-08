@@ -9,13 +9,14 @@ import {
   getAgentPrompt,
 } from "../src/shared/agent-prompts";
 import { renderAgentsView } from "../src/content/agents-view";
+import { CADENCE_SENTENCE } from "../src/assistant-sync/schedule";
 
 describe("agent prompts", () => {
   it("exposes Connect AI Agents tab label", () => {
     expect(AGENTS_TAB_LABEL).toBe("Connect AI Agents");
   });
 
-  it("teaches live sheet use and forbids backup archives", () => {
+  it("teaches live sheet use and names only files Cortex writes", () => {
     const blob = [
       AGENTS_INTRO_BODY,
       ...AGENTS_STEPS,
@@ -26,8 +27,14 @@ describe("agent prompts", () => {
     expect(blob).toMatch(/live/i);
     expect(blob).toMatch(/Content/);
     expect(blob).toMatch(/About/);
-    expect(blob.toLowerCase()).toMatch(/json backup|monthly archive/);
+    // Cortex writes one Drive file. Copy never points at archives or backups it no longer makes.
+    expect(blob.toLowerCase()).not.toMatch(/json backup|archive/);
     expect(blob).not.toMatch(/\u2014/);
+  });
+
+  it("states the sync cadence from the scheduler, not a hardcoded number", () => {
+    expect(AGENTS_INTRO_BODY).toContain(CADENCE_SENTENCE);
+    expect(AGENTS_INTRO_BODY).not.toMatch(/30 seconds/);
   });
 
   it("includes Claude, ChatGPT, Gemini, and Cursor-style templates", () => {
@@ -36,6 +43,12 @@ describe("agent prompts", () => {
       expect.arrayContaining(["claude", "chatgpt", "gemini", "cursor", "generic"])
     );
     expect(getAgentPrompt("claude")?.prompt.length).toBeGreaterThan(80);
+    const prompts = AGENT_PROMPT_TEMPLATES.map((t) => t.prompt);
+    expect(new Set(prompts).size).toBe(prompts.length);
+    expect(getAgentPrompt("claude")?.prompt).toMatch(/You are Claude/);
+    expect(getAgentPrompt("chatgpt")?.prompt).toMatch(/You are ChatGPT/);
+    expect(getAgentPrompt("gemini")?.prompt).toMatch(/You are Gemini/);
+    expect(getAgentPrompt("cursor")?.prompt).toMatch(/Cursor agent/);
   });
 });
 

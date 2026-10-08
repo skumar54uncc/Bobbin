@@ -8,12 +8,22 @@ import { storageLocalGet, storageLocalSet } from "../shared/storage-local";
 
 injectBrandFontFacesInto(document.head);
 
+function setMascot(state: "wave" | "found"): void {
+  const img = document.querySelector<HTMLImageElement>(".cx-onb-mascot");
+  if (!img) return;
+  img.dataset.k = state;
+  img.src = `mascot/felt-${state}.webp`;
+  img.srcset = `mascot/felt-${state}@256.webp 256w, mascot/felt-${state}.webp 512w`;
+  img.alt = state === "found" ? "Cortex mascot with a page it found" : "Cortex mascot waving";
+}
+
 function setStatus(text: string, isError = false): void {
   const el = document.getElementById("cx-onb-consent-status");
   if (!el) return;
   el.hidden = !text;
   el.textContent = text;
   el.classList.toggle("is-error", isError);
+  if (!isError && /Indexing is on|already allowed/i.test(text)) setMascot("found");
 }
 
 async function markOnboardingDone(): Promise<void> {

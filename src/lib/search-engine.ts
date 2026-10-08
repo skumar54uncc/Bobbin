@@ -130,6 +130,12 @@ export interface AdvancedSearchOptions {
   abstainFloor?: number;
   /** Only documents in this collection (Phase 5.4). */
   collectionId?: number;
+  /** Page title or text must contain this phrase. Set from the search filters. */
+  requirePhrase?: string;
+  /** Hostname fragment, such as linkedin.com. */
+  site?: string;
+  /** A date the user picked stays empty when nothing was visited then. */
+  strictTimeRange?: boolean;
   /**
    * Clock for recency and for "yesterday" / "today" / "last week".
    * Production omits this and uses Date.now(). The eval harness pins it.
@@ -579,15 +585,45 @@ export async function runAdvancedSearch(
     if (inWindow.length > 0) {
       ranked = inWindow;
       timeWindow = "applied";
+    } else if (opts?.strictTimeRange) {
+      ranked = [];
+      timeWindow = "applied";
     } else {
       timeRelaxed = true;
       timeWindow = "relaxed";
     }
   }
 
+  const phrase = opts?.requirePhrase?.trim().toLowerCase() ?? "";
+  if (phrase) {
+    const docsWithPhrase = new Set<number>();
+    for (const row of prepared) {
+      if (row.corpus.toLowerCase().includes(phrase) && row.doc.id != null) docsWithPhrase.add(row.doc.id);
+    }
+    ranked = ranked.filter((row) => row.doc.id != null && docsWithPhrase.has(row.doc.id));
+  }
+  const site = opts?.site?.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0] ?? "";
+  if (site) {
+    ranked = ranked.filter((row) => row.doc.url.toLowerCase().includes(site));
+  }
+
+  const windowFields = timeWindow ? { timeWindow, timeRelaxed } : {};
+  if (ranked.length === 0 && (phrase || site || (opts?.strictTimeRange && effectiveParsed.timeRange))) {
+    const evidence = phrase
+      ? "No saved page contains that exact phrase."
+      : opts?.strictTimeRange && effectiveParsed.timeRange
+        ? "Nothing you saved falls in that date range."
+        : "No saved page matches that site.";
+    return {
+      hits: [],
+      evidence,
+      ...windowFields,
+      ...(opts?.includeChunks ? { chunks: [] } : {}),
+    };
+  }
+
   const topScore = ranked[0]?.score ?? 0;
   const floor = opts?.abstainFloor ?? ABSTAIN_FLOOR;
-  const windowFields = timeWindow ? { timeWindow, timeRelaxed } : {};
   if (floor > 0 && topScore < floor) {
     return {
       hits: [],

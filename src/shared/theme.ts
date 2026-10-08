@@ -10,7 +10,7 @@ export type ResolvedTheme = "light" | "dark";
 export const THEME_SETTINGS: ThemeSetting[] = ["light", "dark", "system"];
 
 export function normalizeThemeSetting(raw: unknown): ThemeSetting {
-  return raw === "light" || raw === "dark" || raw === "system" ? raw : "system";
+  return raw === "light" || raw === "dark" || raw === "system" ? raw : "light";
 }
 
 export function resolveTheme(setting: ThemeSetting, prefersDark: boolean): ResolvedTheme {
@@ -45,16 +45,16 @@ export interface ThemePalette {
 
 export const THEME_TOKENS: { light: ThemePalette; dark: ThemePalette } = {
   light: {
-    bg: "#e4e2dd",
-    surface: "#f7f5f0",
-    surfaceInput: "#fffef9",
-    noteBg: "#fffbeb",
-    text: "#1c1917",
-    textMuted: "#3f3f46",
-    textSubtle: "#52525b",
-    accent: "#b8250a",
-    link: "#9a3412",
-    border: "rgba(28, 25, 23, 0.14)",
+    bg: "#f8f1e6",
+    surface: "#f8f1e6",
+    surfaceInput: "#efe4d2",
+    noteBg: "#fff9ef",
+    text: "#2e231d",
+    textMuted: "#6b5a4e",
+    textSubtle: "#6b5a4e",
+    accent: "#9c3b21",
+    link: "#9c3b21",
+    border: "rgba(156, 59, 33, 0.35)",
     hoverSoft: "rgba(28, 25, 23, 0.04)",
     hover: "rgba(28, 25, 23, 0.06)",
     hoverStrong: "rgba(28, 25, 23, 0.08)",
@@ -67,26 +67,26 @@ export const THEME_TOKENS: { light: ThemePalette; dark: ThemePalette } = {
     accentBorder: "rgba(199, 42, 9, 0.45)",
   },
   dark: {
-    bg: "#141312",
-    surface: "#1e1c1a",
-    surfaceInput: "#262321",
-    noteBg: "#2a2418",
-    text: "#f2efe9",
-    textMuted: "#c9c4bb",
-    textSubtle: "#a8a29a",
-    accent: "#ef7554",
-    link: "#f4a28a",
-    border: "rgba(255, 255, 255, 0.14)",
-    hoverSoft: "rgba(255, 255, 255, 0.04)",
-    hover: "rgba(255, 255, 255, 0.07)",
-    hoverStrong: "rgba(255, 255, 255, 0.1)",
-    raised: "rgba(255, 255, 255, 0.05)",
+    bg: "#221a15",
+    surface: "#221a15",
+    surfaceInput: "#2e241e",
+    noteBg: "#3a2e26",
+    text: "#f3e9dc",
+    textMuted: "#bfae9e",
+    textSubtle: "#bfae9e",
+    accent: "#e07a5c",
+    link: "#e07a5c",
+    border: "rgba(243, 233, 220, 0.25)",
+    hoverSoft: "rgba(243, 233, 220, 0.04)",
+    hover: "rgba(243, 233, 220, 0.07)",
+    hoverStrong: "rgba(243, 233, 220, 0.1)",
+    raised: "rgba(243, 233, 220, 0.06)",
     backdrop: "rgba(0, 0, 0, 0.55)",
-    shadowColor: "rgba(0, 0, 0, 0.6)",
-    accentFaint: "rgba(239, 117, 84, 0.1)",
-    accentSoft: "rgba(239, 117, 84, 0.16)",
-    accentMuted: "rgba(239, 117, 84, 0.28)",
-    accentBorder: "rgba(239, 117, 84, 0.5)",
+    shadowColor: "rgba(0, 0, 0, 0.45)",
+    accentFaint: "rgba(224, 122, 92, 0.12)",
+    accentSoft: "rgba(224, 122, 92, 0.18)",
+    accentMuted: "rgba(224, 122, 92, 0.28)",
+    accentBorder: "rgba(224, 122, 92, 0.5)",
   },
 };
 
@@ -119,14 +119,14 @@ function block(selector: string, palette: ThemePalette, scheme: ResolvedTheme): 
   );
   // Named type scale + focus: same steps as cortex-theme.css for overlay controls.
   const shared = [
-    `  --cx-font-body: system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;`,
-    `  --cx-ts-caption: 500 11px/1.45 var(--cx-font-body);`,
-    `  --cx-ts-small: 500 13px/1.45 var(--cx-font-body);`,
-    `  --cx-ts-body: 400 14px/1.5 var(--cx-font-body);`,
-    `  --cx-ts-title: 700 14px/1.35 var(--cx-font-body);`,
-    `  --cx-ts-display: 700 19px/1.15 var(--cx-font-body);`,
-    `  --cx-ts-metric: 700 22px/1.2 var(--cx-font-body);`,
-    `  --cx-focus: rgba(199, 42, 9, 0.45);`,
+    `  --cx-font-body: Nunito, sans-serif;`,
+    `  --cx-ts-caption: 600 12px/1.45 var(--cx-font-body);`,
+    `  --cx-ts-small: 600 14px/1.45 var(--cx-font-body);`,
+    `  --cx-ts-body: 400 14px/1.55 var(--cx-font-body);`,
+    `  --cx-ts-title: 560 20px/1.3 Fraunces, serif;`,
+    `  --cx-ts-display: 560 26px/1.2 Fraunces, serif;`,
+    `  --cx-ts-metric: 560 26px/1.2 Fraunces, serif;`,
+    `  --cx-focus: #cd5f3e;`,
   ];
   return `${selector} {\n${lines.join("\n")}\n${shared.join("\n")}\n  color-scheme: ${scheme};\n}`;
 }

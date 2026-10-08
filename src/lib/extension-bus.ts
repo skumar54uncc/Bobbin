@@ -17,6 +17,8 @@ export type CortexBusInbound =
       settings: ChatSettings;
     }
   | { kind: "chat-abort"; tabId: number; requestId: number }
+  /** Load the embedding model ahead of the first question. */
+  | { kind: "chat-warm" }
   | {
       kind: "digest-run";
       tabId: number;

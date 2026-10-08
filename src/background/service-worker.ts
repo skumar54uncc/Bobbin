@@ -14,11 +14,24 @@ import {
   ASSISTANT_SYNC_ALARM,
   ASSISTANT_SYNC_ALARM_PERIOD_MIN,
   ASSISTANT_SYNC_SOON_ALARM,
-  ASSISTANT_SYNC_SOON_DELAY_MIN,
+  countUnsyncedVisits,
   readSyncEngineState,
   setDriveFolderTrashHandler,
   writeSyncEngineState,
 } from "../assistant-sync/db";
+import {
+  plannedFlushAt,
+  syncStatusLine,
+  VERIFY_EVERY_MS,
+  type FlushReason,
+} from "../assistant-sync/schedule";
+import {
+  AssistantSyncMessageSchema,
+  DwellMessageSchema,
+  parseMessage,
+  SyncWorkReplySchema,
+  type SyncWorkReply,
+} from "../assistant-sync/messages";
 import {
   applyRetention,
   forgetAll,
@@ -48,10 +61,10 @@ import {
 } from "../shared/shell-routing";
 import { storageLocalGet, storageLocalSet } from "../shared/storage-local";
 import {
-  ASSISTANT_SYNC_ARCHIVES_KEY,
   ASSISTANT_SYNC_BACKUP_FILE_ID,
   ASSISTANT_SYNC_FILE_ID,
   ASSISTANT_SYNC_FOLDER_ID,
+  ASSISTANT_SYNC_ON_KEY,
   ASSISTANT_SYNC_RETENTION_KEY,
 } from "../assistant-sync/preference-keys";
 import {
@@ -103,8 +116,9 @@ import {
 import { openCortexSearchForTab } from "../lib/open-cortex-search";
 import { openOverlayOnTab } from "../lib/overlay-injector";
 import { requestExtraction } from "../lib/extract-injector";
-import { canonicalLinkedInUrl, sanitizePersonDetail, type LinkedInEntity } from "../lib/capture/linkedin";
+import { canonicalLinkedInUrl, sameLinkedInProfile, sanitizePersonDetail, type LinkedInEntity } from "../lib/capture/linkedin";
 import { deletePerson, listPeople, upsertPerson } from "../lib/people";
+import { cacheProfilePhoto, getProfilePhoto, profilesWithPhotos } from "../lib/profile-photos";
 import { resolveEnteredUrl, toSuggestions } from "../lib/omnibox";
 import { saveHighlight } from "../lib/highlights";
 import { sanitizeExtraChunks, sanitizeImageInputs, type ImageInput } from "../lib/capture/extra-chunks";
@@ -212,16 +226,22 @@ async function maybeRecordPerson(person: unknown, pageUrl: string): Promise<bool
   const cap = (v: unknown, n: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
   const name = cap(p.name, 120);
   if (!name) return false;
-  await upsertPerson({
+  // Location, about, roles, education and company detail (validated here
+  // because the payload comes from the page).
+  const detail = sanitizePersonDetail(person);
+  const id = await upsertPerson({
     kind: p.kind,
     name,
     headline: cap(p.headline, 220),
     company: cap(p.company, 120),
     profileUrl: canonical,
-    // Location, about, roles, education and company detail (validated here
-    // because the payload comes from the page).
-    ...sanitizePersonDetail(person),
+    ...detail,
   });
+  // The user is on this profile now, so this is the only moment Cortex asks LinkedIn for the photo.
+  if (id != null && settings.profilePhotosEnabled && detail.photoUrl) {
+    void cacheProfilePhoto(canonical, detail.photoUrl, { logo: p.kind === "company" }).catch(() => undefined);
+  }
+  void chrome.storage?.session?.set({ cortexPeopleTick: Date.now() }).catch(() => undefined);
   return true;
 }
 
@@ -342,36 +362,22 @@ function storedId(value: unknown): string | null {
 async function readAssistantSyncLaunch(): Promise<{
   folderId: string | null;
   fileId: string | null;
-  backupFileId: string | null;
   retentionDays?: number;
-  archivesEnabled?: boolean;
 }> {
-  const stored = await storageLocalGet([
-    ASSISTANT_SYNC_FOLDER_ID,
-    ASSISTANT_SYNC_FILE_ID,
-    ASSISTANT_SYNC_BACKUP_FILE_ID,
-    ASSISTANT_SYNC_RETENTION_KEY,
-    ASSISTANT_SYNC_ARCHIVES_KEY,
-  ]);
+  const stored = await storageLocalGet([ASSISTANT_SYNC_FOLDER_ID, ASSISTANT_SYNC_FILE_ID, ASSISTANT_SYNC_RETENTION_KEY]);
   const retention = stored[ASSISTANT_SYNC_RETENTION_KEY];
-  const archives = stored[ASSISTANT_SYNC_ARCHIVES_KEY];
   return {
     folderId: storedId(stored[ASSISTANT_SYNC_FOLDER_ID]),
     fileId: storedId(stored[ASSISTANT_SYNC_FILE_ID]),
-    backupFileId: storedId(stored[ASSISTANT_SYNC_BACKUP_FILE_ID]),
     retentionDays: typeof retention === "number" ? retention : undefined,
-    archivesEnabled: typeof archives === "boolean" ? archives : undefined,
   };
 }
 
-async function writeAssistantSyncIds(
-  ids: { folderId?: string | null; fileId?: string | null; backupFileId?: string | null } | undefined
-): Promise<void> {
+async function writeAssistantSyncIds(ids: { folderId?: string | null; fileId?: string | null } | undefined): Promise<void> {
   if (!ids) return;
   const patch: Record<string, string | null> = {};
   if ("folderId" in ids) patch[ASSISTANT_SYNC_FOLDER_ID] = ids.folderId ?? null;
   if ("fileId" in ids) patch[ASSISTANT_SYNC_FILE_ID] = ids.fileId ?? null;
-  if ("backupFileId" in ids) patch[ASSISTANT_SYNC_BACKUP_FILE_ID] = ids.backupFileId ?? null;
   if (Object.keys(patch).length === 0) return;
   await storageLocalSet(patch);
 }
@@ -390,100 +396,206 @@ async function silentDriveToken(): Promise<string> {
   });
 }
 
-async function forwardAssistantSync(
-  action: "alarm" | "now" | "enable" | "disable",
-  tokenFromPage?: string
-): Promise<unknown> {
+function sendToOffscreen<T>(message: Record<string, unknown>): Promise<T | { ok: false; error: string }> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (result) => {
+      if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message ?? "offscreen_unreachable" });
+      else resolve(result as T);
+    });
+  });
+}
+
+async function sendSyncWork(action: "alarm" | "now" | "enable" | "disable", token: string): Promise<SyncWorkReply> {
+  const launch = await readAssistantSyncLaunch();
+  await ensureOffscreen();
+  const raw = await sendToOffscreen<unknown>({
+    type: "CORTEX_ASSISTANT_SYNC_WORK",
+    action,
+    token,
+    folderId: launch.folderId,
+    fileId: launch.fileId,
+    retentionDays: launch.retentionDays,
+  });
+  const reply = parseMessage(SyncWorkReplySchema, raw) ?? { ok: false, error: "Sync did not start." };
+  if (reply.ids) await writeAssistantSyncIds(reply.ids);
+  return reply;
+}
+
+function dropCachedToken(token: string): Promise<void> {
+  return new Promise((resolve) => chrome.identity.removeCachedAuthToken({ token }, () => resolve()));
+}
+
+async function markAuthNeeded(): Promise<void> {
+  const state = await readSyncEngineState();
+  await writeSyncEngineState({ ...state, authNeeded: true });
+}
+
+/** Content scripts read this flag so tabs measure dwell only while sync is on. */
+function mirrorSyncOn(on: boolean): void {
+  void storageLocalSet({ [ASSISTANT_SYNC_ON_KEY]: on }).catch(() => undefined);
+}
+
+/**
+ * One pass in the offscreen document. On a 401 the cached token is dropped and the
+ * pass runs once more with a fresh silent token; a second refusal pauses sync until
+ * the user reconnects from Settings.
+ */
+async function forwardAssistantSync(action: "alarm" | "now" | "enable" | "disable", tokenFromPage?: string): Promise<SyncWorkReply> {
   try {
     if (action === "disable") {
-      await ensureOffscreen();
-      const launch = await readAssistantSyncLaunch();
-      const response = await new Promise<
-        | {
-            ok?: boolean;
-            error?: string;
-            ids?: { folderId?: string | null; fileId?: string | null };
-            backupFileId?: string | null;
-          }
-        | undefined
-      >((resolve) => {
-        chrome.runtime.sendMessage(
-          {
-            type: "CORTEX_ASSISTANT_SYNC_WORK",
-            action: "disable",
-            token: "",
-            folderId: launch.folderId,
-            fileId: launch.fileId,
-            backupFileId: launch.backupFileId,
-          },
-          (result) => {
-            if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
-            else resolve(result as typeof response);
-          }
-        );
-      });
-      return response ?? { ok: true, status: "disabled" };
+      const reply = await sendSyncWork("disable", "");
+      mirrorSyncOn(false);
+      await chrome.alarms.clear(ASSISTANT_SYNC_SOON_ALARM);
+      return reply.ok === false ? reply : { ok: true, status: "disabled" };
     }
-    const token = action === "enable" ? tokenFromPage : await silentDriveToken();
-    if (!token) throw new Error("Sign in to Google is needed before Cortex can sync.");
-    const launch = await readAssistantSyncLaunch();
-    await ensureOffscreen();
-    const response = await new Promise<
-      | {
-          ok?: boolean;
-          error?: string;
-          ids?: { folderId?: string | null; fileId?: string | null };
-          backupFileId?: string | null;
-        }
-      | undefined
-    >((resolve) => {
-      chrome.runtime.sendMessage(
-        {
-          type: "CORTEX_ASSISTANT_SYNC_WORK",
-          action,
-          token,
-          folderId: launch.folderId,
-          fileId: launch.fileId,
-          backupFileId: launch.backupFileId,
-          retentionDays: launch.retentionDays,
-          archivesEnabled: launch.archivesEnabled,
-        },
-        (result) => {
-          if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
-          else resolve(result as typeof response);
-        }
-      );
-    });
-    if (response?.ids || "backupFileId" in (response ?? {})) {
-      await writeAssistantSyncIds({
-        ...(response?.ids ? { folderId: response.ids.folderId, fileId: response.ids.fileId } : {}),
-        ...(response && "backupFileId" in response ? { backupFileId: response.backupFileId ?? null } : {}),
-      });
+    let token = action === "enable" ? tokenFromPage : await silentDriveToken().catch(() => "");
+    if (!token) {
+      if (action !== "enable") await markAuthNeeded();
+      return { ok: false, status: "auth", error: "Sign in to Google is needed before Cortex can sync." };
     }
-    return response;
+    if (action === "enable") mirrorSyncOn(true);
+    let reply = await sendSyncWork(action, token);
+    if (reply.authFailed) {
+      await dropCachedToken(token);
+      token = await silentDriveToken().catch(() => "");
+      reply = token ? await sendSyncWork(action, token) : reply;
+      if (reply.authFailed || !token) await markAuthNeeded();
+    }
+    if (reply.retryAt) await scheduleFlushAlarm(reply.retryAt);
+    return reply;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Sign in to Google is needed before Cortex can sync.";
+    const message = error instanceof Error ? error.message : "Sync did not start.";
     const state = await readSyncEngineState();
     await writeSyncEngineState({ ...state, lastError: message });
     return { ok: false, error: message };
   }
 }
 
-async function runAssistantSyncAlarm(): Promise<void> {
+/** Moves the one-shot flush alarm earlier, never later. */
+async function scheduleFlushAlarm(at: number): Promise<number> {
+  const existing = await chrome.alarms.get(ASSISTANT_SYNC_SOON_ALARM);
+  if (existing && existing.scheduledTime <= at && existing.scheduledTime > Date.now()) return existing.scheduledTime;
+  await chrome.alarms.create(ASSISTANT_SYNC_SOON_ALARM, { when: Math.max(at, Date.now() + 1_000) });
+  return at;
+}
+
+/** Sets the next flush for a reason. Returns its time, or null while sync cannot run. */
+async function planAssistantFlush(reason: FlushReason): Promise<number | null> {
   const state = await readSyncEngineState();
-  if (!state.syncEnabled) return;
-  await forwardAssistantSync("alarm");
+  const at = plannedFlushAt(state, reason, Date.now());
+  if (at == null) return null;
+  return scheduleFlushAlarm(at);
 }
 
-function scheduleAssistantSyncSoon(): void {
-  chrome.alarms.create(ASSISTANT_SYNC_SOON_ALARM, { delayInMinutes: ASSISTANT_SYNC_SOON_DELAY_MIN });
+let assistantSyncRunning: Promise<SyncWorkReply> | null = null;
+
+/** One pass at a time. A second caller shares the pass already running. */
+function runAssistantSyncPass(action: "alarm" | "now"): Promise<SyncWorkReply> {
+  if (assistantSyncRunning) return assistantSyncRunning;
+  assistantSyncRunning = (async () => {
+    const state = await readSyncEngineState();
+    if (!state.syncEnabled) return { ok: false, status: "disabled" };
+    if (state.authNeeded) return { ok: false, status: "auth" };
+    return forwardAssistantSync(action);
+  })().finally(() => {
+    assistantSyncRunning = null;
+  });
+  return assistantSyncRunning;
 }
 
-function captureAssistantSyncVisit(visit: {
+const OPEN_VISITS_KEY = "cortex_assist_open_visits";
+/** A tab that has not reported for this long is treated as left. */
+const OPEN_VISIT_STALE_MS = 60 * 60_000;
+
+interface OpenVisit {
+  id: string;
+  url: string;
+  activeMs: number | null;
+  maxScrollPct: number | null;
+  seenAt: number;
+}
+
+let openVisitsChain: Promise<unknown> = Promise.resolve();
+
+/** Serialized read-modify-write of the open visit map in session storage. */
+function withOpenVisits<T>(edit: (visits: Record<string, OpenVisit>) => T): Promise<T> {
+  const run = openVisitsChain.then(async () => {
+    const stored = await chrome.storage.session.get(OPEN_VISITS_KEY);
+    const visits = (stored[OPEN_VISITS_KEY] ?? {}) as Record<string, OpenVisit>;
+    const out = edit(visits);
+    await chrome.storage.session.set({ [OPEN_VISITS_KEY]: visits });
+    return out;
+  });
+  openVisitsChain = run.catch(() => undefined);
+  return run;
+}
+
+/** Ends visits in the offscreen database, then plans an activity flush when any row became final. */
+async function finalizeVisits(ended: OpenVisit[], abandonedBefore?: number, keep: string[] = []): Promise<void> {
+  if (!ended.length && abandonedBefore == null) return;
+  await ensureOffscreen();
+  const reply = await sendToOffscreen<{ ok?: boolean; finalized?: number }>({
+    type: "CORTEX_ASSISTANT_SYNC_FINALIZE",
+    visits: ended.map(({ id, activeMs, maxScrollPct }) => ({ id, activeMs, maxScrollPct })),
+    keep,
+    ...(abandonedBefore != null ? { abandonedBefore } : {}),
+  });
+  if ("finalized" in reply && (reply.finalized ?? 0) > 0) await planAssistantFlush("activity");
+}
+
+function endTabVisit(tabId: number): void {
+  void withOpenVisits((visits) => {
+    const visit = visits[tabId];
+    delete visits[tabId];
+    return visit;
+  })
+    .then((visit) => (visit ? finalizeVisits([visit]) : undefined))
+    .catch(() => undefined);
+}
+
+/** Safety alarm housekeeping: ends visits whose tab is gone or silent, and rows left open by a restart. */
+async function finalizeStaleVisits(): Promise<void> {
+  const tabs = new Set((await chrome.tabs.query({})).map((tab) => String(tab.id)));
+  const now = Date.now();
+  const { ended, keep } = await withOpenVisits((visits) => {
+    const out: OpenVisit[] = [];
+    for (const [tabId, visit] of Object.entries(visits)) {
+      if (tabs.has(tabId) && now - visit.seenAt < OPEN_VISIT_STALE_MS) continue;
+      out.push(visit);
+      delete visits[tabId];
+    }
+    return { ended: out, keep: Object.values(visits).map((visit) => visit.id) };
+  });
+  await finalizeVisits(ended, now - OPEN_VISIT_STALE_MS, keep);
+}
+
+function onDwellReport(tabId: number, report: { url: string; activeMs: number; maxScrollPct: number; final: boolean }): void {
+  void withOpenVisits((visits) => {
+    const visit = visits[tabId];
+    if (!visit || visit.url !== report.url) return null;
+    visit.activeMs = Math.max(visit.activeMs ?? 0, report.activeMs);
+    visit.maxScrollPct = Math.max(visit.maxScrollPct ?? 0, report.maxScrollPct);
+    visit.seenAt = Date.now();
+    if (!report.final) return null;
+    delete visits[tabId];
+    return visit;
+  })
+    .then((visit) => (visit ? finalizeVisits([visit]) : undefined))
+    .catch(() => undefined);
+}
+
+/**
+ * Stores the page as an open visit. A tab keeps one visit id per page, so re-indexing
+ * the same page (LinkedIn capture retries, SPA re-reads) updates one row. Moving to a
+ * new page ends the previous visit.
+ */
+async function captureAssistantSyncVisit(visit: {
   id: string;
   url: string;
   title: string;
   visitedAt: number;
+  tabId?: number;
+  pageText?: string;
   linkedInFields?: {
     kind: "person" | "company";
     name: string;
@@ -492,22 +604,80 @@ function captureAssistantSyncVisit(visit: {
     profileUrl: string;
   } | null;
 }): Promise<void> {
-  return readSyncEngineState()
-    .then((state) => {
-      if (!state.syncEnabled) return false;
-      return ensureOffscreen().then(
-        () =>
-          new Promise<boolean>((resolve) => {
-            chrome.runtime.sendMessage({ type: "CORTEX_ASSISTANT_SYNC_CAPTURE", visit }, () => {
-              chrome.runtime.lastError;
-              resolve(true);
-            });
-          })
-      );
-    })
-    .then((captured) => {
-      if (captured && visit.linkedInFields) scheduleAssistantSyncSoon();
+  const state = await readSyncEngineState();
+  if (!state.syncEnabled) return;
+  const { tabId, ...rest } = visit;
+  let row: Record<string, unknown> = { ...rest, open: false };
+  let previous: OpenVisit | undefined;
+  if (tabId != null) {
+    const id = await withOpenVisits((visits) => {
+      const current = visits[tabId];
+      if (current && current.url === visit.url) {
+        current.seenAt = Date.now();
+        return current.id;
+      }
+      previous = current;
+      visits[tabId] = { id: visit.id, url: visit.url, activeMs: null, maxScrollPct: null, seenAt: Date.now() };
+      return visit.id;
     });
+    row = { ...rest, id, open: true };
+  }
+  await ensureOffscreen();
+  await sendToOffscreen({ type: "CORTEX_ASSISTANT_SYNC_CAPTURE", visit: row });
+  if (previous) await finalizeVisits([previous]);
+  else if (tabId == null) await planAssistantFlush("activity");
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  setTimeout(() => endTabVisit(tabId), FINAL_REPORT_GRACE_MS);
+});
+
+/** The page's own final dwell report usually lands within this window after the URL changes. */
+const FINAL_REPORT_GRACE_MS = 1_500;
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url) return;
+  const next = changeInfo.url.split("#")[0];
+  setTimeout(() => {
+    void withOpenVisits((visits) => {
+      const visit = visits[tabId];
+      if (!visit || visit.url.split("#")[0] === next) return null;
+      delete visits[tabId];
+      return visit;
+    })
+      .then((visit) => (visit ? finalizeVisits([visit]) : undefined))
+      .catch(() => undefined);
+  }, FINAL_REPORT_GRACE_MS);
+});
+
+/** Browser start: session storage is empty, so every open row ends. The sheet is checked once a day. */
+async function startAssistantSync(): Promise<void> {
+  const state = await readSyncEngineState();
+  mirrorSyncOn(state.syncEnabled);
+  if (!state.syncEnabled) return;
+  if (state.layout && Date.now() - state.layout.verifiedAt >= VERIFY_EVERY_MS) {
+    await writeSyncEngineState({ ...state, verifyNext: true });
+  }
+  await finalizeVisits([], Date.now());
+  await planAssistantFlush("startup");
+}
+
+async function assistantSyncStatus(): Promise<Record<string, unknown>> {
+  const [state, pendingPages, alarm] = await Promise.all([
+    readSyncEngineState(),
+    countUnsyncedVisits(),
+    chrome.alarms.get(ASSISTANT_SYNC_SOON_ALARM),
+  ]);
+  const now = Date.now();
+  const { layout: _layout, ...publicState } = state;
+  return {
+    ok: true,
+    state: publicState,
+    pendingPages,
+    statusLine: syncStatusLine(state, pendingPages, now),
+    nextFlushAt: alarm?.scheduledTime ?? null,
+    syncNowAt: state.lastFlushAt + 60_000,
+  };
 }
 
 setDriveFolderTrashHandler(async () => {
@@ -831,8 +1001,10 @@ async function commitIndexPayload(
     url: p.url,
     title: p.title,
     visitedAt: p.visitedAt,
+    tabId: opts.tabId ?? undefined,
+    pageText: p.text.slice(0, 4000),
     linkedInFields,
-  });
+  }).catch(() => undefined);
 
   onIndexCommitted();
   return { id: docId, chunks: chunkIds.length };
@@ -999,7 +1171,10 @@ async function runHistoryImportJob(
 }
 
 /** Runs BM25 + hybrid retrieval inside the offscreen document (stable lifetime). */
-function searchViaOffscreen(query: string, collectionId?: number): Promise<
+function searchViaOffscreen(
+  query: string,
+  opts?: { collectionId?: number; from?: number; to?: number; exact?: string; site?: string }
+): Promise<
   | { ok: true; hits: SearchHitDTO[]; evidence?: string }
   | { ok: false; error: string }
 > {
@@ -1007,7 +1182,14 @@ function searchViaOffscreen(query: string, collectionId?: number): Promise<
     void ensureOffscreen()
       .then(() => {
         chrome.runtime.sendMessage(
-          { type: "CORTEX_SEARCH_RUN", query, ...(collectionId != null ? { collectionId } : {}) },
+          {
+            type: "CORTEX_SEARCH_RUN",
+            query,
+            ...(opts?.collectionId != null ? { collectionId: opts.collectionId } : {}),
+            ...(opts?.from != null && opts.to != null ? { from: opts.from, to: opts.to } : {}),
+            ...(opts?.exact ? { exact: opts.exact } : {}),
+            ...(opts?.site ? { site: opts.site } : {}),
+          },
           (
             res:
               | {
@@ -1196,9 +1378,17 @@ async function openCortexSearchFromShortcut(): Promise<void> {
   });
 }
 
-configureSidePanelBehavior();
+addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  const message = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
+  // Chrome answers in-flight extension API calls with this after the worker stops.
+  if (message === "No SW") event.preventDefault();
+});
+
 installActiveTabCacheListeners();
-enableGlobalSidePanel();
+// Side panel setup waits for onInstalled / onStartup. Calling it while this
+// script is still evaluating rejects with "No SW" because Chrome has not
+// registered the worker yet.
 
 /** Toolbar icon — open search immediately (no stats popup). */
 function openCortexSearchFromToolbarClick(tab: chrome.tabs.Tab): void {
@@ -1460,10 +1650,10 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-  void getUserSettings();
-  void import("../shared/gemini-api-key").then((m) =>
-    m.ensureGeminiKeyTrustedAccess().then(() => m.migrateLegacyGeminiApiKey())
-  );
+  void getUserSettings().catch(() => undefined);
+  void import("../shared/gemini-api-key")
+    .then((m) => m.ensureGeminiKeyTrustedAccess().then(() => m.migrateLegacyGeminiApiKey()))
+    .catch(() => undefined);
   devLog.info("[Cortex] installed: local-only indexing (chunk-level)");
   scheduleStorageMaintenanceAlarm();
 
@@ -1474,6 +1664,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     void closeOffscreenDocument();
     void writeInitialStatsSnapshot();
   }
+  void startAssistantSync().catch(() => undefined);
 
   if (details.reason === "update") {
     void grandfatherIndexingConsentIfNeeded();
@@ -1482,38 +1673,54 @@ chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install") {
     // Do not start history backfill or live indexing until the user agrees
     // on the welcome page (INDEXING_CONSENT_KEY).
-    void storageLocalGet([ONBOARDING_DONE_KEY]).then((r) => {
-      if (r[ONBOARDING_DONE_KEY]) return;
-      void chrome.tabs.create({
-        url: chrome.runtime.getURL("onboarding.html"),
-        active: true,
-      });
-    });
+    void storageLocalGet("cortex_installed_at")
+      .then((r) => {
+        if (typeof r.cortex_installed_at === "number") return;
+        return storageLocalSet({ cortex_installed_at: Date.now() });
+      })
+      .catch(() => undefined);
+    void storageLocalGet([ONBOARDING_DONE_KEY])
+      .then((r) => {
+        if (r[ONBOARDING_DONE_KEY]) return;
+        return chrome.tabs.create({
+          url: chrome.runtime.getURL("onboarding.html"),
+          active: true,
+        });
+      })
+      .catch(() => undefined);
   }
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void getUserSettings();
-  void import("../shared/gemini-api-key").then((m) =>
-    m.ensureGeminiKeyTrustedAccess().then(() => m.migrateLegacyGeminiApiKey())
-  );
+  void getUserSettings().catch(() => undefined);
+  void import("../shared/gemini-api-key")
+    .then((m) => m.ensureGeminiKeyTrustedAccess().then(() => m.migrateLegacyGeminiApiKey()))
+    .catch(() => undefined);
   void grandfatherIndexingConsentIfNeeded();
   scheduleStorageMaintenanceAlarm();
   configureSidePanelBehavior();
   enableGlobalSidePanel();
+  void startAssistantSync().catch(() => undefined);
 });
+
+function quietChrome(result: unknown): void {
+  const pending = result as { catch?: (onReject: () => void) => unknown } | null | undefined;
+  if (pending && typeof pending.catch === "function") void pending.catch(() => undefined);
+}
 
 function scheduleStorageMaintenanceAlarm(): void {
   void syncContextMenus().catch(() => undefined);
-  chrome.alarms.create(ASSISTANT_SYNC_ALARM, { periodInMinutes: ASSISTANT_SYNC_ALARM_PERIOD_MIN });
-  chrome.alarms.create("cortex-evict-storage", { periodInMinutes: 360 });
+  quietChrome(chrome.alarms.create(ASSISTANT_SYNC_ALARM, { periodInMinutes: ASSISTANT_SYNC_ALARM_PERIOD_MIN }));
+  quietChrome(chrome.alarms.create("cortex-evict-storage", { periodInMinutes: 360 }));
   // Phase 4.2: daily retention sweep (no-op while retention is off).
-  chrome.alarms.create(RETENTION_ALARM, { delayInMinutes: 2, periodInMinutes: 24 * 60 });
+  quietChrome(chrome.alarms.create(RETENTION_ALARM, { delayInMinutes: 2, periodInMinutes: 24 * 60 }));
   // Phase 3.4: upgrade pages chunked with an older profile, a few per tick.
-  chrome.alarms.create(RECHUNK_ALARM, {
-    delayInMinutes: 1,
-    periodInMinutes: RECHUNK_ALARM_PERIOD_MIN,
-  });
+  quietChrome(
+    chrome.alarms.create(RECHUNK_ALARM, {
+      delayInMinutes: 1,
+      periodInMinutes: RECHUNK_ALARM_PERIOD_MIN,
+    })
+  );
 }
 
 const RETENTION_ALARM = "cortex-retention";
@@ -1565,16 +1772,23 @@ async function runRechunkTick(): Promise<void> {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ASSISTANT_SYNC_ALARM || alarm.name === ASSISTANT_SYNC_SOON_ALARM) {
-    void runAssistantSyncAlarm();
+  if (alarm.name === ASSISTANT_SYNC_ALARM) {
+    void finalizeStaleVisits()
+      .catch(() => undefined)
+      .then(() => planAssistantFlush("safety"))
+      .catch(() => undefined);
+    return;
+  }
+  if (alarm.name === ASSISTANT_SYNC_SOON_ALARM) {
+    void runAssistantSyncPass("alarm").catch(() => undefined);
     return;
   }
   if (alarm.name === RECHUNK_ALARM) {
-    void runRechunkTick();
+    void runRechunkTick().catch(() => undefined);
     return;
   }
   if (alarm.name === RETENTION_ALARM) {
-    void runRetentionSweep();
+    void runRetentionSweep().catch(() => undefined);
     return;
   }
   if (alarm.name !== "cortex-evict-storage") return;
@@ -1642,9 +1856,6 @@ async function addTabPageToCollection(
 // Context menus (Phase 5.3 highlights, 5.4 collections). Rebuilt from settings.
 // ---------------------------------------------------------------------------
 const HIGHLIGHT_MENU_ID = "cortex-save-highlight";
-const COLLECTION_MENU_ID = "cortex-collections";
-const COLLECTION_ITEM_PREFIX = "cortex-collection-";
-const COLLECTION_NEW_ID = "cortex-collection-new";
 const WEB_PATTERNS = ["http://*/*", "https://*/*"];
 
 async function syncContextMenus(): Promise<void> {
@@ -1652,61 +1863,18 @@ async function syncContextMenus(): Promise<void> {
   const settings = await getEffectiveSettings();
   await new Promise<void>((resolve) => chrome.contextMenus.removeAll(() => resolve()));
   if (settings.highlightsEnabled) {
-    chrome.contextMenus.create({
-      id: HIGHLIGHT_MENU_ID,
-      title: "Save to Cortex",
-      contexts: ["selection"],
-      documentUrlPatterns: WEB_PATTERNS,
-    });
+    chrome.contextMenus.create(
+      {
+        id: HIGHLIGHT_MENU_ID,
+        title: "Save to Cortex",
+        contexts: ["selection"],
+        documentUrlPatterns: WEB_PATTERNS,
+      },
+      () => {
+        void chrome.runtime.lastError;
+      }
+    );
   }
-  chrome.contextMenus.create({
-    id: COLLECTION_MENU_ID,
-    title: "Add page to collection",
-    contexts: ["page"],
-    documentUrlPatterns: WEB_PATTERNS,
-  });
-  for (const c of await listCollections()) {
-    chrome.contextMenus.create({
-      id: `${COLLECTION_ITEM_PREFIX}${c.id}`,
-      parentId: COLLECTION_MENU_ID,
-      title: c.name.replace(/&/g, "&&"),
-      contexts: ["page"],
-      documentUrlPatterns: WEB_PATTERNS,
-    });
-  }
-  chrome.contextMenus.create({
-    id: COLLECTION_NEW_ID,
-    parentId: COLLECTION_MENU_ID,
-    title: "New collection...",
-    contexts: ["page"],
-    documentUrlPatterns: WEB_PATTERNS,
-  });
-}
-
-async function handleCollectionMenu(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab): Promise<void> {
-  if (tab?.id == null) return;
-  const id = String(info.menuItemId);
-  let collectionId: number | null = null;
-  if (id === COLLECTION_NEW_ID) {
-    let name: string | null = null;
-    try {
-      const [r] = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => window.prompt("Name for the new Cortex collection:", ""),
-      });
-      name = typeof r?.result === "string" ? r.result : null;
-    } catch {
-      name = null;
-    }
-    if (!name?.trim()) return;
-    collectionId = await createCollection(name);
-    await syncContextMenus();
-  } else if (id.startsWith(COLLECTION_ITEM_PREFIX)) {
-    collectionId = Number(id.slice(COLLECTION_ITEM_PREFIX.length));
-  }
-  if (collectionId == null || !Number.isFinite(collectionId)) return;
-  const res = await addTabPageToCollection(collectionId, tab);
-  flashBadge(tab.id, res.ok ? "+" : "!");
 }
 
 function flashBadge(tabId: number, text: string): void {
@@ -1754,10 +1922,6 @@ async function handleSaveHighlight(info: chrome.contextMenus.OnClickData, tab?: 
 chrome.contextMenus?.onClicked.addListener((info, tab) => {
   if (info.menuItemId === HIGHLIGHT_MENU_ID) {
     void handleSaveHighlight(info, tab).catch((e) => devLog.warn("[Cortex] highlight:", e));
-    return;
-  }
-  if (String(info.menuItemId).startsWith(COLLECTION_ITEM_PREFIX)) {
-    void handleCollectionMenu(info, tab).catch((e) => devLog.warn("[Cortex] collection menu:", e));
   }
 });
 
@@ -1774,7 +1938,7 @@ const OMNIBOX_DEFAULT = "Search your Cortex library for <match>%s</match>";
 let omniboxSeq = 0;
 let omniboxLast: { query: string; bestUrl: string | null } = { query: "", bestUrl: null };
 
-chrome.omnibox?.setDefaultSuggestion({ description: OMNIBOX_DEFAULT });
+quietChrome(chrome.omnibox?.setDefaultSuggestion({ description: OMNIBOX_DEFAULT }));
 
 chrome.omnibox?.onInputChanged.addListener((text, suggest) => {
   const seq = ++omniboxSeq;
@@ -1851,14 +2015,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
 
   const type = (msg as { type: string }).type;
 
+  if (type === "CORTEX_KEEPALIVE") {
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (type === "CORTEX_CHAT_WARM") {
+    void ensureOffscreen().then(() => cortexBus.postMessage({ kind: "chat-warm" } satisfies CortexBusInbound)).catch(() => undefined);
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (type === "CORTEX_INDEX_REQUEST") {
     const tabId = sender.tab?.id;
     const url = String((msg as { url?: unknown }).url ?? "");
-    if (tabId == null || !indexPayloadUrlMatchesTab(url, sender)) {
+    const tabUrl = sender.tab?.url ?? "";
+    if (tabId == null || (!indexPayloadUrlMatchesTab(url, sender) && !sameLinkedInProfile(url, tabUrl))) {
       sendResponse({ ok: false, error: "bad_index_request" });
       return true;
     }
-    if (!rateLimitHit(`extract:${tabId}`, 20, sendResponse)) return true;
+    const entityPage = /linkedin\.com\/(?:in|company|school|showcase)\//i.test(url);
+    if (!rateLimitHit(`extract:${tabId}`, entityPage ? 60 : 20, sendResponse)) return true;
     void requestTabExtraction(tabId, url, sender).then(sendResponse);
     return true;
   }
@@ -1960,21 +2137,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
   if (type === "CORTEX_INDEX") {
     const p = (msg as { payload: IndexPayload }).payload;
     const domainKey = `index:${hostnameFromUrl(p.url)}`;
-    if (!rateLimitHit(domainKey, 30, sendResponse)) return true;
+    // A profile or company page still gets saved when the text index is
+    // rate limited. LinkedIn retries would otherwise drop the person.
+    const indexAllowed = p?.person
+      ? SW_RATE_LIMITER.check(domainKey, 30)
+      : rateLimitHit(domainKey, 30, sendResponse);
+    if (!p?.person && !indexAllowed) return true;
 
     void (async () => {
       try {
-        const gate = await shouldSkipIndexing(
-          (msg as { payload: IndexPayload }).payload.url,
-          sender
-        );
+        const gate = await shouldSkipIndexing(p.url, sender);
         if (gate.skip) {
           sendResponse({ ok: false, reason: gate.reason });
           return;
         }
 
-        const p = (msg as { payload: IndexPayload }).payload;
-        if (!indexPayloadUrlMatchesTab(p.url, sender)) {
+        const tabUrl = sender.tab?.url ?? "";
+        if (!indexPayloadUrlMatchesTab(p.url, sender) && !sameLinkedInProfile(p.url, tabUrl)) {
           sendResponse({
             ok: false,
             error: ERROR_CODES.INDEX_URL_MISMATCH,
@@ -1984,6 +2163,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
         }
 
         const personRecorded = p.person ? await maybeRecordPerson(p.person, p.url) : false;
+        if (!indexAllowed) {
+          sendResponse({ ok: personRecorded, reason: "rate_limited", person: personRecorded });
+          return;
+        }
 
         const settingsForExtras = await getEffectiveSettings();
         const extraChunks = sanitizeExtraChunks(p.extraChunks, {
@@ -2137,10 +2320,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     return true;
   }
 
+  if (type === "CORTEX_PHOTO_GET") {
+    // The saved copy only. Nothing here talks to LinkedIn.
+    if (!rateLimitHit(`photo:${sender.tab?.id ?? 0}`, 300, sendResponse)) return true;
+    const profileUrl = String((msg as { profileUrl?: unknown }).profileUrl ?? "").slice(0, 2048);
+    void (async () => {
+      const settings = await getEffectiveSettings();
+      const photo = settings.profilePhotosEnabled && profileUrl ? await getProfilePhoto(profileUrl) : undefined;
+      if (!photo) {
+        sendResponse({ ok: false });
+        return;
+      }
+      const bytes = new Uint8Array(photo.bytes);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 8192) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192) as unknown as number[]);
+      }
+      sendResponse({ ok: true, mime: photo.mime, b64: btoa(bin) });
+    })().catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (type === "CORTEX_PEOPLE_LIST") {
     void (async () => {
       const q = String((msg as { q?: unknown }).q ?? "").slice(0, 200);
-      const people = await listPeople({ q, limit: 200 });
+      const [rows, settings] = await Promise.all([listPeople({ q, limit: 200 }), getEffectiveSettings()]);
+      const saved = settings.profilePhotosEnabled ? await profilesWithPhotos() : new Set<string>();
+      const people = rows.map((p) => ({ ...p, hasPhoto: saved.has(p.profileUrl) }));
       sendResponse({ ok: true as const, people });
     })().catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
@@ -2302,7 +2508,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
         const cidRaw = (msg as { collectionId?: unknown }).collectionId;
         const collectionId =
           typeof cidRaw === "number" && Number.isFinite(cidRaw) ? cidRaw : undefined;
-        const result = await searchViaOffscreen(q, collectionId);
+        const from = Number((msg as { from?: unknown }).from);
+        const to = Number((msg as { to?: unknown }).to);
+        const exact = String((msg as { exact?: unknown }).exact ?? "").slice(0, 120);
+        const site = String((msg as { site?: unknown }).site ?? "").slice(0, 80);
+        const result = await searchViaOffscreen(q, {
+          collectionId,
+          ...(Number.isFinite(from) && Number.isFinite(to) ? { from, to } : {}),
+          ...(exact.trim() ? { exact: exact.trim() } : {}),
+          ...(site.trim() ? { site: site.trim() } : {}),
+        });
         if (result.ok) {
           sendResponse({
             ok: true,
@@ -2681,19 +2896,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     return true;
   }
 
+  if (type === "CORTEX_SYNC_LABEL") {
+    if (sender.id !== chrome.runtime.id) {
+      sendResponse({ on: false });
+      return true;
+    }
+    void readSyncEngineState().then((state) => {
+      const phase = !state.syncEnabled
+        ? "wave"
+        : state.lastError
+          ? "lost"
+          : state.backfillPhase === "reading" || state.backfillPhase === "writing" || !state.lastSyncedAt
+            ? "syncing"
+            : "connected";
+      sendResponse({ on: state.syncEnabled, phase });
+    });
+    return true;
+  }
+
   if (type === "CORTEX_ASSISTANT_SYNC") {
     // Options opens in a tab, so sender.tab is set. A web page still cannot send this.
     if (!isPrivilegedExtensionSender(sender) && !isOptionsPageSender(sender)) {
       sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
       return true;
     }
-    const action = (msg as { action?: string }).action;
-    if (action === "status") {
-      void readSyncEngineState().then((state) => sendResponse({ ok: true, state }));
+    const parsed = parseMessage(AssistantSyncMessageSchema, msg);
+    if (!parsed) {
+      sendResponse({ ok: false, error: "bad_action" });
       return true;
     }
-    if (action !== "enable" && action !== "now" && action !== "disable") {
-      sendResponse({ ok: false, error: "bad_action" });
+    const action = parsed.action;
+    if (action === "status") {
+      void assistantSyncStatus().then(sendResponse, () => sendResponse({ ok: false, error: "status_failed" }));
       return true;
     }
     // Interactive Enable must come from Settings (user gesture + getAuthToken).
@@ -2702,20 +2936,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       return true;
     }
     if (action === "now") {
-      void readSyncEngineState().then((state) => {
+      void readSyncEngineState().then(async (state) => {
         if (!state.syncEnabled) {
-          sendResponse({ ok: false, error: "Turn Assist Sync on before syncing." });
+          sendResponse({ ok: false, error: "Turn Assistant Sync on before syncing." });
           return;
         }
-        void forwardAssistantSync("now").then((result) => sendResponse(result));
+        // One flush a minute, Sync now included. Inside the minute the page counts down.
+        const waitMs = state.lastFlushAt + 60_000 - Date.now();
+        if (waitMs > 0) {
+          await planAssistantFlush("now");
+          sendResponse({ ok: true, status: "waiting", waitMs });
+          return;
+        }
+        sendResponse(await runAssistantSyncPass("now"));
       });
       return true;
     }
-    const pageToken = (msg as { token?: unknown }).token;
-    void forwardAssistantSync(action, typeof pageToken === "string" ? pageToken : undefined).then((result) =>
-      sendResponse(result)
-    );
+    void forwardAssistantSync(action, parsed.token).then(async (result) => {
+      if (action === "enable" && result.more) await planAssistantFlush("now");
+      sendResponse(result);
+    });
     return true;
+  }
+
+  if (type === "CORTEX_DWELL") {
+    const tabId = sender.tab?.id;
+    const report = parseMessage(DwellMessageSchema, msg);
+    if (sender.id !== chrome.runtime.id || tabId == null || !report) return false;
+    onDwellReport(tabId, report);
+    return false;
   }
 
   if (type === "CORTEX_OPEN_OPTIONS") {
@@ -2723,7 +2972,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       try {
         const section = String((msg as { section?: unknown }).section ?? "");
         // Whitelist only known options sections (Assist Sync deep link from Agents tab).
-        if (section === "cx-sec-assistant") {
+        if (section === "cx-sec-assistant" || section === "cx-sec-capture") {
           await chrome.tabs.create({
             url: chrome.runtime.getURL(`options.html#${section}`),
             active: true,

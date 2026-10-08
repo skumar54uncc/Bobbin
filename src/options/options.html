@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Cortex Settings</title>
+    <link rel="stylesheet" href="fonts.css" />
+    <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="cortex-theme.css" />
     <link rel="stylesheet" href="cx-buttons.css" />
     <link rel="stylesheet" href="options.css" />
@@ -16,7 +18,7 @@
         <div class="cx-opt-brand" aria-label="Cortex">
           <img
             class="cx-opt-brand-mark"
-            src="icons/icon-48.png"
+            src="mascot/felt-head.webp"
             alt=""
             width="28"
             height="28"
@@ -40,7 +42,7 @@
           <li><a class="cx-nav-link" href="#cx-sec-appearance">Appearance</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-capture">Capture</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-intelligence">Intelligence</a></li>
-          <li><a class="cx-nav-link" href="#cx-sec-assistant">Assist Sync</a></li>
+          <li><a class="cx-nav-link" href="#cx-sec-assistant">Assistant Sync</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-privacy">Privacy and data</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-backup">Backup</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-about">About</a></li>
@@ -125,7 +127,7 @@
               <p class="cx-group-desc">Saved as soon as you pick one.</p>
               <div class="cx-radio-cards" role="radiogroup" aria-labelledby="cx-theme-sub">
                 <label class="cx-radio-card">
-                  <input type="radio" name="cx-theme" value="system" checked />
+                  <input type="radio" name="cx-theme" value="system" />
                   <span class="cx-radio-card-inner">
                     <span class="cx-radio-card-title">System</span>
                     <span class="cx-radio-card-desc">Follows your operating system setting.</span>
@@ -135,7 +137,7 @@
                   </span>
                 </label>
                 <label class="cx-radio-card">
-                  <input type="radio" name="cx-theme" value="light" />
+                  <input type="radio" name="cx-theme" value="light" checked />
                   <span class="cx-radio-card-inner">
                     <span class="cx-radio-card-title">Light</span>
                     <span class="cx-radio-card-desc">Always light.</span>
@@ -218,6 +220,13 @@
                   <input type="checkbox" id="cx-feat-peopleMemoryEnabled" class="cx-check-native cx-switch" data-feature="peopleMemoryEnabled" />
                 </div>
                 <div class="cx-feature-row">
+                  <label for="cx-feat-profilePhotosEnabled" class="cx-feature-label">
+                    <span class="cx-field-label">Show profile photos</span>
+                    <span class="cx-field-hint">Save the photo shown on a profile, on this device only. Photos are never synced. Turn this off to stop saving photos and hide the ones already saved.</span>
+                  </label>
+                  <input type="checkbox" id="cx-feat-profilePhotosEnabled" class="cx-check-native cx-switch" data-feature="profilePhotosEnabled" />
+                </div>
+                <div class="cx-feature-row">
                   <label for="cx-feat-youtubeTranscriptsEnabled" class="cx-feature-label">
                     <span class="cx-field-label">YouTube transcripts</span>
                     <span class="cx-field-hint">Index captions of videos you watch for at least 30 seconds.</span>
@@ -275,21 +284,6 @@
                 </div>
               </div>
             </div>
-
-            <div class="cx-group" id="cx-collections-group">
-              <h3 class="cx-group-title" id="cx-collections-h">Collections</h3>
-              <p class="cx-group-desc">
-                Group pages, for example "Job search", then search or ask within one collection. Add the
-                page you are on from the Cortex panel or the right-click menu.
-              </p>
-              <div class="cx-inline-form">
-                <label class="cx-visually-hidden" for="cx-collection-name">New collection name</label>
-                <input type="text" id="cx-collection-name" class="cx-input" maxlength="60" placeholder="New collection name" autocomplete="off" />
-                <button type="button" id="cx-collection-create" class="cx-btn cx-btn-secondary">Create collection</button>
-              </div>
-              <p id="cx-collection-feedback" class="cx-form-feedback" hidden role="status" aria-live="polite"></p>
-              <ul id="cx-collection-list" class="cx-collection-list" aria-label="Your collections"></ul>
-            </div>
           </div>
         </section>
 
@@ -329,7 +323,7 @@
                   <input type="radio" name="cx-chat-mode" value="cloud-only" />
                   <span class="cx-radio-card-inner">
                     <span class="cx-radio-card-title">Cloud only</span>
-                    <span class="cx-radio-card-desc">Uses Gemini when an API key is set.</span>
+                    <span class="cx-radio-card-desc">Uses the provider and API key you set below.</span>
                     <svg class="cx-radio-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                       <path d="M20 6L9 17l-5-5"></path>
                     </svg>
@@ -339,9 +333,9 @@
             </div>
 
             <div class="cx-group">
-              <h3 class="cx-group-title">Cloud chat (Gemini)</h3>
+              <h3 class="cx-group-title">Cloud chat</h3>
               <p class="cx-group-desc">
-                Cloud chat sends retrieved passages only. Your library stays on this device.
+                Cloud chat sends retrieved passages only. Your library stays on this device. Gemini, OpenAI, Anthropic, OpenRouter, Groq, Mistral, or any OpenAI-compatible endpoint.
               </p>
 
               <div class="cx-setting-row">
@@ -352,7 +346,20 @@
               </div>
 
               <div class="cx-field">
-                <label class="cx-field-label" for="cx-opt-gemini-key">Gemini API key</label>
+                <label class="cx-field-label" for="cx-opt-cloud-provider">Model provider</label>
+                <select id="cx-opt-cloud-provider" class="cx-input">
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="groq">Groq</option>
+                  <option value="mistral">Mistral</option>
+                  <option value="custom">Custom endpoint</option>
+                </select>
+              </div>
+
+              <div class="cx-field">
+                <label class="cx-field-label" for="cx-opt-gemini-key">API key</label>
                 <input
                   type="password"
                   id="cx-opt-gemini-key"
@@ -361,10 +368,52 @@
                   autocomplete="off"
                 />
                 <p class="cx-field-hint">
-                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
+                  <a id="cx-opt-cloud-help" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
                     >Get a free API key from Google AI Studio</a
                   >
                 </p>
+              </div>
+
+              <div class="cx-field">
+                <label class="cx-field-label" for="cx-opt-cloud-model-pick">Model</label>
+                <div class="cx-model-row">
+                  <select id="cx-opt-cloud-model-pick" class="cx-input"></select>
+                  <button type="button" id="cx-opt-cloud-models-load" class="cx-btn cx-btn-secondary">
+                    <span class="cx-btn-label">Load models from my key</span>
+                  </button>
+                </div>
+                <div id="cx-opt-cloud-model-other" hidden>
+                  <label class="cx-field-label cx-field-label-sub" for="cx-opt-cloud-model">Model id</label>
+                  <input
+                    type="text"
+                    id="cx-opt-cloud-model"
+                    class="cx-input"
+                    spellcheck="false"
+                    autocomplete="off"
+                    placeholder="gemini-3.8-flash"
+                  />
+                </div>
+                <p class="cx-field-hint">
+                  Pick a model from the list. Load models from my key shows exactly the ids your key can call, so nothing
+                  needs to be typed.
+                  <a id="cx-opt-cloud-models-help" href="https://ai.google.dev/gemini-api/docs/models" target="_blank" rel="noopener noreferrer"
+                    >See model names for Google Gemini</a
+                  >
+                </p>
+                <p id="cx-opt-cloud-models-msg" class="cx-form-feedback" hidden role="status" aria-live="polite"></p>
+              </div>
+
+              <div class="cx-field" id="cx-opt-cloud-base-wrap" hidden>
+                <label class="cx-field-label" for="cx-opt-cloud-base">Endpoint URL</label>
+                <input
+                  type="url"
+                  id="cx-opt-cloud-base"
+                  class="cx-input"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="https://example.com/v1/chat/completions"
+                />
+                <p class="cx-field-hint">https only. A model on this machine can use http://127.0.0.1.</p>
               </div>
 
               <div class="cx-actions-row">
@@ -380,13 +429,13 @@
         <!-- 5. Privacy and data ---------------------------------------- -->
         <section class="cx-sec" id="cx-sec-assistant" tabindex="-1" aria-labelledby="cx-assistant-h">
           <div class="cx-sec-head">
-            <h2 class="cx-sec-title" id="cx-assistant-h">Assist Sync</h2>
+            <h2 class="cx-sec-title" id="cx-assistant-h">Assistant Sync</h2>
           </div>
           <div class="cx-sec-body">
             <div class="cx-group" id="cx-assistant-consent">
               <h3 class="cx-group-title">Before you turn this on</h3>
               <p class="cx-group-desc">
-                Assist Sync copies your library into a folder named Cortex Memory in your own Google Drive. It syncs page titles, URLs, excerpts of pages you read for 5 minutes or more, searches, LinkedIn profiles, and topics. The Google permission is drive.file: Cortex can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can receive the relevant rows while it answers you. Sync stays off until you press Enable.
+                Assistant Sync copies your library into a folder named Cortex Memory in your own Google Drive. After you enable it, Cortex updates that sheet about every 5 minutes while you browse, and at least every 15 minutes. It syncs page titles, URLs, excerpts of pages you read for 5 minutes or more, searches, LinkedIn profiles, and topics. The Google permission is drive.file: Cortex can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can receive the relevant rows while it answers you. Sync stays off until you press Enable.
               </p>
               <p class="cx-field-hint">
                 <a href="https://skumar54uncc.github.io/Cortex/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
@@ -396,56 +445,75 @@
               <div class="cx-actions-row">
                 <button type="button" id="cx-assistant-enable" class="cx-btn cx-btn-primary">Enable</button>
                 <button type="button" id="cx-assistant-disable" class="cx-btn cx-btn-secondary" hidden>Disable</button>
-                <button type="button" id="cx-assistant-now" class="cx-btn cx-btn-secondary" disabled title="Turn Assist Sync on before syncing">Sync now</button>
+                <button type="button" id="cx-assistant-now" class="cx-btn cx-btn-secondary" disabled title="Turn Assistant Sync on before syncing">Sync now</button>
               </div>
               <p id="cx-assistant-feedback" class="cx-form-feedback" hidden role="status" aria-live="polite"></p>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">Status</h3>
-              <dl class="cx-assistant-status">
-                <div><dt>Sync</dt><dd id="cx-assistant-enabled">Off</dd></div>
-                <div><dt>Last sync</dt><dd id="cx-assistant-last">Not yet</dd></div>
-                <div><dt>Last error</dt><dd id="cx-assistant-error">None</dd></div>
-                <div><dt>Backfill</dt><dd id="cx-assistant-backfill">idle</dd></div>
-              </dl>
+              <p id="cx-assistant-line" class="cx-group-desc" role="status" aria-live="polite">Assistant Sync is off.</p>
+              <div class="cx-assistant-status-row">
+                <dl class="cx-assistant-status">
+                  <div><dt>Sync</dt><dd id="cx-assistant-enabled">Off</dd></div>
+                  <div><dt>Last sync</dt><dd id="cx-assistant-last">Not yet</dd></div>
+                  <div><dt>Last error</dt><dd id="cx-assistant-error">None</dd></div>
+                  <div><dt>Backfill</dt><dd id="cx-assistant-backfill">idle</dd></div>
+                </dl>
+                <img
+                  id="cx-assistant-lost"
+                  class="cx-assistant-lost is-lost"
+                  width="96"
+                  height="96"
+                  alt="Cortex mascot looking for a page"
+                  src="mascot/felt-lost.webp"
+                  srcset="mascot/felt-lost@256.webp 256w, mascot/felt-lost.webp 512w"
+                />
+              </div>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">Retention</h3>
               <div class="cx-field">
                 <label class="cx-field-label" for="cx-assistant-retention">Keep Drive rows for this many days</label>
                 <input type="number" id="cx-assistant-retention" class="cx-input cx-field-narrow" min="7" max="365" step="1" value="90" />
-                <p class="cx-field-hint">From 7 to 365 days. The default is 90. Older rows are deleted from the sheet.</p>
-              </div>
-              <div class="cx-feature-row">
-                <label for="cx-assistant-archives" class="cx-feature-label">
-                  <span class="cx-field-label">Monthly archives</span>
-                  <span class="cx-field-hint" id="cx-assistant-archives-note">Archives are personal backups. Assistants do not read them.</span>
-                </label>
-                <input type="checkbox" id="cx-assistant-archives" class="cx-check-native cx-switch" />
+                <p class="cx-field-hint">From 7 to 365 days. The default is 90.</p>
+                <p class="cx-field-hint" id="cx-assistant-retention-warn">
+                  Rows older than this are deleted from the sheet permanently. To keep a copy, use
+                  <a href="#cx-sec-backup">Download backup</a> first.
+                </p>
               </div>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">Assistant setup guides</h3>
-              <details class="cx-disclosure" data-assistant-guide="muse">
-                <summary>Muse</summary>
-                <p>Connect Muse to Google Drive. Open the spreadsheet named Cortex Memory in the folder Cortex Memory. Read the About tab first. About lists the tabs and the rules. Before Muse answers from its own knowledge, ask it to check the Content tab. Content holds excerpts from pages you read for 5 minutes or more. Use Visits, Searches, People, Companies, and Daily for the other questions. Leave monthly archive files alone. Those are personal backups.</p>
-              </details>
-              <details class="cx-disclosure" data-assistant-guide="grok">
-                <summary>Grok</summary>
-                <p>Connect Grok to Google Drive. Open the spreadsheet named Cortex Memory in the folder Cortex Memory. Read the About tab first. When a question is about something you read, tell Grok to use the Content tab before it uses its own knowledge. Content has excerpts of pages you read for 5 minutes or more. Visits lists every page. Searches, People, Companies, and Daily cover the rest. Do not use the monthly archive files. They are personal backups.</p>
-              </details>
-              <details class="cx-disclosure" data-assistant-guide="chatgpt">
-                <summary>ChatGPT</summary>
-                <p>Connect ChatGPT to Google Drive. Open the spreadsheet named Cortex Memory in the folder Cortex Memory. Read the About tab first. For questions about what a page said, tell ChatGPT to check the Content tab before answering from its own knowledge. Content stores excerpts of pages you read for 5 minutes or more. Use Visits for where you went, and Searches, People, Companies, and Daily for the rest. Skip monthly archive files. They are personal backups.</p>
-              </details>
-              <details class="cx-disclosure" data-assistant-guide="claude">
-                <summary>Claude</summary>
-                <p>Connect Claude to Google Drive. Open the spreadsheet named Cortex Memory in the folder Cortex Memory. Read the About tab first. Ask Claude to check the Content tab before it relies on its own knowledge. Content contains excerpts of pages you read for 5 minutes or more. Visits, Searches, People, Companies, and Daily answer the other kinds of questions. Do not read the monthly archive files. They are personal backups.</p>
-              </details>
-              <details class="cx-disclosure" data-assistant-guide="generic">
-                <summary>Another assistant</summary>
-                <p>Connect your assistant to Google Drive. Open the spreadsheet named Cortex Memory in the folder Cortex Memory. Read the About tab first. About explains every tab. When you ask what a page said, tell the assistant to check the Content tab before using its own knowledge. Content holds excerpts of pages you read for 5 minutes or more. The other tabs are Visits, Searches, People, Companies, and Daily. Monthly archive files in the same folder are personal backups, so leave them out.</p>
-              </details>
+              <div class="cx-guide-intro">
+                <p class="cx-group-desc">
+                  Every assistant reads the same spreadsheet. Connect it to Google Drive and open
+                  Cortex Memory in the folder Cortex Memory. Read the About tab first. About names
+                  the tabs. Content is what a page said, after a read of 5 minutes or more. Visits,
+                  Searches, People, Companies, and Daily cover the other questions.
+                </p>
+              </div>
+              <ul class="cx-guide-list">
+                <li data-assistant-guide="muse">
+                  <h4>Muse</h4>
+                  <p>Use Muse's Google Drive connection. Open Cortex Memory, read About, then check Content before it answers from its own knowledge.</p>
+                </li>
+                <li data-assistant-guide="grok">
+                  <h4>Grok</h4>
+                  <p>Use Grok's Google Drive connection. Open Cortex Memory. For something you read, use Content after About.</p>
+                </li>
+                <li data-assistant-guide="chatgpt">
+                  <h4>ChatGPT</h4>
+                  <p>Use ChatGPT's connected Google Drive source. Open Cortex Memory, read About, and check Content before its own knowledge.</p>
+                </li>
+                <li data-assistant-guide="claude">
+                  <h4>Claude</h4>
+                  <p>Use Claude's Google Drive connector. Open Cortex Memory, read About, and check Content before it relies on its own knowledge.</p>
+                </li>
+                <li data-assistant-guide="generic">
+                  <h4>Another assistant</h4>
+                  <p>If it can open Google Drive, point it at Cortex Memory, then About and Content.</p>
+                </li>
+              </ul>
             </div>
           </div>
         </section>
@@ -697,7 +765,7 @@
             <p class="cx-sec-desc">Version, and how Cortex handles your data.</p>
           </div>
 
-          <div class="cx-panel">
+          <div class="cx-panel cx-about-panel">
             <div class="cx-group">
               <h3 class="cx-group-title" id="cx-shortcuts-h">Keyboard shortcut</h3>
               <p class="cx-group-desc">Open Search, Ask, or Digest while you browse.</p>
@@ -745,6 +813,14 @@
                 </div>
               </dl>
             </div>
+            <img
+              class="cx-about-portrait"
+              src="mascot/felt-portrait.webp"
+              srcset="mascot/felt-portrait@256.webp 256w, mascot/felt-portrait.webp 512w"
+              width="112"
+              height="112"
+              alt="Cortex mascot portrait"
+            />
           </div>
         </section>
       </main>

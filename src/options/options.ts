@@ -13,6 +13,115 @@ import { INDEXING_CONSENT_KEY } from "../shared/onboarding-constants";
 import { storageLocalGet } from "../shared/storage-local";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import { siteBadgeColors, siteInitial } from "../lib/site-badge";
+import {
+  CLOUD_MODELS,
+  defaultCloudModel,
+  detectCloudProvider,
+  normalizeCloudProvider,
+  safeCloudBaseUrl,
+  sanitizeCloudModel,
+  type CloudProviderId,
+} from "../lib/chat/cloud-provider";
+import { listCloudModels } from "../lib/chat/cloud-stream";
+
+const CLOUD_HELP: Partial<Record<CloudProviderId, { label: string; href: string }>> = {
+  gemini: { label: "Google Gemini", href: "https://aistudio.google.com/apikey" },
+  openai: { label: "OpenAI", href: "https://platform.openai.com/api-keys" },
+  anthropic: { label: "Anthropic", href: "https://console.anthropic.com/settings/keys" },
+  openrouter: { label: "OpenRouter", href: "https://openrouter.ai/keys" },
+  groq: { label: "Groq", href: "https://console.groq.com/keys" },
+  mistral: { label: "Mistral", href: "https://console.mistral.ai/api-keys" },
+};
+
+/** Where each provider lists its model ids. */
+const MODEL_DOCS: Partial<Record<CloudProviderId, string>> = {
+  gemini: "https://ai.google.dev/gemini-api/docs/models",
+  openai: "https://platform.openai.com/docs/models",
+  anthropic: "https://docs.anthropic.com/en/docs/about-claude/models",
+  openrouter: "https://openrouter.ai/models",
+  groq: "https://console.groq.com/docs/models",
+  mistral: "https://docs.mistral.ai/getting-started/models/",
+};
+
+/** Suggested ids, the default first. Load models from my key replaces these with the real list. */
+const MODEL_CHOICES: Record<CloudProviderId, string[]> = {
+  gemini: ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+  openai: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"],
+  anthropic: ["claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1"],
+  openrouter: ["openai/gpt-4o-mini", "anthropic/claude-sonnet-4.5", "google/gemini-2.5-flash"],
+  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+  mistral: ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"],
+  custom: [],
+};
+
+const OTHER_MODEL = "__other";
+
+/** Ids Cortex itself put in the field. A provider switch replaces these, never a typed id. */
+function knownModelIds(): Set<string> {
+  return new Set([
+    ...Object.values(CLOUD_MODELS),
+    ...Object.values(MODEL_CHOICES).flat(),
+    ...[...loadedModels.values()].flat(),
+  ]);
+}
+
+/** Ids the provider returned for the key in the form, per provider. */
+const loadedModels = new Map<CloudProviderId, string[]>();
+
+function renderModelPick(id: CloudProviderId): void {
+  const pick = qs<HTMLSelectElement>("#cx-opt-cloud-model-pick");
+  const input = qs<HTMLInputElement>("#cx-opt-cloud-model");
+  const current = input.value.trim();
+  const ids = [...(loadedModels.get(id) ?? MODEL_CHOICES[id])];
+  if (current && !ids.includes(current)) ids.unshift(current);
+  pick.replaceChildren();
+  for (const model of ids) {
+    const opt = document.createElement("option");
+    opt.value = model;
+    opt.textContent = model === defaultCloudModel(id) ? `${model} (suggested)` : model;
+    pick.appendChild(opt);
+  }
+  const other = document.createElement("option");
+  other.value = OTHER_MODEL;
+  other.textContent = "Other model id…";
+  pick.appendChild(other);
+  pick.value = current && ids.includes(current) ? current : ids[0] ?? OTHER_MODEL;
+  if (pick.value !== OTHER_MODEL) input.value = pick.value;
+  qs<HTMLElement>("#cx-opt-cloud-model-other").hidden = pick.value !== OTHER_MODEL;
+}
+
+async function loadModelsFromKey(): Promise<void> {
+  const id = normalizeCloudProvider(qs<HTMLSelectElement>("#cx-opt-cloud-provider").value);
+  const btn = qs<HTMLButtonElement>("#cx-opt-cloud-models-load");
+  const msg = qs<HTMLElement>("#cx-opt-cloud-models-msg");
+  msg.hidden = true;
+  msg.classList.remove("is-error", "is-success");
+  btn.disabled = true;
+  btn.classList.add("is-loading");
+  try {
+    const ids = await listCloudModels(
+      id,
+      qs<HTMLInputElement>("#cx-opt-gemini-key").value,
+      qs<HTMLInputElement>("#cx-opt-cloud-base").value
+    );
+    if (!ids.length) throw new Error("This key has no chat models.");
+    loadedModels.set(id, ids);
+    const input = qs<HTMLInputElement>("#cx-opt-cloud-model");
+    if (!ids.includes(input.value.trim())) {
+      input.value = ids.includes(defaultCloudModel(id)) ? defaultCloudModel(id) : ids[0]!;
+    }
+    renderModelPick(id);
+    msg.textContent = `Found ${ids.length} ${ids.length === 1 ? "model" : "models"} for this key. Pick one, then save.`;
+    msg.classList.add("is-success");
+  } catch (e) {
+    msg.textContent = e instanceof Error && e.message ? e.message : "Could not load models. Check the key.";
+    msg.classList.add("is-error");
+  } finally {
+    msg.hidden = false;
+    btn.disabled = false;
+    btn.classList.remove("is-loading");
+  }
+}
 
 const HISTORY_IDLE: HistoryImportProgress = {
   running: false,
@@ -313,6 +422,71 @@ function readChatModeFromForm():
     : "auto";
 }
 
+function syncCloudProviderFields(): void {
+  const id = normalizeCloudProvider(qs<HTMLSelectElement>("#cx-opt-cloud-provider").value);
+  const helpInfo = CLOUD_HELP[id];
+  qs<HTMLElement>("#cx-opt-cloud-base-wrap").hidden = id !== "custom";
+  const help = qs<HTMLAnchorElement>("#cx-opt-cloud-help");
+  if (helpInfo) {
+    help.hidden = false;
+    help.href = helpInfo.href;
+    help.textContent = `Get an API key for ${helpInfo.label}`;
+  } else {
+    help.hidden = true;
+  }
+  const model = qs<HTMLInputElement>("#cx-opt-cloud-model");
+  model.placeholder = defaultCloudModel(id) || "model id";
+  const docs = qs<HTMLAnchorElement>("#cx-opt-cloud-models-help");
+  const docsHref = MODEL_DOCS[id];
+  docs.hidden = !docsHref;
+  if (docsHref && helpInfo) {
+    docs.href = docsHref;
+    docs.textContent = `See model names for ${helpInfo.label}`;
+  }
+  qs<HTMLElement>("#cx-opt-cloud-models-msg").hidden = true;
+  renderModelPick(id);
+}
+
+function readCloudFields():
+  | {
+      cloudChatEnabled: boolean;
+      geminiApiKey: string;
+      cloudProvider: CloudProviderId;
+      cloudModel: string;
+      cloudBaseUrl: string;
+    }
+  | string {
+  const cloudProvider = normalizeCloudProvider(qs<HTMLSelectElement>("#cx-opt-cloud-provider").value);
+  const cloudModel = sanitizeCloudModel(
+    qs<HTMLInputElement>("#cx-opt-cloud-model").value,
+    defaultCloudModel(cloudProvider)
+  );
+  if (cloudProvider !== "gemini" && cloudProvider !== "custom" && !cloudModel) {
+    return "Enter the model id this key should call.";
+  }
+  let cloudBaseUrl = "";
+  if (cloudProvider === "custom") {
+    const safe = safeCloudBaseUrl(qs<HTMLInputElement>("#cx-opt-cloud-base").value);
+    if (!safe) return "Use an https endpoint, or http://127.0.0.1 for a local model.";
+    if (!cloudModel) return "Enter the model id this endpoint should call.";
+    cloudBaseUrl = safe;
+  }
+  return {
+    cloudChatEnabled: (qs("#cx-opt-cloud-chat") as HTMLInputElement).checked,
+    geminiApiKey: (qs("#cx-opt-gemini-key") as HTMLInputElement).value.trim(),
+    cloudProvider,
+    cloudModel,
+    cloudBaseUrl,
+  };
+}
+
+function showChatSaveError(message: string): void {
+  const feedback = qs<HTMLElement>("#cx-opt-chat-save-msg");
+  feedback.textContent = message;
+  feedback.classList.add("is-error");
+  feedback.hidden = false;
+}
+
 async function runSave(
   btnId: string,
   msgId: string,
@@ -342,12 +516,12 @@ async function runSave(
       if (label) label.textContent = idle;
       feedback.hidden = true;
     }, 2000);
-  } catch {
+  } catch (err) {
     btn.classList.remove("is-loading");
     btn.classList.add("shake");
     btn.disabled = false;
     if (label) label.textContent = idle;
-    feedback.textContent = "Could not save. Try again.";
+    feedback.textContent = err instanceof Error && err.message ? err.message : "Could not save. Try again.";
     feedback.classList.add("is-error");
     feedback.hidden = false;
   }
@@ -445,7 +619,7 @@ async function loadSettingsUi(): Promise<void> {
   document
     .querySelectorAll<HTMLInputElement>('input[name="cx-theme"]')
     .forEach((r) => {
-      r.checked = r.value === (s.theme ?? "system");
+      r.checked = r.value === (s.theme ?? "light");
     });
   document
     .querySelectorAll<HTMLInputElement>('input[name="cx-panel-mode"]')
@@ -455,6 +629,11 @@ async function loadSettingsUi(): Promise<void> {
   (qs("#cx-opt-cloud-chat") as HTMLInputElement).checked = s.cloudChatEnabled;
   // S-2: key comes from secret store via getEffectiveSettings, not getUserSettings.
   (qs("#cx-opt-gemini-key") as HTMLInputElement).value = eff.geminiApiKey ?? "";
+  const provider = normalizeCloudProvider(s.cloudProvider);
+  qs<HTMLSelectElement>("#cx-opt-cloud-provider").value = provider;
+  qs<HTMLInputElement>("#cx-opt-cloud-model").value = s.cloudModel || defaultCloudModel(provider);
+  qs<HTMLInputElement>("#cx-opt-cloud-base").value = s.cloudBaseUrl ?? "";
+  syncCloudProviderFields();
   qs<HTMLSelectElement>("#cx-opt-retention").value = String(s.retentionDays ?? 0);
   document.querySelectorAll<HTMLInputElement>("input[data-feature]").forEach((box) => {
     const key = box.dataset.feature as FeatureToggle;
@@ -465,59 +644,6 @@ async function loadSettingsUi(): Promise<void> {
 
   // Enterprise policy: lock and label managed fields (Phase 4.1).
   applyManagedLockout(document, eff);
-}
-
-type CollectionRow = { id: number; name: string; count: number };
-
-async function renderCollections(): Promise<void> {
-  const ul = qs<HTMLUListElement>("#cx-collection-list");
-  const res = (await chrome.runtime.sendMessage({ type: "CORTEX_COLLECTIONS_LIST" })) as
-    | { ok?: boolean; collections?: CollectionRow[] }
-    | undefined;
-  const rows = res?.ok ? res.collections ?? [] : [];
-  ul.replaceChildren();
-  if (!rows.length) {
-    const li = document.createElement("li");
-    li.className = "cx-field-hint";
-    li.textContent = "No collections yet.";
-    ul.appendChild(li);
-    return;
-  }
-  for (const c of rows) {
-    const li = document.createElement("li");
-    li.className = "cx-collection-row";
-    const name = document.createElement("span");
-    name.className = "cx-collection-name";
-    name.textContent = c.name;
-    const count = document.createElement("span");
-    count.className = "cx-field-hint";
-    count.textContent = `${c.count} page${c.count === 1 ? "" : "s"}`;
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "cx-btn cx-btn-ghost cx-btn-sm";
-    del.textContent = "Delete";
-    del.setAttribute("aria-label", `Delete collection ${c.name}`);
-    del.addEventListener("click", async () => {
-      await chrome.runtime.sendMessage({ type: "CORTEX_COLLECTION_DELETE", id: c.id });
-      void renderCollections();
-    });
-    li.append(name, count, del);
-    ul.appendChild(li);
-  }
-}
-
-async function createCollectionFromForm(): Promise<void> {
-  const input = qs<HTMLInputElement>("#cx-collection-name");
-  const fb = qs<HTMLElement>("#cx-collection-feedback");
-  const res = (await chrome.runtime.sendMessage({
-    type: "CORTEX_COLLECTION_CREATE",
-    name: input.value,
-  })) as { ok?: boolean; error?: string } | undefined;
-  fb.classList.toggle("is-error", !res?.ok);
-  fb.textContent = res?.ok ? "Collection created." : res?.error ?? "Could not create the collection.";
-  fb.hidden = false;
-  if (res?.ok) input.value = "";
-  void renderCollections();
 }
 
 async function runForget(scope: "site" | "hour" | "day", hostname?: string): Promise<void> {
@@ -685,12 +811,6 @@ document.addEventListener("DOMContentLoaded", () => {
     void saveUserSettings({ retentionDays: Number.isFinite(v) && v >= 1 ? v : 0 });
   });
 
-  void renderCollections();
-  qs<HTMLButtonElement>("#cx-collection-create").addEventListener("click", () => void createCollectionFromForm());
-  qs<HTMLInputElement>("#cx-collection-name").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") void createCollectionFromForm();
-  });
-
   qs<HTMLButtonElement>("#cx-forget-site-btn").addEventListener("click", () => {
     const host = qs<HTMLInputElement>("#cx-forget-site").value.trim();
     void runForget("site", host);
@@ -703,24 +823,68 @@ document.addEventListener("DOMContentLoaded", () => {
     if (area === "managed") void loadSettingsUi();
   });
 
+  qs<HTMLSelectElement>("#cx-opt-cloud-provider").addEventListener("change", () => {
+    const id = normalizeCloudProvider(qs<HTMLSelectElement>("#cx-opt-cloud-provider").value);
+    const model = qs<HTMLInputElement>("#cx-opt-cloud-model");
+    const known = knownModelIds();
+    if (!model.value.trim() || known.has(model.value.trim())) model.value = defaultCloudModel(id);
+    syncCloudProviderFields();
+  });
+
+  qs<HTMLSelectElement>("#cx-opt-cloud-model-pick").addEventListener("change", () => {
+    const pick = qs<HTMLSelectElement>("#cx-opt-cloud-model-pick");
+    const other = pick.value === OTHER_MODEL;
+    qs<HTMLElement>("#cx-opt-cloud-model-other").hidden = !other;
+    const input = qs<HTMLInputElement>("#cx-opt-cloud-model");
+    if (other) {
+      input.value = "";
+      input.focus();
+    } else {
+      input.value = pick.value;
+    }
+  });
+
+  qs<HTMLButtonElement>("#cx-opt-cloud-models-load").addEventListener("click", () => void loadModelsFromKey());
+
+  qs<HTMLInputElement>("#cx-opt-gemini-key").addEventListener("input", () => {
+    const knownBefore = knownModelIds();
+    loadedModels.clear();
+    const key = qs<HTMLInputElement>("#cx-opt-gemini-key");
+    const cloud = qs<HTMLInputElement>("#cx-opt-cloud-chat");
+    if (key.value.trim() && !cloud.disabled) cloud.checked = true;
+    const detected = detectCloudProvider(key.value);
+    const provider = qs<HTMLSelectElement>("#cx-opt-cloud-provider");
+    if (detected && !provider.disabled && provider.value !== detected) {
+      provider.value = detected;
+      const model = qs<HTMLInputElement>("#cx-opt-cloud-model");
+      if (!model.value.trim() || knownBefore.has(model.value.trim())) model.value = defaultCloudModel(detected);
+    }
+    syncCloudProviderFields();
+  });
+
   qs<HTMLButtonElement>("#cx-opt-chat-save").addEventListener("click", () => {
+    const cloud = readCloudFields();
+    if (typeof cloud === "string") {
+      showChatSaveError(cloud);
+      return;
+    }
     void runSave("#cx-opt-chat-save", "#cx-opt-chat-save-msg", "Save chat settings", () =>
       saveUserSettings({
         chatMode: readChatModeFromForm(),
-        cloudChatEnabled: (qs("#cx-opt-cloud-chat") as HTMLInputElement).checked,
-        geminiApiKey: (qs("#cx-opt-gemini-key") as HTMLInputElement).value.trim(),
+        ...cloud,
       })
     );
   });
 
   qs<HTMLButtonElement>("#cx-opt-save").addEventListener("click", () => {
     void runSave("#cx-opt-save", "#cx-opt-save-msg", "Save privacy settings", async () => {
+      const cloud = readCloudFields();
+      if (typeof cloud === "string") throw new Error(cloud);
       await saveUserSettings({
         indexingPaused: (qs("#cx-opt-pause") as HTMLInputElement).checked,
         blocklist: domainsFromTextarea(qs("#cx-opt-blocklist")),
         chatMode: readChatModeFromForm(),
-        cloudChatEnabled: (qs("#cx-opt-cloud-chat") as HTMLInputElement).checked,
-        geminiApiKey: (qs("#cx-opt-gemini-key") as HTMLInputElement).value.trim(),
+        ...cloud,
       });
       renderBlocklistChips();
     });

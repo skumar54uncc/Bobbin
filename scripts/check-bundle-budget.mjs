@@ -13,9 +13,11 @@ export const BUNDLE_BUDGETS = {
   "extract.js": 70 * KB,
   "resurface-chip.js": 8 * KB,
   "youtube-bridge.js": 4 * KB,
-  // Pass 5 Agents UX (tab + coach + local feedback) needs headroom; SW budget unchanged.
-  "overlay.js": 155 * KB,
-  "service-worker.js": 220 * KB,
+  // Search cards, digest hierarchy, filters, and on-device photo sharpening.
+  "overlay.js": 164 * KB,
+  // Multi-provider cloud chat (OpenAI-compatible and Anthropic) lives in the worker.
+  // Sync scheduling and dwell tracking add 5.3 KB; valibot message checks add 5.2 KB.
+  "service-worker.js": 237 * KB,
   "offscreen.js": 700 * KB,
   // Assistant Sync: Drive client and int8 topic vectors, lazy only.
   // Caps stay under the 130 KB float file so that file cannot return.
@@ -27,7 +29,7 @@ export const BUNDLE_BUDGETS = {
   // pdfjs-dist (Phase 5.9): lazy chunk and worker, loaded only when a PDF is read.
   "pdf.js": 560 * KB,
   "pdf.worker.min.mjs": 1400 * KB,
-  "search-shell.js": 155 * KB,
+  "search-shell.js": 164 * KB,
   "options.js": 40 * KB,
   "popup.js": 20 * KB,
   "onboarding.js": 10 * KB,
@@ -50,6 +52,22 @@ for (const [file, budget] of Object.entries(BUNDLE_BUDGETS)) {
   );
 }
 // The ONNX Runtime binary must ship exactly once, under wasm/ (Phase 6).
+const strayDesign = [];
+function rejectDesignOnly(dir) {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (name === "dev" || name === "PREVIEW.png") {
+      strayDesign.push(full.slice(dist.length + 1));
+      continue;
+    }
+    if (statSync(full).isDirectory()) rejectDesignOnly(full);
+  }
+}
+rejectDesignOnly(dist);
+if (strayDesign.length) {
+  failed = true;
+  console.error(`FAIL    design-only file in the package: ${strayDesign.join(", ")}`);
+}
 const strayWasm = readdirSync(dist).filter((f) => f.endsWith(".wasm"));
 if (strayWasm.length) {
   failed = true;

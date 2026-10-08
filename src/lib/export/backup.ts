@@ -538,7 +538,9 @@ export async function restoreBackup(backup: CortexBackup, opts: RestoreOptions):
       for (const p of s.people) {
         if (!allowed.get(p.profileUrl)) continue;
         if (await db.people.where("profileUrl").equals(p.profileUrl).first()) continue;
-        await db.people.add(p);
+        // Backups from before local photos carry a LinkedIn photo URL. It is not kept.
+        const { photoUrl: _photoUrl, ...row } = p as typeof p & { photoUrl?: unknown };
+        await db.people.add(row);
         added.people += 1;
       }
 

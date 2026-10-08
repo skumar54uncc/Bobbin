@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Welcome to Cortex</title>
+    <link rel="stylesheet" href="fonts.css" />
+    <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="cortex-theme.css" />
     <link rel="stylesheet" href="cx-buttons.css" />
     <link rel="stylesheet" href="options.css" />
@@ -13,15 +15,18 @@
     <div class="cx-opt-page cx-onb-page">
       <header class="cx-opt-topbar">
         <div class="cx-opt-topbar-inner cx-onb-bar">
-        <div class="cx-opt-brand" aria-label="Cortex">
+        <div class="cx-opt-brand cx-onb-brand" aria-label="Cortex">
           <img
             class="cx-opt-brand-mark"
-            src="icons/icon-48.png"
+            src="mascot/felt-head.webp"
             alt=""
-            width="28"
-            height="28"
+            width="40"
+            height="40"
           />
-          <span class="cx-opt-brand-wordmark">Cortex</span>
+          <span class="cx-onb-brand-text">
+            <span class="cx-opt-brand-wordmark">Cortex</span>
+            <span class="cx-onb-tagline">Private library of pages you read on this device</span>
+          </span>
         </div>
         </div>
       </header>
@@ -35,6 +40,15 @@
         </header>
 
         <section class="cx-card cx-onb-notice" aria-label="Indexing consent" id="cx-onb-consent">
+          <img
+            class="cx-onb-mascot"
+            data-k="wave"
+            src="mascot/felt-wave.webp"
+            srcset="mascot/felt-wave@256.webp 256w, mascot/felt-wave.webp 512w"
+            width="160"
+            height="160"
+            alt="Cortex mascot waving"
+          />
           <p class="cx-onb-notice-lead">
             <strong>Before Cortex indexes anything.</strong>
             Cortex builds a private library of readable pages you open in this browser.

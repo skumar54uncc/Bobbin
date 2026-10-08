@@ -1,5 +1,5 @@
 import { isNanoAvailable, createNanoSession } from "./nano-client";
-import { geminiStream } from "./gemini-client";
+import { cloudStream } from "./cloud-stream";
 import { stripOnDeviceDescriptions } from "../capture/images";
 import type { ParsedQuestion } from "./question-parser";
 import type { ChatSettings } from "./types";
@@ -28,12 +28,12 @@ function cloudKeyMissingOrDisabled(settings: ChatSettings): ChatUnavailableError
   if (!settings.cloudEnabled) {
     return new ChatUnavailableError(
       "Cloud chat is turned off.",
-      `Turn on "Enable cloud chat" in Cortex settings, then add your free Gemini API key from Google AI Studio: ${GEMINI_API_KEY_HELP_URL}`
+      "Turn on Enable cloud chat in Cortex settings, then add an API key."
     );
   }
   return new ChatUnavailableError(
-    "You haven't added a Gemini API key yet.",
-    `Create a free API key from Google (AI Studio), open Cortex settings → Chat with your library, and paste it there: ${GEMINI_API_KEY_HELP_URL}`
+    "You haven't added an API key yet.",
+    `Open Cortex settings, choose a model provider, and paste an API key. A free Gemini key is at ${GEMINI_API_KEY_HELP_URL}`
   );
 }
 
@@ -124,11 +124,10 @@ export async function* streamAnswer(
     }
   } else {
     // On-device image descriptions (Phase 5.8) never leave the device.
-    yield* geminiStream(stripOnDeviceDescriptions(prompt), {
-      apiKey: settings.geminiApiKey,
+    yield* cloudStream(stripOnDeviceDescriptions(prompt), settings, {
       systemPrompt,
       temperature: 0.3,
-      maxOutputTokens: opts.maxOutputTokens ?? 2048,
+      maxOutputTokens: opts.maxOutputTokens ?? 4096,
       signal,
     });
   }

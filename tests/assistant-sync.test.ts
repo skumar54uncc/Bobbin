@@ -209,6 +209,7 @@ describe("linkedin sync", () => {
     expect(row.person.company).toBe("Tidora");
     expect(row.person.howFound).toBe("");
     expect(row.person).not.toHaveProperty("photoUrl");
+    expect(JSON.stringify(row)).not.toMatch(/licdn|photo/i);
     expect(howFoundFromReferrer("https://www.linkedin.com/search/results/people/?keywords=tidora")).toBe("search");
     expect(howFoundFromReferrer("https://www.linkedin.com/feed/")).toBe("feed");
     expect(howFoundFromReferrer("https://www.linkedin.com/in/other/?trk=public_profile_browsemap")).toBe(

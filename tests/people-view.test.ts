@@ -2,9 +2,11 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   renderPeopleView,
+  personCardName,
   personCardTitle,
   personCardPlace,
   personHeadlineLine,
+  unsharpMask,
   personInitials,
   personSummaryLine,
   type PersonRow,
@@ -171,6 +173,7 @@ describe("People view", () => {
     expect(link.href).toContain("linkedin.com/in/mira");
     card.querySelector<HTMLButtonElement>(".cortex-person-turn")!.click();
     expect(card.classList.contains("is-flipped")).toBe(true);
+    expect(card.querySelector(".cortex-person-back-name")?.textContent).toBe("Mira <b>Okafor</b>");
     expect(deps.announce).toHaveBeenCalled();
     const profile = card.querySelector<HTMLAnchorElement>("a.cortex-person-profile")!;
     expect(profile.textContent).toBe("Profile");
@@ -179,24 +182,59 @@ describe("People view", () => {
     expect(card.classList.contains("is-flipped")).toBe(false);
   });
 
-  it("uses a profile photo when the url is on LinkedIn's image host", async () => {
-    const { container, deps } = setup([
-      {
-        ...rows[0],
-        photoUrl: "https://media.licdn.com/dms/image/v2/D4E/profile-displayphoto-shrink_200_200/0/1",
-      },
-    ]);
-    await renderPeopleView(container, deps);
-    const img = container.querySelector<HTMLImageElement>(".cortex-person-photo")!;
-    expect(img.src).toContain("profile-displayphoto-shrink_800_800");
-    expect(img.alt).toBe("");
-    img.dispatchEvent(new Event("error"));
-    expect(img.getAttribute("src")).toContain("shrink_400_400");
-    img.dispatchEvent(new Event("error"));
-    expect(img.getAttribute("src")).toContain("shrink_200_200");
-    img.dispatchEvent(new Event("error"));
-    expect(container.querySelector(".cortex-person-photo")).toBeNull();
-    expect(container.querySelector(".has-photo")).toBeNull();
+  it("shows initials and asks for nothing when no photo is saved", async () => {
+    const sendMessage = vi.fn();
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+    try {
+      const { container, deps } = setup();
+      await renderPeopleView(container, deps);
+      expect(container.querySelector(".cortex-person-photo")).toBeNull();
+      expect(container.querySelector(".cortex-person-mark")?.textContent).toBeTruthy();
+      expect(sendMessage).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("drops the photo slot when the saved copy is gone", async () => {
+    const sendMessage = vi.fn((_msg: unknown, cb: (res: unknown) => void) => cb({ ok: false }));
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+    try {
+      const { container, deps } = setup([{ ...rows[0], hasPhoto: true }]);
+      await renderPeopleView(container, deps);
+      await vi.waitFor(() => expect(container.querySelector(".cortex-person-photo")).toBeNull());
+      expect(container.querySelector(".has-photo")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows the copy saved on this device, then a data url when blob is blocked, and never a LinkedIn url", async () => {
+    const jpeg = btoa("\xff\xd8\xff" + "x".repeat(64));
+    const sendMessage = vi.fn((_msg: unknown, cb: (res: unknown) => void) => cb({ ok: true, mime: "image/jpeg", b64: jpeg }));
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+    const saved = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = vi.fn(() => "blob:cortex/photo");
+    URL.revokeObjectURL = vi.fn();
+    try {
+      const { container, deps } = setup([{ ...rows[0], hasPhoto: true }]);
+      await renderPeopleView(container, deps);
+      const img = container.querySelector<HTMLImageElement>(".cortex-person-photo")!;
+      expect(img.alt).toBe("");
+      expect(img.getAttribute("src") ?? "").not.toContain("licdn");
+      await vi.waitFor(() => expect(img.getAttribute("src")).toBe("blob:cortex/photo"));
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(sendMessage.mock.calls[0]![0]).toEqual({ type: "CORTEX_PHOTO_GET", profileUrl: rows[0]!.profileUrl });
+      img.dispatchEvent(new Event("error"));
+      await vi.waitFor(() => expect(img.getAttribute("src")).toMatch(/^data:image\/jpeg;base64,/));
+      expect(img.isConnected).toBe(true);
+      img.dispatchEvent(new Event("error"));
+      expect(img.isConnected).toBe(false);
+    } finally {
+      URL.createObjectURL = saved.create;
+      URL.revokeObjectURL = saved.revoke;
+      vi.unstubAllGlobals();
+    }
   });
 
   it("drops profile links that are not http(s)", async () => {
@@ -278,7 +316,59 @@ describe("personCardTitle", () => {
   });
 });
 
+describe("unsharpMask", () => {
+  it("lifts an edge and leaves small noise and alpha alone", () => {
+    const data = new Uint8ClampedArray([180, 100, 42, 255]);
+    const blurred = new Uint8ClampedArray([120, 100, 40, 255]);
+    unsharpMask(data, blurred, 0.5, 5);
+    expect(data[0]).toBe(210);
+    expect(data[1]).toBe(100);
+    expect(data[2]).toBe(42);
+    expect(data[3]).toBe(255);
+  });
+});
+
+describe("personCardName", () => {
+  it("keeps a long surname from leaving one letter on the next line", () => {
+    expect(personCardName("Swatika SIVARAMASUBRAMANIAM")).toBe("Swatika SIVARAMASUBRAMA…");
+    expect(personCardName("Ankit Kumar")).toBe("Ankit Kumar");
+  });
+});
+
 describe("personHeadlineLine", () => {
+  it("keeps a company tagline whole, including words from the company name", () => {
+    expect(
+      personHeadlineLine({
+        id: 9,
+        kind: "company",
+        name: "University City Partners",
+        headline: "University of North Carolina at Charlotte",
+        tagline: "A City Within A City",
+        company: "University City Partners",
+        profileUrl: "https://www.linkedin.com/company/charlottecentercitypartners/",
+        lastSeen: 0,
+        visitCount: 7,
+      })
+    ).toBe("A City Within A City");
+  });
+
+  it("drops a based-in place that the role already names", () => {
+    expect(
+      personHeadlineLine({
+        id: 8,
+        kind: "person",
+        name: "Swatika Sivaramasubramaniam",
+        headline: "Research Assistant at Tickle College of Engineering at the University of Tennessee",
+        company: "University of Tennessee, Knoxville",
+        profileUrl: "https://www.linkedin.com/in/swatika-siva/",
+        lastSeen: 0,
+        visitCount: 11,
+        summary:
+          "Research Assistant at Tickle College of Engineering at the University of Tennessee, based in University of Tennessee, Knoxville.",
+      })
+    ).not.toMatch(/based in/i);
+  });
+
   it("keeps every part of a pipe-separated headline", () => {
     const line = personHeadlineLine({
       id: 1,

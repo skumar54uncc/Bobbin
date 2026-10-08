@@ -13,6 +13,37 @@ export interface SyncVisitRecord {
   maxScrollPct: number | null;
   pageType: PageType;
   topics: string[];
+  /**
+   * Epoch ms when the visit ended (tab closed or navigated away). Unset while the
+   * page is still open. Backfilled history rows are final on arrival.
+   */
+  finalizedAt?: number;
+}
+
+/** Page text kept until the visit ends, so the excerpt can depend on real dwell. Never synced. */
+export interface SyncDraftRecord {
+  id: string;
+  text: string;
+}
+
+/** Where each tab's rows sit in the sheet, so a flush needs no reads. */
+export interface SheetLayout {
+  fileId: string;
+  sheetIds: Record<string, number>;
+  /** Data rows per tab, in sheet order, run-length encoded by date. The header row is not counted. */
+  runs: Record<string, { date: string; count: number }[]>;
+  /** Tabs whose header row is in the sheet. */
+  headers?: Record<string, boolean>;
+  aboutRows: number;
+  verifiedAt: number;
+}
+
+/** A flush that was sent but not confirmed. Its presence after a restart triggers a recovery read. */
+export interface InflightFlush {
+  id: "inflight";
+  fileId: string;
+  keys: string[];
+  startedAt: number;
 }
 
 export interface SyncContentRecord {
@@ -65,29 +96,39 @@ export const SYNC_ENGINE_STATE_ID = "engine";
 export const DEFAULT_RETENTION_DAYS = 90;
 export const MIN_RETENTION_DAYS = 7;
 export const MAX_RETENTION_DAYS = 365;
+/** Safety alarm. Flushes anything still pending. */
 export const ASSISTANT_SYNC_ALARM = "cortex-assistant-sync";
 export const ASSISTANT_SYNC_ALARM_PERIOD_MIN = 15;
-/** One-shot alarm after LinkedIn (or other) capture. Not a Google call by itself. */
+/** One-shot alarm for the next scheduled flush (activity, Sync now countdown, backoff). */
 export const ASSISTANT_SYNC_SOON_ALARM = "cortex-assistant-sync-soon";
-export const ASSISTANT_SYNC_SOON_DELAY_MIN = 2;
-export const MAX_CONSECUTIVE_SYNC_FAILURES = 10;
-
 export type BackfillPhase = "idle" | "reading" | "writing" | "done";
 
 export interface SyncEngineState {
   id: typeof SYNC_ENGINE_STATE_ID;
   syncEnabled: boolean;
   retentionDays: number;
-  archivesEnabled: boolean;
   userDenylist: string[];
-  consecutiveFailures: number;
-  stoppedUntilAlarm: boolean;
   lastError: string;
   /** Epoch ms of the last successful sync. 0 until the first one finishes. */
   lastSyncedAt: number;
   backfillDone: number;
   backfillTotal: number;
   backfillPhase: BackfillPhase;
+  /** Epoch ms when the last flush request was sent, successful or not. Enforces one flush a minute. */
+  lastFlushAt: number;
+  /** Earliest epoch ms for the next attempt after a 429 or 5xx. 0 when no backoff is active. */
+  nextAttemptAt: number;
+  /** Failed flushes in a row (429 or 5xx). Drives the backoff exponent. */
+  backoffFailures: number;
+  /** Flushes in a row that ended in 429. Three of them start slow mode. */
+  consecutive429: number;
+  /** Until this epoch ms, flush only on the 15 minute cadence. */
+  slowUntil: number;
+  /** Google refused the token twice. Only Enable clears it. */
+  authNeeded: boolean;
+  /** The next flush reads the sheet first (startup check, recovery). */
+  verifyNext: boolean;
+  layout: SheetLayout | null;
 }
 
 export function clampRetentionDays(days: number): number {
@@ -100,15 +141,20 @@ export function defaultSyncEngineState(): SyncEngineState {
     id: SYNC_ENGINE_STATE_ID,
     syncEnabled: false,
     retentionDays: DEFAULT_RETENTION_DAYS,
-    archivesEnabled: false,
     userDenylist: [],
-    consecutiveFailures: 0,
-    stoppedUntilAlarm: false,
     lastError: "",
     lastSyncedAt: 0,
     backfillDone: 0,
     backfillTotal: 0,
     backfillPhase: "idle",
+    lastFlushAt: 0,
+    nextAttemptAt: 0,
+    backoffFailures: 0,
+    consecutive429: 0,
+    slowUntil: 0,
+    authNeeded: false,
+    verifyNext: false,
+    layout: null,
   };
 }
 
@@ -122,6 +168,8 @@ class AssistantSyncDB extends Dexie {
   synced!: EntityTable<{ key: string }, "key">;
   pending!: EntityTable<PendingSyncRow, "key">;
   state!: EntityTable<SyncEngineState, "id">;
+  drafts!: EntityTable<SyncDraftRecord, "id">;
+  inflight!: EntityTable<InflightFlush, "id">;
 
   constructor() {
     super("cortex-assistant-sync");
@@ -150,6 +198,25 @@ class AssistantSyncDB extends Dexie {
       pending: "key, tab, enqueuedAt",
       state: "id",
     });
+    this.version(4)
+      .stores({
+        visits: "id, visitedAt, domain, finalizedAt",
+        content: "id, visitedAt",
+        searches: "id, visitedAt",
+        people: "id, visitedAt",
+        companies: "id, visitedAt",
+        synced: "key",
+        pending: "key, tab, enqueuedAt",
+        state: "id",
+        drafts: "id",
+        inflight: "id",
+      })
+      .upgrade(async (tx) => {
+        // Rows captured before dwell tracking are final as they are.
+        await tx.table("visits").toCollection().modify((visit: SyncVisitRecord) => {
+          if (visit.finalizedAt == null) visit.finalizedAt = visit.visitedAt;
+        });
+      });
   }
 }
 
@@ -167,8 +234,12 @@ export async function clearAssistantSyncDatabase(): Promise<void> {
       assistantSyncDb.synced,
       assistantSyncDb.pending,
       assistantSyncDb.state,
+      assistantSyncDb.drafts,
+      assistantSyncDb.inflight,
     ],
     async () => {
+      await assistantSyncDb.drafts.clear();
+      await assistantSyncDb.inflight.clear();
       await assistantSyncDb.visits.clear();
       await assistantSyncDb.content.clear();
       await assistantSyncDb.searches.clear();
@@ -188,6 +259,12 @@ export async function readSyncEngineState(): Promise<SyncEngineState> {
 
 export async function writeSyncEngineState(state: SyncEngineState): Promise<void> {
   await assistantSyncDb.state.put({ ...state, id: SYNC_ENGINE_STATE_ID });
+}
+
+/** Finished page visits the sheet does not have yet. The status line counts these. */
+export async function countUnsyncedVisits(): Promise<number> {
+  const synced = new Set((await assistantSyncDb.synced.toCollection().primaryKeys()).map(String));
+  return assistantSyncDb.visits.filter((row) => row.finalizedAt != null && !synced.has(`Visits:${row.id}`)).count();
 }
 
 /** The service worker points this at the offscreen Drive client. Tests replace it. */

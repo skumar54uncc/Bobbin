@@ -74,8 +74,8 @@ describe("Dexie v5 -> v6 migration", () => {
   it("opens the 1.0.1 database without losing any row", async () => {
     const { db, CORTEX_DB_SCHEMA_VERSION } = await import("../src/db/schema");
     await db.open();
-    expect(CORTEX_DB_SCHEMA_VERSION).toBe(6);
-    expect(db.verno).toBe(6);
+    expect(CORTEX_DB_SCHEMA_VERSION).toBe(7);
+    expect(db.verno).toBe(7);
     for (const [name, n] of Object.entries(before)) {
       expect(await db.table(name).count(), name).toBe(n);
     }

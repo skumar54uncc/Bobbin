@@ -39,7 +39,15 @@ export interface FinalizedVisitInput {
   excerptMinDwellMinutes?: number;
   /** Writes nothing unless the user has turned sync on. */
   syncEnabled: boolean;
+  /**
+   * The tab is still on this page. The row waits for `finalizeVisit`, which adds the
+   * measured dwell and decides on the excerpt. Page text is held locally until then.
+   */
+  open?: boolean;
 }
+
+/** Page text kept for a later excerpt. Longer than the excerpt so trimming has room. */
+export const DRAFT_MAX_CHARS = 4000;
 
 export interface CaptureResult {
   stored: boolean;
@@ -83,6 +91,9 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
   });
   if (denied) return { stored: false, reason: denied };
 
+  const previous = await assistantSyncDb.visits.get(input.id);
+  if (input.open && previous?.finalizedAt != null) return { stored: false, reason: "final" };
+
   const title = redactForSync(input.title.replace(/\s+/g, " ").trim());
   const topics = input.pageEmbedding?.length
     ? tagTopics(input.pageEmbedding, TOPIC_SIMILARITY_THRESHOLD, await loadTopicVectors())
@@ -92,7 +103,7 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
 
   await assistantSyncDb.visits.put({
     id: input.id,
-    visitedAt: input.visitedAt,
+    visitedAt: previous?.visitedAt ?? input.visitedAt,
     title,
     url: canonical,
     domain: domainFromUrl(canonical),
@@ -100,9 +111,17 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
     maxScrollPct,
     pageType: pageTypeForUrl(canonical),
     topics,
+    ...(input.open ? {} : { finalizedAt: input.visitedAt }),
   });
 
-  const excerpt = buildExcerpt(redactForSync(input.pageText ?? ""), dwellMinutes, input.excerptMinDwellMinutes);
+  if (input.open) {
+    const text = redactForSync((input.pageText ?? "").replace(/\s+/g, " ").trim().slice(0, DRAFT_MAX_CHARS));
+    if (text) await assistantSyncDb.drafts.put({ id: input.id, text });
+  }
+
+  const excerpt = input.open
+    ? null
+    : buildExcerpt(redactForSync(input.pageText ?? ""), dwellMinutes, input.excerptMinDwellMinutes);
   if (excerpt && !isLinkedInProfileOrCompany(canonical)) {
     await assistantSyncDb.content.put({
       id: input.id,

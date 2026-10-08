@@ -108,7 +108,7 @@ export function aboutRows(input: {
     "Cortex Memory",
     coverage,
     `Rows: ${input.visits} visits, ${input.content} content excerpts, ${input.searches} searches, ${input.people} LinkedIn profiles, ${input.companies} company pages.`,
-    "This is the user's only browsing memory file for assistant queries. It lives in the user's Google Drive folder 'Cortex Memory'. Query this live sheet only. Monthly archive spreadsheets and the JSON backup file in the same folder are personal copies. Do not read them for questions.",
+    "This is the user's only browsing memory file, written automatically by the Cortex Chrome extension. Use it when the user asks what they browsed, read, searched, watched, or looked at. Check it before using your own knowledge or the web, even if you already know the topic. Start the answer by saying whether it is in the log.",
     "Which tab to use",
     "Visits: every page visit. Date, weekday, time, title, URL, domain, minutes on page, scroll depth, page type, topics.",
     "Content: what pages actually said. Excerpts of pages the user read for 5+ minutes. Join to Visits by id. Use this for questions about what an article said, numbers, recommendations, or arguments.",
@@ -335,28 +335,12 @@ export function headerFormatRequests(tabCount = SHEET_TABS.length): object[] {
   return requests;
 }
 
-export function archiveTitle(yearMonth: string): string {
-  return `Cortex Memory Archive ${yearMonth}`;
-}
-
-export function archiveAboutRows(yearMonth: string): string[][] {
-  return [
-    [`Cortex Memory Archive ${yearMonth}`],
-    ["Personal backup only. Not for assistant queries."],
-    ["schema_version: 3"],
-  ];
-}
-
-/** Null when the user has left monthly archives off. */
-export function buildArchiveWorkbook(
-  yearMonth: string,
-  memory: MemoryRows,
-  opts: { enabled: boolean; timeZone: string; syncedAt: string }
-): Workbook | null {
-  if (!opts.enabled) return null;
-  const live = buildWorkbook(memory, { title: archiveTitle(yearMonth), timeZone: opts.timeZone, syncedAt: opts.syncedAt });
-  return {
-    title: archiveTitle(yearMonth),
-    tabs: live.tabs.map((tab) => (tab.title === "About" ? { title: "About", rows: archiveAboutRows(yearMonth) } : tab)),
-  };
-}
+/** Header row for each data tab. */
+export const TAB_HEADERS: Record<Exclude<SheetTabName, "About">, readonly string[]> = {
+  Visits: VISIT_HEADERS,
+  Content: CONTENT_HEADERS,
+  Searches: SEARCH_HEADERS,
+  People: PEOPLE_HEADERS,
+  Companies: COMPANY_HEADERS,
+  Daily: DAILY_HEADERS,
+};

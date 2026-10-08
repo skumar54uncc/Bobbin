@@ -8,6 +8,12 @@
  */
 
 import type { ChatSettings } from "../lib/chat/types";
+import {
+  normalizeCloudProvider,
+  safeCloudBaseUrl,
+  sanitizeCloudModel,
+  type CloudProviderId,
+} from "../lib/chat/cloud-provider";
 import { storageLocalGet, storageLocalSet } from "./storage-local";
 import { normalizeThemeSetting, type ThemeSetting } from "./theme";
 import { normalizePanelPreference, type PanelPreference } from "../lib/panel-mode";
@@ -23,6 +29,12 @@ export interface CortexUserSettings {
   allowlist: string[];
   chatMode: ChatMode;
   cloudChatEnabled: boolean;
+  /** Which cloud model family the API key belongs to. */
+  cloudProvider: CloudProviderId;
+  /** Model id sent with the key. Empty uses the provider default. */
+  cloudModel: string;
+  /** Custom OpenAI-compatible endpoint. Empty unless the provider is custom. */
+  cloudBaseUrl: string;
   /**
    * Always empty in getUserSettings / local blob (S-2). Populated only when
    * trusted code merges getGeminiApiKey() (e.g. getEffectiveSettings).
@@ -42,6 +54,8 @@ export interface CortexUserSettings {
   imageDescriptionsEnabled: boolean;
   /** Release 1.2.0 feature toggles (Phase 5). */
   peopleMemoryEnabled: boolean;
+  /** Save and show the photo a profile showed. Device only. Off stops saving and hides saved photos. */
+  profilePhotosEnabled: boolean;
   omniboxEnabled: boolean;
   highlightsEnabled: boolean;
   /** "Seen this before" chip; opt-in. */
@@ -56,6 +70,7 @@ export interface CortexUserSettings {
 
 export type FeatureToggle =
   | "peopleMemoryEnabled"
+  | "profilePhotosEnabled"
   | "omniboxEnabled"
   | "highlightsEnabled"
   | "resurfacingEnabled"
@@ -75,12 +90,16 @@ export const DEFAULT_USER_SETTINGS: CortexUserSettings = {
   allowlist: [],
   chatMode: "auto",
   cloudChatEnabled: false,
+  cloudProvider: "gemini",
+  cloudModel: "",
+  cloudBaseUrl: "",
   geminiApiKey: "",
-  theme: "system",
+  theme: "light",
   panelPreference: "auto",
   retentionDays: 0,
   imageDescriptionsEnabled: false,
   peopleMemoryEnabled: true,
+  profilePhotosEnabled: true,
   omniboxEnabled: true,
   highlightsEnabled: true,
   resurfacingEnabled: false,
@@ -95,6 +114,11 @@ function bool(v: unknown, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback;
 }
 
+function stringList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((item): item is string => typeof item === "string");
+}
+
 let memorySettings: CortexUserSettings | null = null;
 
 function normalizeSettings(
@@ -104,9 +128,9 @@ function normalizeSettings(
   // S-2: never surface geminiApiKey from the local settings blob.
   return {
     indexingPaused: bool(raw?.indexingPaused, DEFAULT_USER_SETTINGS.indexingPaused),
-    blocklist: Array.isArray(raw?.blocklist) ? raw!.blocklist : [],
+    blocklist: stringList(raw?.blocklist),
     allowlistOnly: bool(raw?.allowlistOnly, DEFAULT_USER_SETTINGS.allowlistOnly),
-    allowlist: Array.isArray(raw?.allowlist) ? raw!.allowlist : [],
+    allowlist: stringList(raw?.allowlist),
     chatMode:
       raw?.chatMode === "on-device-only" ||
       raw?.chatMode === "cloud-only" ||
@@ -114,6 +138,12 @@ function normalizeSettings(
         ? raw.chatMode
         : DEFAULT_USER_SETTINGS.chatMode,
     cloudChatEnabled: Boolean(raw?.cloudChatEnabled),
+    cloudProvider: normalizeCloudProvider(raw?.cloudProvider),
+    cloudModel: sanitizeCloudModel(raw?.cloudModel, ""),
+    cloudBaseUrl:
+      normalizeCloudProvider(raw?.cloudProvider) === "custom"
+        ? safeCloudBaseUrl(raw?.cloudBaseUrl) ?? ""
+        : "",
     geminiApiKey: "",
     theme: normalizeThemeSetting(raw?.theme),
     panelPreference: normalizePanelPreference(raw?.panelPreference),
@@ -125,6 +155,7 @@ function normalizeSettings(
         : 0,
     imageDescriptionsEnabled: raw?.imageDescriptionsEnabled === true,
     peopleMemoryEnabled: bool(raw?.peopleMemoryEnabled, DEFAULT_USER_SETTINGS.peopleMemoryEnabled),
+    profilePhotosEnabled: bool(raw?.profilePhotosEnabled, DEFAULT_USER_SETTINGS.profilePhotosEnabled),
     omniboxEnabled: bool(raw?.omniboxEnabled, DEFAULT_USER_SETTINGS.omniboxEnabled),
     highlightsEnabled: bool(raw?.highlightsEnabled, DEFAULT_USER_SETTINGS.highlightsEnabled),
     resurfacingEnabled: raw?.resurfacingEnabled === true,
@@ -185,6 +216,9 @@ export async function getChatSettings(): Promise<ChatSettings> {
     mode: s.chatMode,
     cloudEnabled: s.cloudChatEnabled,
     geminiApiKey,
+    cloudProvider: s.cloudProvider,
+    cloudModel: s.cloudModel,
+    cloudBaseUrl: s.cloudBaseUrl,
   };
 }
 

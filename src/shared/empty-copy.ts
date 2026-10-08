@@ -9,11 +9,9 @@ export const EMPTY_LIBRARY_NEXT = "Browse normally. Cortex saves pages on this d
 export const EMPTY_VISITS_LEAD = "No visits logged yet.";
 export const EMPTY_VISITS_NEXT = "Keep browsing. Recent pages show up here.";
 
-export const EMPTY_SEARCH_TITLE = "No matching pages in your library.";
+export const EMPTY_SEARCH_TITLE = "Nothing in your memory matches that.";
 export const EMPTY_SEARCH_TIPS = [
-  "Try fewer words or a phrase you remember.",
-  "Include a site or topic.",
-  "Visit more pages. Your index grows as you read.",
+  "Try fewer words or a wider date range.",
 ] as const;
 
 export const EMPTY_ASK_TITLE = "Ask about pages you have read.";

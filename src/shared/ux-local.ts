@@ -10,6 +10,7 @@ export const UX_LOCAL_KEY = "cortex_ux_local_v1";
 export const COACH_TIP_IDS = [
   "search",
   "ask",
+  "digest",
   "people",
   "agents",
   "assistSync",
@@ -17,10 +18,15 @@ export const COACH_TIP_IDS = [
 
 export type CoachTipId = (typeof COACH_TIP_IDS)[number];
 
+/** Bump when the walkthrough changes, so an old Got it does not skip the new tour. */
+export const TOUR_VERSION = 2;
+
 export interface UxLocalState {
   firstSeenAt: number;
   panelOpenCount: number;
   coachDismissed: Partial<Record<CoachTipId, true>>;
+  /** Tour revision the user finished or skipped. Older tips do not count. */
+  tourSeen?: number;
   /** When the feedback card was last shown (ms). */
   feedbackShownAt?: number;
   /** User dismissed without submitting. */
@@ -32,17 +38,16 @@ export interface UxLocalState {
   feedbackThumb?: "up" | "down";
 }
 
-export const FEEDBACK_MIN_DAYS = 7;
-export const FEEDBACK_MIN_PAGES = 20;
-export const FEEDBACK_MIN_OPENS = 3;
-/** Quiet period after dismiss or submit (90 days). */
+export const FEEDBACK_MIN_DAYS = 10;
+/** Quiet period after dismiss or a store visit (90 days). */
 export const FEEDBACK_COOLDOWN_MS = 90 * 24 * 60 * 60 * 1000;
 
-export const FEEDBACK_GITHUB_NEW_ISSUE =
-  "https://github.com/skumar54uncc/Cortex/issues/new";
+/** Written once on install. Review timing uses this, then first panel open. */
+export const INSTALLED_AT_KEY = "cortex_installed_at";
 
-export const FEEDBACK_MAILTO =
-  "mailto:shailesh.entrant@gmail.com?subject=Cortex%20product%20feedback";
+/** Chrome Web Store listing. The id is stable; the slug can change. */
+export const CHROME_WEB_STORE_LISTING =
+  "https://chromewebstore.google.com/detail/happibddmmagkgneicjkndapcpmhdbfn";
 
 const EMPTY: UxLocalState = {
   firstSeenAt: 0,
@@ -67,6 +72,7 @@ export function parseUxLocalState(raw: unknown): UxLocalState {
     panelOpenCount: typeof raw.panelOpenCount === "number" ? raw.panelOpenCount : 0,
     coachDismissed,
   };
+  if (typeof raw.tourSeen === "number") state.tourSeen = raw.tourSeen;
   if (typeof raw.feedbackShownAt === "number") state.feedbackShownAt = raw.feedbackShownAt;
   if (typeof raw.feedbackDismissedAt === "number") {
     state.feedbackDismissedAt = raw.feedbackDismissedAt;
@@ -100,8 +106,16 @@ export async function recordPanelOpen(now = Date.now()): Promise<UxLocalState> {
 }
 
 export async function dismissCoachTip(id: CoachTipId): Promise<UxLocalState> {
+  return dismissCoachTips([id]);
+}
+
+/** Marks every listed tip seen, so a skipped tour does not return. */
+export async function dismissCoachTips(ids: readonly CoachTipId[]): Promise<UxLocalState> {
   const state = await loadUxLocalState();
-  state.coachDismissed = { ...state.coachDismissed, [id]: true };
+  const coachDismissed = { ...state.coachDismissed };
+  for (const id of ids) coachDismissed[id] = true;
+  state.coachDismissed = coachDismissed;
+  state.tourSeen = TOUR_VERSION;
   await saveUxLocalState(state);
   return state;
 }
@@ -118,29 +132,21 @@ export function nextCoachTip(
 
 export interface FeedbackGateInput {
   state: UxLocalState;
-  /** Indexed page count from local stats snapshot (0 if unknown). */
-  pageCount: number;
+  /** Install time when known. Falls back to the first time the panel opened. */
+  installedAt?: number;
   now?: number;
 }
 
-/**
- * Show delayed feedback when the user has meaningful tenure or use,
- * and has not dismissed/submitted within the cooldown.
- */
+/** Show a store-review prompt only after 10 days, and not during the quiet period. */
 export function shouldShowFeedback(input: FeedbackGateInput): boolean {
   const now = input.now ?? Date.now();
-  const { state, pageCount } = input;
+  const { state } = input;
   const quietAt = Math.max(state.feedbackDismissedAt ?? 0, state.feedbackSubmittedAt ?? 0);
   if (quietAt > 0 && now - quietAt < FEEDBACK_COOLDOWN_MS) return false;
 
-  const first = state.firstSeenAt;
-  if (!first) return false;
-
-  const days = (now - first) / (24 * 60 * 60 * 1000);
-  const byDays = days >= FEEDBACK_MIN_DAYS;
-  const byUse =
-    pageCount >= FEEDBACK_MIN_PAGES && state.panelOpenCount >= FEEDBACK_MIN_OPENS;
-  return byDays || byUse;
+  const start = input.installedAt || state.firstSeenAt;
+  if (!start) return false;
+  return now - start >= FEEDBACK_MIN_DAYS * 24 * 60 * 60 * 1000;
 }
 
 export async function markFeedbackShown(now = Date.now()): Promise<UxLocalState> {
@@ -172,9 +178,28 @@ export async function submitFeedbackLocal(input: {
 }
 
 export const COACH_COPY: Record<CoachTipId, { title: string; body: string }> = {
-  search: { title: "Search", body: "Find pages you already read by phrase, site, or topic." },
-  ask: { title: "Ask", body: "Ask in plain language. Answers cite your local library." },
-  people: { title: "People and companies", body: "LinkedIn profiles appear here when people memory is on." },
-  agents: { title: "Connect AI agents", body: "Teach assistants to use your Cortex Memory sheet." },
-  assistSync: { title: "Assist Sync", body: "Enable Assist Sync in Settings for the live sheet." },
+  search: {
+    title: "Search",
+    body: "Find a page you already read by phrase, site, or topic. Nothing leaves this device.",
+  },
+  ask: {
+    title: "Ask",
+    body: "Ask in plain language. Answers stay on this device and cite the pages they came from.",
+  },
+  digest: {
+    title: "Digest",
+    body: "A short recap of what you read today, yesterday, or over the last 7 days.",
+  },
+  people: {
+    title: "People and companies",
+    body: "Profiles and company pages you open are saved here, with the role and photo from the page.",
+  },
+  agents: {
+    title: "Connect AI agents",
+    body: "Copy a prompt for Claude, ChatGPT, Gemini, or Cursor so it can read your Cortex Memory sheet.",
+  },
+  assistSync: {
+    title: "Assistant Sync",
+    body: "The gear opens Settings. Assistant Sync is where the live sheet is turned on.",
+  },
 };
