@@ -8,7 +8,6 @@ import {
   getUserSettingsFresh,
 } from "../shared/extension-settings";
 import { doubleShiftSwitch } from "./double-shift";
-import { ASSISTANT_SYNC_ON_KEY } from "../assistant-sync/preference-keys";
 import { createDwellTracker, DWELL_TICK_MS, pageScrollPct, videoPlaying, type DwellTracker } from "./dwell";
 import { shouldReindexAfterMutation } from "./mutation-throttle";
 import { devLog } from "../lib/extension-logger";
@@ -74,10 +73,33 @@ function guardedIndexPage(): void {
   });
 }
 
-// Dwell is measured only while Assistant Sync is on.
-const SYNC_ON_KEY = ASSISTANT_SYNC_ON_KEY;
+// Dwell is measured wherever capture runs. The worker answers with the indexing gate
+// (incognito, pause, block list, sensitive sites); pages with a password field never ask.
 let dwell: DwellTracker | null = null;
 let dwellTimer: number | undefined;
+let dwellAsk = 0;
+
+function hasPasswordField(): boolean {
+  return document.querySelector('input[type="password" i]') != null;
+}
+
+/** Starts or stops the tracker for the current page. A newer call wins. */
+async function refreshDwell(): Promise<void> {
+  const ask = ++dwellAsk;
+  if (!isExtensionRuntimeAlive()) return;
+  const allowed =
+    !hasPasswordField() &&
+    (await sendRuntimeMessage({ type: "CORTEX_DWELL_ALLOWED", url: normalizedUrl() })
+      .then((res) => (res as { ok?: boolean } | undefined)?.ok === true)
+      .catch(() => false));
+  if (ask !== dwellAsk) return;
+  if (allowed) {
+    startDwell();
+    return;
+  }
+  dwell?.end();
+  stopDwell();
+}
 
 function sendDwell(report: { url: string; activeMs: number; maxScrollPct: number; final: boolean }): void {
   if (!isExtensionRuntimeAlive()) return;
@@ -116,18 +138,16 @@ window.addEventListener("pageshow", (event) => {
   startDwell();
 });
 
-void chrome.storage?.local
-  ?.get(SYNC_ON_KEY)
-  .then((stored) => {
-    if (stored[SYNC_ON_KEY] === true) startDwell();
-  })
-  .catch(() => undefined);
+void refreshDwell();
 
 function onLocationLikeChange(reason: "spa" | "mutation"): void {
   const next = normalizedUrl();
   if (next !== currentUrl) {
     currentUrl = next;
-    dwell?.navigate(next);
+    // The old page gets its final report; the new page is measured only if the gate allows it.
+    dwell?.end();
+    stopDwell();
+    void refreshDwell();
     scheduleIndex(reason === "spa" ? 900 : 1400);
     scheduleCaptureRetries();
     return;
@@ -239,11 +259,9 @@ void getUserSettings()
 // Turning the setting off applies to open tabs, not only to the next load.
 chrome.storage?.onChanged?.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes[SYNC_ON_KEY]) {
-    if (changes[SYNC_ON_KEY].newValue === true) startDwell();
-    else stopDwell();
-  }
   if (!changes[USER_SETTINGS_KEY]) return;
+  // Pause, block list and allowlist changes apply to the page already open.
+  void refreshDwell();
   void getUserSettingsFresh()
     .then((s) => setDoubleShift(s.doubleShiftShortcutEnabled))
     .catch(() => {

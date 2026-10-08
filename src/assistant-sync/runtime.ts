@@ -95,6 +95,9 @@ export interface AssistantSyncWorkResult {
   /** Epoch ms when the service worker should schedule the next attempt. */
   retryAt?: number;
   more?: boolean;
+  /** Sheets requests this pass made, for the flush log. */
+  reads?: number;
+  writes?: number;
 }
 
 function plainSyncError(error: unknown): string {
@@ -125,6 +128,8 @@ function workResult(flush: FlushResult, created = false): AssistantSyncWorkResul
     ...(flush.warning ? { warning: flush.warning } : {}),
     ...(flush.retryAt ? { retryAt: flush.retryAt } : {}),
     ...(flush.more ? { more: true } : {}),
+    reads: flush.reads,
+    writes: flush.writes,
   };
 }
 

@@ -27,9 +27,11 @@ import {
 } from "../assistant-sync/schedule";
 import {
   AssistantSyncMessageSchema,
+  DwellAllowedMessageSchema,
   DwellMessageSchema,
   parseMessage,
   SyncWorkReplySchema,
+  type DwellMessage,
   type SyncWorkReply,
 } from "../assistant-sync/messages";
 import {
@@ -119,6 +121,8 @@ import { requestExtraction } from "../lib/extract-injector";
 import { canonicalLinkedInUrl, sameLinkedInProfile, sanitizePersonDetail, type LinkedInEntity } from "../lib/capture/linkedin";
 import { deletePerson, listPeople, upsertPerson } from "../lib/people";
 import { cacheProfilePhoto, getProfilePhoto, profilesWithPhotos } from "../lib/profile-photos";
+import { applyDwellReport, readingTimeFor, type DwellLedger } from "../lib/reading-time";
+import { FLUSH_LOG_KEY, appendFlushLog, flushLogEntry } from "../assistant-sync/flush-log";
 import { resolveEnteredUrl, toSuggestions } from "../lib/omnibox";
 import { saveHighlight } from "../lib/highlights";
 import { sanitizeExtraChunks, sanitizeImageInputs, type ImageInput } from "../lib/capture/extra-chunks";
@@ -418,7 +422,22 @@ async function sendSyncWork(action: "alarm" | "now" | "enable" | "disable", toke
   });
   const reply = parseMessage(SyncWorkReplySchema, raw) ?? { ok: false, error: "Sync did not start." };
   if (reply.ids) await writeAssistantSyncIds(reply.ids);
+  if (action !== "disable") void recordFlush(action, reply);
   return reply;
+}
+
+let flushLogChain: Promise<unknown> = Promise.resolve();
+
+function recordFlush(action: "alarm" | "now" | "enable", reply: SyncWorkReply): Promise<unknown> {
+  const entry = flushLogEntry(action, reply, Date.now());
+  devLog.info("[Cortex] sync pass", entry);
+  flushLogChain = flushLogChain
+    .then(async () => {
+      const stored = await chrome.storage.local.get(FLUSH_LOG_KEY);
+      await chrome.storage.local.set({ [FLUSH_LOG_KEY]: appendFlushLog(stored[FLUSH_LOG_KEY], entry) });
+    })
+    .catch(() => undefined);
+  return flushLogChain;
 }
 
 function dropCachedToken(token: string): Promise<void> {
@@ -430,9 +449,49 @@ async function markAuthNeeded(): Promise<void> {
   await writeSyncEngineState({ ...state, authNeeded: true });
 }
 
-/** Content scripts read this flag so tabs measure dwell only while sync is on. */
+/** Mirror of the sync switch in local storage, kept for readers outside the offscreen database. */
 function mirrorSyncOn(on: boolean): void {
   void storageLocalSet({ [ASSISTANT_SYNC_ON_KEY]: on }).catch(() => undefined);
+}
+
+/** Tabs measure attention only where capture would run: never incognito, paused, blocked, or sensitive. */
+async function dwellAllowed(url: string, sender: chrome.runtime.MessageSender): Promise<boolean> {
+  if (!indexPayloadUrlMatchesTab(url, sender)) return false;
+  const gate = await shouldSkipIndexing(url, sender).catch(() => ({ skip: true as const }));
+  return !gate.skip;
+}
+
+const LOCAL_DWELL_KEY = "cortex_local_dwell";
+let localDwellChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Reports are handled one at a time in arrival order, so a final report never
+ * lands before an earlier one and no time is counted twice. The new part of
+ * each report goes to the page's reading time; session storage survives worker restarts.
+ */
+function handleDwellReport(tabId: number, report: DwellMessage, sender: chrome.runtime.MessageSender): void {
+  localDwellChain = localDwellChain
+    .then(async () => {
+      if (!(await dwellAllowed(report.url, sender))) return;
+      onDwellReport(tabId, report);
+      const stored = await chrome.storage.session.get(LOCAL_DWELL_KEY);
+      const ledger = (stored[LOCAL_DWELL_KEY] ?? {}) as DwellLedger;
+      if (await applyDwellReport(ledger, tabId, report)) onIndexCommitted();
+      await chrome.storage.session.set({ [LOCAL_DWELL_KEY]: ledger });
+    })
+    .catch(() => undefined);
+}
+
+function forgetLocalDwell(tabId: number): void {
+  localDwellChain = localDwellChain
+    .then(async () => {
+      const stored = await chrome.storage.session.get(LOCAL_DWELL_KEY);
+      const map = (stored[LOCAL_DWELL_KEY] ?? {}) as DwellLedger;
+      if (!(tabId in map)) return;
+      delete map[tabId];
+      await chrome.storage.session.set({ [LOCAL_DWELL_KEY]: map });
+    })
+    .catch(() => undefined);
 }
 
 /**
@@ -629,7 +688,10 @@ async function captureAssistantSyncVisit(visit: {
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  setTimeout(() => endTabVisit(tabId), FINAL_REPORT_GRACE_MS);
+  setTimeout(() => {
+    endTabVisit(tabId);
+    forgetLocalDwell(tabId);
+  }, FINAL_REPORT_GRACE_MS);
 });
 
 /** The page's own final dwell report usually lands within this window after the URL changes. */
@@ -2519,9 +2581,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
           ...(site.trim() ? { site: site.trim() } : {}),
         });
         if (result.ok) {
+          const read = await readingTimeFor(result.hits.map((h) => h.url)).catch(() => new Map<string, number>());
           sendResponse({
             ok: true,
-            hits: result.hits,
+            hits: result.hits.map((h) => (read.has(h.url) ? { ...h, readMs: read.get(h.url) } : h)),
             evidence: result.evidence,
           });
         } else {
@@ -2959,11 +3022,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     return true;
   }
 
+  if (type === "CORTEX_DWELL_ALLOWED") {
+    const ask = parseMessage(DwellAllowedMessageSchema, msg);
+    if (sender.id !== chrome.runtime.id || sender.tab?.id == null || !ask) return false;
+    void dwellAllowed(ask.url, sender).then((ok) => sendResponse({ ok }));
+    return true;
+  }
+
   if (type === "CORTEX_DWELL") {
     const tabId = sender.tab?.id;
     const report = parseMessage(DwellMessageSchema, msg);
     if (sender.id !== chrome.runtime.id || tabId == null || !report) return false;
-    onDwellReport(tabId, report);
+    handleDwellReport(tabId, report, sender);
     return false;
   }
 

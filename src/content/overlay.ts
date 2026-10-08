@@ -16,6 +16,7 @@ import {
   type PendingDelete,
 } from "./chat-history";
 import { buildExamplePrompts, type RecentVisitLite } from "./example-prompts";
+import { formatReadingTime } from "../shared/reading-time-format";
 import {
   isExtensionRuntimeAlive,
   sendRuntimeMessage,
@@ -2009,6 +2010,7 @@ ${shadowCss}`;
               scoreBreakdown: string;
               kind?: ChunkKind;
               locator?: ChunkLocator;
+              readMs?: number;
             }[];
           }>((resolve, reject) => {
             const exact = exactInput.value.trim();
@@ -2079,6 +2081,7 @@ ${shadowCss}`;
 
               // Per-kind target and detail (release 1.2.0): video moment, PDF page, table rows.
               const kindDetail = citationDetail(h);
+              const read = formatReadingTime(h.readMs);
               return `
 <div class="cortex-hit-card" role="listitem">
   <a class="cortex-hit-link" href="${esc(citationHref(h, h.url) ?? "#")}" target="_blank" rel="noreferrer">
@@ -2091,6 +2094,7 @@ ${shadowCss}`;
   </a>
   <div class="cortex-hit-footer">
     <time class="cortex-hit-time" datetime="${new Date(h.visitedAt).toISOString()}">${esc(when)}</time>
+    ${read ? `<span class="cortex-hit-read">${esc(read)}</span>` : ""}
     <span class="cortex-confidence-badge ${tier.cssClass}" title="${esc(titleAttr)}">${esc(tier.label)}</span>
   </div>
   <details class="cortex-hit-details">

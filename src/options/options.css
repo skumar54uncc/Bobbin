@@ -1287,6 +1287,10 @@ body {
   color: var(--text-tertiary);
 }
 
+.cx-recent-read {
+  margin-right: 8px;
+}
+
 .cx-recent-count-pill {
   display: inline-block;
   margin-bottom: 2px;

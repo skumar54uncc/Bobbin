@@ -17,7 +17,9 @@ export const BUNDLE_BUDGETS = {
   "overlay.js": 164 * KB,
   // Multi-provider cloud chat (OpenAI-compatible and Anthropic) lives in the worker.
   // Sync scheduling and dwell tracking add 5.3 KB; valibot message checks add 5.2 KB.
-  "service-worker.js": 237 * KB,
+  // Set with 15 KB headroom before v2 Phase 2. Largest parts: Dexie, the worker itself,
+  // and Readability for history import (which needs a DOM and belongs in offscreen).
+  "service-worker.js": 254 * KB,
   "offscreen.js": 700 * KB,
   // Assistant Sync: Drive client and int8 topic vectors, lazy only.
   // Caps stay under the 130 KB float file so that file cannot return.

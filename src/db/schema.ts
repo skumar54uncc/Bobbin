@@ -32,6 +32,8 @@ export interface DocumentRecord {
    * Missing on 1.0.x rows; the background re-chunk job upgrades them.
    */
   chunkingVersion?: number;
+  /** Measured reading time across visits. Missing until a tab reports attention. */
+  readMs?: number;
 }
 
 export type EmbedState = "pending" | "embedded" | "failed" | "skipped";
@@ -143,6 +145,8 @@ export interface VisitLogEntry {
   hostname: string;
   visitedAt: number;
   textLength: number;
+  /** Measured reading time for this visit. */
+  readMs?: number;
 }
 
 export interface ConversationRecord {

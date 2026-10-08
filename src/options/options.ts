@@ -1,5 +1,6 @@
 import { initBackupUi, saveBlob } from "./backup-ui";
 import { normalizePanelPreference } from "../lib/panel-mode";
+import { formatReadingTime } from "../shared/reading-time-format";
 import {
   getUserSettings,
   setUserSettings,
@@ -137,6 +138,7 @@ type RecentRow = {
   title: string;
   hostname: string;
   visitedAt: number;
+  readMs?: number;
 };
 
 let statsAnimatedOnce = false;
@@ -254,7 +256,7 @@ function renderRecentList(recent: RecentRow[]): void {
 
   const map = new Map<
     string,
-    { url: string; title: string; host: string; at: number; n: number }
+    { url: string; title: string; host: string; at: number; n: number; readMs: number }
   >();
   for (const row of recent) {
     const e = map.get(row.url);
@@ -265,9 +267,11 @@ function renderRecentList(recent: RecentRow[]): void {
         host: row.hostname,
         at: row.visitedAt,
         n: 1,
+        readMs: row.readMs ?? 0,
       });
     } else {
       e.n++;
+      e.readMs += row.readMs ?? 0;
       if (row.visitedAt > e.at) {
         e.at = row.visitedAt;
         e.title = row.title || e.title;
@@ -310,6 +314,13 @@ function renderRecentList(recent: RecentRow[]): void {
       pill.className = "cx-recent-count-pill";
       pill.textContent = `${r.n} visits`;
       meta.appendChild(pill);
+    }
+    const read = formatReadingTime(r.readMs);
+    if (read) {
+      const readEl = document.createElement("span");
+      readEl.className = "cx-recent-read";
+      readEl.textContent = read;
+      meta.appendChild(readEl);
     }
     const when = document.createElement("span");
     when.textContent = relativeTime(r.at);

@@ -532,7 +532,8 @@
   padding-left: 32px;
 }
 
-.cortex-hit-time {
+.cortex-hit-time,
+.cortex-hit-read {
   font-size: 11px;
   color: var(--cx-text-subtle);
 }

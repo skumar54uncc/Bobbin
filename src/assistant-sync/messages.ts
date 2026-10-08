@@ -10,6 +10,12 @@ export const DwellMessageSchema = v.object({
 });
 export type DwellMessage = v.InferOutput<typeof DwellMessageSchema>;
 
+/** A tab asks whether its page may be measured. The same gate as indexing answers. */
+export const DwellAllowedMessageSchema = v.object({
+  type: v.literal("CORTEX_DWELL_ALLOWED"),
+  url: v.pipe(v.string(), v.maxLength(8192)),
+});
+
 export const AssistantSyncMessageSchema = v.object({
   type: v.literal("CORTEX_ASSISTANT_SYNC"),
   action: v.picklist(["status", "enable", "now", "disable"]),
@@ -28,6 +34,8 @@ export const SyncWorkReplySchema = v.object({
   authFailed: v.optional(v.boolean()),
   retryAt: v.optional(v.number()),
   more: v.optional(v.boolean()),
+  reads: v.optional(v.number()),
+  writes: v.optional(v.number()),
   ids: v.optional(
     v.object({
       folderId: v.optional(v.nullable(v.string())),

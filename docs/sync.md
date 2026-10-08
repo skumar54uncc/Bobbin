@@ -105,3 +105,9 @@ project quota.
 | Visit end, 5 second filter, excerpt | `src/assistant-sync/finalize.ts` |
 | Alarms, open visits, token refresh | `src/background/service-worker.ts` |
 | Google calls (offscreen only) | `src/assistant-sync/drive-api.ts` |
+| Last 50 passes (counts and status, no URLs) | `src/assistant-sync/flush-log.ts`, key `cortex_assist_flush_log` |
+
+Dwell is measured wherever capture runs, whether or not sync is on: the
+tab asks the worker, which answers with the same gate as indexing. The
+local library keeps reading time per page and visit
+(`src/lib/reading-time.ts`). The live test is in `docs/live-sync-test.md`.

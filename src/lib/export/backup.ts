@@ -214,6 +214,7 @@ export function validateBackup(raw: unknown): ValidateResult {
       if (docIds.has(docId)) throw new Invalid(`${w}: duplicate id`);
       docIds.add(docId);
       const chunkingVersion = optNum(o, "chunkingVersion", w);
+      const readMs = optNum(o, "readMs", w);
       return {
         id: docId,
         url: url(o, "url", w),
@@ -224,6 +225,7 @@ export function validateBackup(raw: unknown): ValidateResult {
         visitCount: optNum(o, "visitCount", w) ?? 1,
         importanceScore: optNum(o, "importanceScore", w) ?? 0,
         ...(chunkingVersion !== undefined ? { chunkingVersion } : {}),
+        ...(readMs !== undefined ? { readMs } : {}),
       };
     });
 
@@ -251,12 +253,14 @@ export function validateBackup(raw: unknown): ValidateResult {
     const visitLog = rows(s, "visitLog").map((r, n) => {
       const w = `visitLog[${n}]`;
       const o = obj(r, w);
+      const readMs = optNum(o, "readMs", w);
       return {
         url: url(o, "url", w),
         title: str(o, "title", w),
         hostname: str(o, "hostname", w),
         visitedAt: num(o, "visitedAt", w),
         textLength: optNum(o, "textLength", w) ?? 0,
+        ...(readMs !== undefined ? { readMs } : {}),
       };
     });
 
