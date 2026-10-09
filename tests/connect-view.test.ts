@@ -14,7 +14,7 @@ function mount(over: Partial<ConnectDeps> = {}, on = true) {
   document.body.replaceChildren(host);
   const deps: ConnectDeps = {
     status: vi.fn(async () => ({ on, line: on ? "Synced 2 min ago." : "", problem: false })),
-    enable: vi.fn(),
+    enable: vi.fn(async () => ({ message: "Sync is on.", needsSettings: false })),
     openSettings: vi.fn(),
     start: vi.fn(async () => ({ ok: true })),
     ...over,
@@ -63,25 +63,50 @@ describe("Connect your AI view", () => {
     expect(deps.start).toHaveBeenCalledWith("grok");
   });
 
-  it("puts Turn on Assistant Sync first when sync is off, Enable inline where it can run", async () => {
+  it("offers Enable in the status card when sync is off, before any assistant is picked", async () => {
     const { host, deps } = mount({}, false);
     await settle();
-    expect(host.querySelector(".cx-connect-status-title")?.textContent).toBe("Assistant Sync is off");
-    card(host, "claude").click();
-    const first = host.querySelector(".cx-connect-steps li")!;
-    expect(first.textContent).toMatch(/^Turn on Assistant Sync\./);
-    first.querySelector<HTMLButtonElement>("button")!.click();
+    const status = host.querySelector<HTMLElement>(".cx-connect-status")!;
+    expect(status.querySelector(".cx-connect-status-title")?.textContent).toBe("Assistant Sync is off");
+    const enable = status.querySelector<HTMLButtonElement>(".cx-connect-enable")!;
+    expect(enable.textContent).toBe("Enable");
+    enable.click();
+    await settle();
     expect(deps.enable).toHaveBeenCalledTimes(1);
+    expect(status.querySelector(".cx-connect-feedback")?.textContent).toBe("Sync is on.");
+    // Picking an assistant shows only its steps: Enable is not repeated.
+    card(host, "claude").click();
+    expect(host.querySelectorAll(".cx-connect-enable")).toHaveLength(1);
   });
 
-  it("sends people to Settings for Enable inside the panel frame", async () => {
-    const { host, deps } = mount({ enable: null }, false);
+  it("sends people to Settings when Cortex has a question about an earlier folder", async () => {
+    const { host, deps } = mount({ enable: vi.fn(async () => ({ message: "Answer it in Settings.", needsSettings: true })) }, false);
     await settle();
-    card(host, "chatgpt").click();
-    const button = host.querySelector<HTMLButtonElement>(".cx-connect-enable")!;
-    expect(button.textContent).toBe("Turn on in Settings");
-    button.click();
+    host.querySelector<HTMLButtonElement>(".cx-connect-enable")!.click();
+    await settle();
+    [...host.querySelectorAll<HTMLButtonElement>(".cx-connect-feedback button")].find((b) => b.textContent === "Open Settings")!.click();
     expect(deps.openSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the Enable button once sync is on", async () => {
+    const { host } = mount({}, true);
+    await settle();
+    expect(host.querySelector<HTMLElement>(".cx-connect-status-action")!.hidden).toBe(true);
+  });
+
+  it("in Settings, shows sync status and Enable only in the Assistant Sync section", async () => {
+    const off = mount({ enable: null }, false);
+    await settle();
+    const status = off.host.querySelector<HTMLElement>(".cx-connect-status")!;
+    expect(status.hidden).toBe(false);
+    expect(status.querySelector(".cx-connect-status-line")?.textContent).toBe("Turn it on in Assistant Sync above so your assistant has something to read.");
+    const go = status.querySelector<HTMLButtonElement>(".cx-connect-enable")!;
+    expect(go.textContent).toBe("Go to Assistant Sync");
+    go.click();
+    expect(off.deps.openSettings).toHaveBeenCalledTimes(1);
+    const on = mount({ enable: null }, true);
+    await settle();
+    expect(on.host.querySelector<HTMLElement>(".cx-connect-status")!.hidden).toBe(true);
   });
 
   it("shows the start failure in words", async () => {

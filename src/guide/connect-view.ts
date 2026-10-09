@@ -4,6 +4,7 @@
  */
 import { ASSISTANTS, firstUrl, troubleshootingFor, type AssistantConfig, type AssistantId } from "../config/assistants";
 import { mascotHtml } from "../content/mascot";
+import type { EnableResult } from "./enable-sync";
 
 export const CONNECT_TITLE = "Connect your AI to your Cortex memory";
 export const CONNECT_LEAD = "Pick your assistant. Cortex opens the right page and walks you through it. About 3 minutes.";
@@ -16,8 +17,13 @@ export interface SyncStatus {
 
 export interface ConnectDeps {
   status: () => Promise<SyncStatus>;
-  /** Inline Enable. Null where Enable cannot run (a web page frame): the button opens Settings instead. */
-  enable: (() => void) | null;
+  /**
+   * Inline Enable, run from the click, with the sync status card above the cards.
+   * Null in Settings: the Assistant Sync section there already has both, so the view only
+   * points to it while sync is off.
+   */
+  enable: (() => Promise<EnableResult>) | null;
+  /** Opens Settings at Assistant Sync (from the panel), or scrolls to it (in Settings). */
   openSettings: () => void;
   start: (id: AssistantId) => Promise<{ ok: boolean; error?: string }>;
 }
@@ -58,7 +64,12 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
   const statusText = el("div", "cx-connect-status-text");
   const statusTitle = el("p", "cx-connect-status-title", "Checking Assistant Sync");
   const statusLine = el("p", "cx-connect-status-line");
-  statusText.append(statusTitle, statusLine);
+  const statusAction = el("div", "cx-connect-status-action");
+  const statusButton = button("cx-btn cx-btn-primary cx-connect-enable", deps.enable ? "Enable" : "Go to Assistant Sync");
+  const feedback = el("p", "cx-connect-status-line cx-connect-feedback");
+  feedback.setAttribute("role", "status");
+  statusAction.append(statusButton);
+  statusText.append(statusTitle, statusLine, statusAction, feedback);
   status.append(statusDot, statusText);
 
   const gridLabel = el("h3", "cx-connect-h", "Your assistant");
@@ -74,7 +85,6 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
   const troubleList = el("ul", "cx-connect-trouble-list");
   trouble.append(el("summary", undefined, "Troubleshooting"), troubleList);
 
-  let syncOn = false;
   let active: AssistantConfig | null = null;
   const cards = new Map<AssistantId, HTMLButtonElement>();
 
@@ -82,15 +92,28 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     troubleList.replaceChildren(...troubleshootingFor(active).map((t) => el("li", undefined, t)));
   };
 
-  const enableStep = (): HTMLLIElement => {
-    const li = el("li", "cx-connect-step cx-connect-step--sync");
-    li.dataset.step = "sync";
-    li.append(el("p", "cx-connect-step-text", "Turn on Assistant Sync. Cortex copies your memory to the Cortex Memory folder in your Google Drive."));
-    const on = button("cx-btn cx-btn-primary cx-connect-enable", deps.enable ? "Enable" : "Turn on in Settings");
-    on.addEventListener("click", () => (deps.enable ? deps.enable() : deps.openSettings()));
-    li.append(on);
-    return li;
-  };
+  statusButton.addEventListener("click", () => {
+    const enable = deps.enable;
+    if (!enable) {
+      deps.openSettings();
+      return;
+    }
+    statusButton.disabled = true;
+    feedback.replaceChildren();
+    void enable()
+      .then((res) => {
+        feedback.textContent = res.message;
+        if (res.needsSettings) {
+          const open = button("cx-btn cx-btn-secondary", "Open Settings");
+          open.addEventListener("click", () => deps.openSettings());
+          feedback.append(" ", open);
+        }
+      })
+      .finally(() => {
+        statusButton.disabled = false;
+        void refresh();
+      });
+  });
 
   const paintGuide = () => {
     guide.replaceChildren();
@@ -99,7 +122,6 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     if (!a) return;
     guide.append(el("h3", "cx-connect-h", `Set up ${a.name}`));
     const ol = el("ol", "cx-connect-steps");
-    if (!syncOn) ol.append(enableStep());
     for (const s of a.steps) {
       const li = el("li", "cx-connect-step", s.title);
       li.dataset.step = s.id;
@@ -159,12 +181,15 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     } catch {
       s = { on: false, line: "Cortex could not read the sync status.", problem: true };
     }
-    const changed = s.on !== syncOn;
-    syncOn = s.on;
     status.dataset.state = s.problem ? "problem" : s.on ? "on" : "off";
     statusTitle.textContent = s.problem ? "Assistant Sync needs attention" : s.on ? "Assistant Sync is on" : "Assistant Sync is off";
-    statusLine.textContent = s.on || s.problem ? s.line : "Turn it on so your assistant has something to read.";
-    if (changed || guide.childElementCount === 0) paintGuide();
+    if (deps.enable) statusLine.textContent = s.on || s.problem ? s.line : "Turn it on so your assistant has something to read.";
+    else statusLine.textContent = s.problem ? s.line : "Turn it on in Assistant Sync above so your assistant has something to read.";
+    statusAction.hidden = s.on;
+    if (s.on) feedback.replaceChildren();
+    // Settings shows sync status and Enable once, in its Assistant Sync section.
+    status.hidden = !deps.enable && s.on && !s.problem;
+    if (guide.childElementCount === 0) paintGuide();
   };
 
   root.append(head, status, gridLabel, grid, guide, trouble);

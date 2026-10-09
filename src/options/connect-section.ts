@@ -4,31 +4,18 @@ import { startGuide } from "../guide/start";
 import { keepFresh, readSyncStatus } from "../guide/sync-status";
 import type { SyncWarningRecord } from "../assistant-sync/db";
 
-/** Runs the Assistant Sync Enable button, so sign-in, the old-files question, and feedback stay in one place. */
-function enableFromConnect(refresh: () => Promise<void>): void {
-  const enable = document.getElementById("cx-assistant-enable") as HTMLButtonElement | null;
-  if (!enable) return;
-  enable.click();
-  const confirm = document.getElementById("cx-assistant-confirm");
-  if (confirm) {
-    const watch = new MutationObserver(() => {
-      if (confirm.hidden) return;
-      watch.disconnect();
-      confirm.scrollIntoView({ block: "center" });
-    });
-    watch.observe(confirm, { attributes: true, attributeFilter: ["hidden"] });
-    window.setTimeout(() => watch.disconnect(), 120_000);
-  }
-  for (const ms of [1500, 4000, 8000]) window.setTimeout(() => void refresh(), ms);
-}
-
 export function mountConnectSection(): void {
   const root = document.getElementById("cx-connect-root");
   if (!root) return;
+  // Sync status and Enable live once on this page, in the Assistant Sync section.
   const view = renderConnectView(root, {
     status: readSyncStatus,
-    enable: () => enableFromConnect(view.refresh),
-    openSettings: () => document.getElementById("cx-sec-assistant")?.scrollIntoView({ block: "start" }),
+    enable: null,
+    openSettings: () => {
+      const section = document.getElementById("cx-sec-assistant");
+      section?.scrollIntoView({ block: "start" });
+      document.getElementById("cx-assistant-enable")?.focus();
+    },
     start: startGuide,
   });
   keepFresh(view.refresh);

@@ -19,6 +19,7 @@ import {
 } from "../config/assistants";
 import { mascotHtml } from "../content/mascot";
 import { copyText } from "./clipboard";
+import { enableFromClick } from "./enable-sync";
 import { stepPointer } from "./pointer-targets";
 import {
   DONE_MESSAGE,
@@ -45,17 +46,6 @@ function button(className: string, text: string): HTMLButtonElement {
   const b = el("button", className, text);
   b.type = "button";
   return b;
-}
-
-/** Interactive sign-in. Runs only from the Enable click. */
-function driveTokenFromClick(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    chrome.identity.getAuthToken({ interactive: true }, (value) => {
-      const err = chrome.runtime.lastError;
-      if (err?.message || !value) reject(new Error(err?.message || "Sign in to Google is needed before Cortex can sync."));
-      else resolve(value);
-    });
-  });
 }
 
 /** The primary button's words. On the step's own page, a copy step only copies. */
@@ -183,21 +173,14 @@ function syncBlock(): HTMLElement {
   enable.addEventListener("click", () => {
     enable.disabled = true;
     feedback.textContent = "";
-    void driveTokenFromClick()
-      .then(async (token) => {
-        const res = (await chrome.runtime.sendMessage({ type: "CORTEX_ASSISTANT_SYNC", action: "enable", token })) as
-          | { ok?: boolean; error?: string; status?: string }
-          | undefined;
-        if (res?.status === "confirm") {
-          feedback.textContent = "Cortex has a question about an earlier Cortex Memory folder. Answer it in Settings.";
+    void enableFromClick()
+      .then((res) => {
+        feedback.textContent = res.message;
+        if (res.needsSettings) {
           const open = button("cx-btn cx-btn-secondary", "Open Settings");
           open.addEventListener("click", () => openSettingsSection("cx-sec-assistant"));
           feedback.append(" ", open);
-        } else if (!res?.ok) feedback.textContent = res?.error || "Sync did not start.";
-        else feedback.textContent = "Sync is on.";
-      })
-      .catch((error: unknown) => {
-        feedback.textContent = error instanceof Error ? error.message : "Sign in to Google is needed before Cortex can sync.";
+        }
       })
       .finally(() => {
         enable.disabled = false;

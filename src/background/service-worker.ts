@@ -80,6 +80,7 @@ import {
   indexPayloadUrlMatchesTab,
   isOptionsPageSender,
   isGuidePanelSender,
+  isConnectFrameSender,
   isExtensionPageSender,
   isPrivilegedExtensionSender,
 } from "../lib/message-security";
@@ -3211,8 +3212,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       void assistantSyncStatus().then(sendResponse, () => sendResponse({ ok: false, error: "status_failed" }));
       return true;
     }
+    // Enable from the click in the Connect frame inside the Cortex panel. Nothing else from there.
+    const frameEnable = parsed?.action === "enable" && isConnectFrameSender(sender);
     // Options opens in a tab, so sender.tab is set. A web page still cannot send this.
-    if (!isPrivilegedExtensionSender(sender) && !isOptionsPageSender(sender)) {
+    if (!isPrivilegedExtensionSender(sender) && !isOptionsPageSender(sender) && !frameEnable) {
       sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
       return true;
     }
@@ -3225,8 +3228,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       void assistantSyncStatus().then(sendResponse, () => sendResponse({ ok: false, error: "status_failed" }));
       return true;
     }
-    // Interactive Enable comes from the Enable click in Settings or the setup side panel.
-    if (action === "enable" && !isOptionsPageSender(sender) && !isGuidePanelSender(sender)) {
+    // Interactive Enable comes from the Enable click in Settings, the setup side panel, or the Connect frame.
+    if (action === "enable" && !isOptionsPageSender(sender) && !isGuidePanelSender(sender) && !frameEnable) {
       sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
       return true;
     }

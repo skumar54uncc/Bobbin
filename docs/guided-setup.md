@@ -6,8 +6,8 @@ How the Connect AI Agents tab, the setup side panel, and the on-page pointer wor
 
 | Surface | File | Notes |
 | --- | --- | --- |
-| Cortex panel, Connect AI Agents tab | `connect-frame.html` (`src/guide/connect-frame.ts`) | An extension frame inside the panel's closed shadow root, so Start setup runs in an extension click. Listed in `web_accessible_resources` with `use_dynamic_url`. Offers no Enable button: a web page hosts the frame, so Enable stays in Settings. |
-| Settings, Connect your AI | `src/options/connect-section.ts` | Same view. Its Enable runs the Assistant Sync Enable button, so sign-in and the old-files question stay in one place. |
+| Cortex panel, Connect AI Agents tab | `connect-frame.html` (`src/guide/connect-frame.ts`) | An extension frame inside the panel's closed shadow root, so Start setup runs in an extension click. Listed in `web_accessible_resources` with `use_dynamic_url`, so only the panel can load it. The status card has its own Enable (interactive sign-in from that click, `src/guide/enable-sync.ts`). The service worker accepts `enable` from this frame (`isConnectFrameSender`) and nothing else beyond status. If Cortex has a question about an earlier folder, it sends the user to Settings. |
+| Settings, Connect your AI | `src/options/connect-section.ts` | Same view without its own Enable: the Assistant Sync section just above has it. While sync is off, a short card says so with "Go to Assistant Sync". While sync is on, there is no status card. |
 | Setup side panel | `guide-panel.html` (`src/guide/guide-panel.ts`) | Set for the assistant's tab only. Has its own Enable (interactive sign-in from that click). |
 | On-page pointer | `guide-pointer.js` (`src/guide/guide-pointer.ts`) | Injected into the guide's tab only, on the assistant's own site. |
 
