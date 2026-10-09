@@ -86,6 +86,7 @@ import {
   isPrivilegedExtensionSender,
 } from "../lib/message-security";
 import { GUIDE_KEY, GUIDE_PANEL_PATH } from "../guide/state";
+import { COPY_MESSAGE, COPY_TEXT_MAX, OFFSCREEN_COPY_MESSAGE } from "../guide/exec-copy";
 import {
   CORTEX_EXTENSION_BUS_CHANNEL,
   type CortexBusInbound,
@@ -341,9 +342,13 @@ async function ensureOffscreen(): Promise<void> {
 
       await chrome.offscreen.createDocument({
         url: chrome.runtime.getURL("offscreen.html"),
-        reasons: [chrome.offscreen.Reason.WORKERS, chrome.offscreen.Reason.DOM_PARSER],
+        reasons: [
+          chrome.offscreen.Reason.WORKERS,
+          chrome.offscreen.Reason.DOM_PARSER,
+          "CLIPBOARD" as chrome.offscreen.Reason,
+        ],
         justification:
-          "Compute local MiniLM embeddings (Transformers.js) and read the text of imported history pages for Bobbin.",
+          "Compute local MiniLM embeddings (Transformers.js), read imported history pages, and copy text when a host page blocks the clipboard in the in-page panel.",
       });
       // #region agent log
       agentDebugLog({
@@ -3390,6 +3395,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     if (sender.id !== chrome.runtime.id || tabId == null || !report) return false;
     handleDwellReport(tabId, report, sender);
     return false;
+  }
+
+  if (type === COPY_MESSAGE) {
+    const allowed =
+      isConnectFrameSender(sender) ||
+      isGuidePanelSender(sender) ||
+      isOptionsPageSender(sender) ||
+      isPrivilegedExtensionSender(sender);
+    const text = typeof (msg as { text?: unknown }).text === "string" ? (msg as { text: string }).text.slice(0, COPY_TEXT_MAX) : "";
+    if (!allowed || !text) {
+      sendResponse({ ok: false as const });
+      return true;
+    }
+    void (async () => {
+      try {
+        await ensureOffscreen();
+        const res = (await chrome.runtime.sendMessage({ type: OFFSCREEN_COPY_MESSAGE, text })) as { ok?: boolean } | undefined;
+        sendResponse({ ok: res?.ok === true });
+      } catch {
+        sendResponse({ ok: false as const });
+      }
+    })();
+    return true;
   }
 
   if (type === "CORTEX_OPEN_OPTIONS") {

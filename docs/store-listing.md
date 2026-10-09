@@ -23,13 +23,15 @@ Bobbin: Browsing Memory for AI
 
 ## Tagline
 
-Read it once. Ask your AI anytime.
+The missing memory for your AI.
 
 ## Short description
 
-Bobbin remembers the pages you read so Claude, ChatGPT, Gemini, and Grok can answer questions about them. Free. No servers.
+The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free.
 
 ## Full description
+
+The missing memory for your AI.
 
 Read it once. Ask your AI anytime.
 

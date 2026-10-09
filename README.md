@@ -40,7 +40,7 @@ CI (`.github/workflows/ci.yml`) runs the audit gate (`npm audit --omit=dev --aud
 
 ### Toolbar icons
 
-Put a square brand PNG at `icons/cortex-brand.png` and run `npm run icons` to regenerate `icons/icon-16.png`, `icon-48.png` and `icon-128.png`.
+Put a square brand PNG at `icons/bobbin-brand.png` and run `npm run icons` to regenerate `icons/icon-16.png`, `icon-48.png` and `icon-128.png`.
 
 ## Architecture
 

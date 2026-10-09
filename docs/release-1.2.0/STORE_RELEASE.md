@@ -89,13 +89,15 @@ Leave unticked: health information, financial and payment information, authentic
 
 **Name:** Bobbin: Browsing Memory for AI
 
-**Tagline:** Read it once. Ask your AI anytime.
+**Tagline:** The missing memory for your AI.
 
-**Short description (123 characters):** Bobbin remembers the pages you read so Claude, ChatGPT, Gemini, and Grok can answer questions about them. Free. No servers.
+**Short description (108 characters):** The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free.
 
-**Manifest description (tagline first, 116 characters):** Read it once. Ask your AI anytime. Remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free. No servers.
+**Manifest description (same sentence, 108 characters):** The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free.
 
 **Detailed description:**
+
+The missing memory for your AI.
 
 Read it once. Ask your AI anytime.
 

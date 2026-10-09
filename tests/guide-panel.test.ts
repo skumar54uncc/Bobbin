@@ -382,7 +382,7 @@ describe("setup side panel", () => {
     await settle();
     expect(card()!.dataset.step).toBe("connect");
     expect(primary().textContent).toBe("Open Claude connectors");
-    expect(navigations(fake).at(-1)).toBe("https://claude.ai/customize/connectors");
+    expect(navigations(fake).at(-1)).toBe("https://claude.ai/customize/connectors/id/google-drive-drivemcp");
     expect(document.querySelectorAll(".cx-guide-done-item")).toHaveLength(3);
     expect(document.querySelector('.cx-guide-done-item[aria-current="step"]')?.getAttribute("data-step")).toBe("connect");
     await save(fake, { result: "yes" });

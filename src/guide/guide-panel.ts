@@ -20,7 +20,7 @@ import {
   type GuideStep,
 } from "../config/assistants";
 import { mascotHtml } from "../content/mascot";
-import { copyText } from "./clipboard";
+import { copyText, showManualCopy } from "./clipboard";
 import { enableFromClick } from "./enable-sync";
 import { stepPointer } from "./pointer-targets";
 import {
@@ -283,11 +283,7 @@ function stepCard(a: AssistantConfig, s: GuideStep, current: GuideState): HTMLEl
   const note = el("p", "cx-guide-feedback", status);
   note.setAttribute("role", "status");
   card.append(note);
-  if (manualCopy) {
-    const pre = el("pre", "cx-connect-instruction", manualCopy);
-    pre.tabIndex = 0;
-    card.append(pre);
-  }
+  if (manualCopy) showManualCopy(card, manualCopy);
   return card;
 }
 

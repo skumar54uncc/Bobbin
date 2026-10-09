@@ -134,6 +134,7 @@ module.exports = (env, argv) => {
         { from: "src/guide/guide.css", to: "." },
         { from: "icons", to: "icons", noErrorOnMissing: true },
         { from: "assets/mascot", to: "mascot", noErrorOnMissing: true },
+        { from: "assets/assistant-logos", to: "assistant-logos" },
         { from: "fonts", to: "fonts", noErrorOnMissing: true },
         { from: "vendor/models", to: "models", noErrorOnMissing: true },
         /** pdfjs-dist worker, loaded by the offscreen document only when a PDF is read. */

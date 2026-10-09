@@ -10,7 +10,9 @@ import {
   FEEDBACK_FORM_URL,
   FOOTER_FREE,
   HOMEPAGE_URL,
+  HOMEPAGE_SECONDARY,
   MANIFEST_DESCRIPTION,
+  NOT_AFFILIATED,
   PRIVACY_POLICY_URL,
   PRODUCT_TAGLINE,
   STORE_SUMMARY,
@@ -59,6 +61,7 @@ describe("Phase 6 free and independent copy", () => {
     expect(html).toContain(">Terms of Use<");
     expect(html).toContain(">Send feedback<");
     expect(html).toContain(BRAND_LINE);
+    expect(html.replace(/\s+/g, " ")).toContain(NOT_AFFILIATED);
     expect(html).toContain("github.io/Bobbin");
     expect(html).not.toContain("github.io/Cortex");
   });
@@ -66,6 +69,9 @@ describe("Phase 6 free and independent copy", () => {
   it("uses the marketing tagline on onboarding and in the manifest", () => {
     const onb = readFileSync(join(root, "src/onboarding/onboarding.html"), "utf8");
     expect(onb).toContain(PRODUCT_TAGLINE);
+    expect(onb).not.toContain(HOMEPAGE_SECONDARY);
+    expect(PRODUCT_TAGLINE).toBe("The missing memory for your AI.");
+    expect(MANIFEST_DESCRIPTION).toBe(STORE_SUMMARY);
     expect(MANIFEST_DESCRIPTION.startsWith(PRODUCT_TAGLINE)).toBe(true);
     expect(MANIFEST_DESCRIPTION.length).toBeLessThanOrEqual(132);
     expect(STORE_SUMMARY.length).toBeLessThanOrEqual(132);

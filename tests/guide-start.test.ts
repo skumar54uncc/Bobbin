@@ -47,7 +47,7 @@ describe("Start setup", () => {
     const { calls, session } = fakeChrome();
     expect(await startGuide("claude")).toEqual({ ok: true, tabId: 7 });
     expect(calls).toEqual([
-      ["tabs.create", { url: "https://claude.ai/customize/connectors", active: true }],
+      ["tabs.create", { url: "https://claude.ai/customize/connectors/id/google-drive-drivemcp", active: true }],
       ["runtime.sendMessage", { type: "CORTEX_GUIDE_PANEL", tabId: 7 }],
       ["sidePanel.open", { tabId: 7 }],
     ]);

@@ -2,6 +2,7 @@
  * Ask any assistant: builds a context packet from local memory, previews it, and puts it
  * into the chat box on the page (Insert into chat) or on the clipboard (Copy). Never sends.
  */
+import { showManualCopy } from "../guide/clipboard";
 import { formatPacket, itemLine, packetHeader, TEMPLATES, type PacketItem, type PacketRequest } from "./packet";
 
 export type InsertReply = { ok: true } | { ok: false; reason: "nofield" | "rejected" | "blocked" };
@@ -169,7 +170,13 @@ export function renderAttachView(container: HTMLElement, deps: AttachDeps): void
     const text = packet();
     if (!text) return;
     void deps.copy(text).then((ok) => {
-      status.textContent = ok ? "Copied. Paste it into any chat." : "Copy did not work.";
+      root.querySelector(".cx-copy-manual")?.remove();
+      if (ok) {
+        status.textContent = "Copied. Paste it into any chat.";
+        return;
+      }
+      status.textContent = "";
+      showManualCopy(root, text);
     });
   });
 }

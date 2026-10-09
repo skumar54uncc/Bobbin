@@ -26,6 +26,7 @@ import {
   type CortexBusOutbound,
 } from "../lib/extension-bus";
 import { isPrivilegedExtensionSender } from "../lib/message-security";
+import { COPY_TEXT_MAX, OFFSCREEN_COPY_MESSAGE, execCommandCopy } from "../guide/exec-copy";
 import { SEARCH_LIMITS } from "../lib/limits";
 import {
   backupGateUrls,
@@ -232,6 +233,16 @@ async function runBackupWork(m: BackupWorkMessage): Promise<unknown> {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
   if (!isPrivilegedExtensionSender(sender)) {
     return false;
+  }
+
+  if (msg?.type === OFFSCREEN_COPY_MESSAGE) {
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false });
+      return true;
+    }
+    const text = typeof msg.text === "string" ? msg.text.slice(0, COPY_TEXT_MAX) : "";
+    sendResponse({ ok: Boolean(text) && execCommandCopy(text) });
+    return true;
   }
 
   if (msg?.type === BACKUP_WORK_MESSAGE) {

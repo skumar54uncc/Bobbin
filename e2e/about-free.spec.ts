@@ -30,6 +30,7 @@ test("popup footer and About Bobbin match the free-forever copy", async ({ conte
   await expect(section).toContainText("Free, and built to stay that way");
   await expect(section).toContainText("about every 5 minutes");
   await expect(section).toContainText("Page text goes into Google Docs in your Bobbin Memory folder");
+  await expect(section).toContainText("Bobbin is not affiliated with, endorsed by, or sponsored by");
   await expect(section).not.toContainText("every 2 minutes");
   await expect(section.getByRole("link", { name: "Privacy Policy" })).toBeVisible();
   await expect(section.getByRole("link", { name: "Terms of Use" })).toBeVisible();
@@ -41,6 +42,6 @@ test("popup footer and About Bobbin match the free-forever copy", async ({ conte
   const onb = await context.newPage();
   await onb.setViewportSize({ width: 720, height: 900 });
   await onb.goto(`chrome-extension://${extensionId}/onboarding.html`);
-  await expect(onb.locator(".cx-opt-subtitle")).toHaveText("Read it once. Ask your AI anytime.");
+  await expect(onb.locator(".cx-opt-subtitle")).toHaveText("The missing memory for your AI.");
   await onb.screenshot({ path: join(SHOTS, "onboarding.png") });
 });

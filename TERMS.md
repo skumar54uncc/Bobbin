@@ -33,7 +33,7 @@ so AI assistants you choose can read it.
 Assistant Sync relies on Google Drive and Google Sheets. AI assistants
 rely on their own providers. Bobbin is not affiliated with, endorsed
 by, or sponsored by Google, Anthropic, OpenAI, xAI, Meta, Microsoft,
-Perplexity, or LinkedIn. Their names are used only to describe
+Perplexity, Muse, or LinkedIn. Their names are used only to describe
 compatibility. Changes or outages in those services may affect Bobbin.
 
 ## 5. Accuracy of answers

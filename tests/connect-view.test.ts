@@ -37,7 +37,9 @@ describe("Connect your AI view", () => {
     expect(host.querySelector(".cx-connect-status-line")?.textContent).toBe("Synced 2 min ago.");
     const names = [...host.querySelectorAll(".cx-connect-card-name")].map((n) => n.textContent);
     expect(names).toEqual(["Claude", "ChatGPT", "Gemini", "Grok", "Muse", "Perplexity", "Other"]);
-    expect(card(host, "claude").querySelector(".cx-connect-badge")?.textContent).toBe("Recommended, works on free");
+    expect(host.querySelector(".cx-connect-badge")).toBeNull();
+    expect(card(host, "claude").querySelector(".cx-connect-logo")?.getAttribute("width")).toBe("24");
+    expect(card(host, "claude").querySelector(".cx-connect-logo")?.getAttribute("src")).toContain("assistant-logos/claude.svg");
     expect(card(host, "chatgpt").querySelector(".cx-connect-card-plan")?.textContent).toMatch(/^Needs a ChatGPT plan/);
     expect(host.querySelector(".cx-connect-guide")?.hasAttribute("hidden")).toBe(true);
   });
@@ -57,7 +59,7 @@ describe("Connect your AI view", () => {
       "Add the Bobbin instruction",
       "Test it in a new chat",
     ]);
-    expect(guide.querySelector(".cx-connect-copy, .cx-connect-preview, pre")).toBeNull();
+    expect(guide.querySelector(".cx-connect-copy, .cx-connect-instruction, pre")).toBeNull();
     guide.querySelector<HTMLButtonElement>(".cx-connect-start")!.click();
     await settle();
     expect(deps.start).toHaveBeenCalledWith("grok");
@@ -126,6 +128,30 @@ describe("Connect your AI view", () => {
     card(host, "muse").click();
     expect(items()[0]).toBe("Muse forgets: send the Remember message again in a new chat.");
     expect(items()).toHaveLength(COMMON_TROUBLESHOOTING.length);
+  });
+
+  it("shows Other's full steps and a visible standing instruction with Copy", async () => {
+    const { standingInstructionFor, assistantById } = await import("../src/config/assistants");
+    const clip: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (s: string) => void clip.push(s) },
+    });
+    const { host } = mount();
+    await settle();
+    card(host, "other").click();
+    const guide = host.querySelector<HTMLElement>(".cx-connect-guide")!;
+    expect([...guide.querySelectorAll(".cx-connect-step-text")].map((p) => p.textContent).join(" ")).toContain(
+      "Open your assistant's settings"
+    );
+    expect(guide.querySelector(".cx-connect-pointer")).toBeNull();
+    const box = guide.querySelector<HTMLTextAreaElement>(".cx-connect-instruction")!;
+    expect(box.readOnly).toBe(true);
+    expect(box.value).toBe(standingInstructionFor(assistantById("other")!));
+    guide.querySelector<HTMLButtonElement>(".cx-connect-copy")!.click();
+    await settle();
+    expect(clip).toEqual([box.value]);
+    expect(guide.querySelector(".cx-connect-instruction-block [role=status]")?.textContent).toBe("Copied");
   });
 
   it("uses accordions that push content down and a grid that wraps", () => {

@@ -109,7 +109,7 @@ test.describe("guided setup", () => {
 
     await start("claude");
     const assistantTab = context.pages().find((p) => p.url().startsWith("https://claude.ai/"))!;
-    expect(assistantTab.url()).toBe("https://claude.ai/customize/connectors");
+    expect(assistantTab.url()).toBe("https://claude.ai/customize/connectors/id/google-drive-drivemcp");
     await expect(frame.locator(".cx-connect-start-note")).toHaveText("Bobbin opens Claude in a new tab and shows these steps in the side panel beside it.");
     const panel = await panelFor("https://claude.ai/");
     expect(panel.options).toMatchObject({ path: "guide-panel.html", enabled: true });

@@ -2,8 +2,9 @@
  * Connect your AI: status, assistant grid, the chosen assistant's guide, troubleshooting.
  * Rendered in Settings and in connect-frame.html inside the Cortex panel.
  */
-import { ASSISTANTS, firstUrl, troubleshootingFor, type AssistantConfig, type AssistantId } from "../config/assistants";
+import { ASSISTANTS, firstUrl, standingInstructionFor, troubleshootingFor, type AssistantConfig, type AssistantId } from "../config/assistants";
 import { mascotHtml } from "../content/mascot";
+import { copyText, showManualCopy } from "./clipboard";
 import type { EnableResult } from "./enable-sync";
 
 export const CONNECT_TITLE = "Connect your AI to your Bobbin memory";
@@ -44,6 +45,11 @@ function button(className: string, text: string): HTMLButtonElement {
   const b = el("button", className, text);
   b.type = "button";
   return b;
+}
+
+function logoUrl(id: string): string {
+  const get = (globalThis as { chrome?: { runtime?: { getURL?: (p: string) => string } } }).chrome?.runtime?.getURL;
+  return get ? get(`assistant-logos/${id}.svg`) : `assistant-logos/${id}.svg`;
 }
 
 export function renderConnectView(container: HTMLElement, deps: ConnectDeps): ConnectView {
@@ -123,9 +129,38 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     guide.append(el("h3", "cx-connect-h", `Set up ${a.name}`));
     const ol = el("ol", "cx-connect-steps");
     for (const s of a.steps) {
-      const li = el("li", "cx-connect-step", s.title);
+      const li = el("li", "cx-connect-step");
       li.dataset.step = s.id;
+      li.append(el("span", "cx-connect-step-title", s.title));
+      if (a.id === "other") li.append(el("p", "cx-connect-step-text", s.text));
       ol.append(li);
+    }
+    guide.append(ol);
+
+    if (a.id === "other") {
+      const ins = standingInstructionFor(a);
+      const block = el("div", "cx-connect-instruction-block");
+      block.append(el("p", "cx-connect-h", "Standing instruction"));
+      const box = el("textarea", "cx-connect-instruction");
+      box.readOnly = true;
+      box.value = ins;
+      box.setAttribute("aria-label", "Standing instruction");
+      const copy = button("cx-btn cx-btn-secondary cx-connect-copy", "Copy");
+      const copyNote = el("p", "cx-connect-start-note");
+      copyNote.setAttribute("role", "status");
+      copy.addEventListener("click", () => {
+        void copyText(ins).then((ok) => {
+          block.querySelector(".cx-copy-manual")?.remove();
+          if (ok) {
+            copyNote.textContent = "Copied";
+            return;
+          }
+          copyNote.textContent = "";
+          showManualCopy(block, ins);
+        });
+      });
+      block.append(box, copy, copyNote);
+      guide.append(block);
     }
 
     const start = button("cx-btn cx-btn-primary cx-connect-start", "Start setup");
@@ -147,7 +182,7 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
           start.disabled = false;
         });
     });
-    guide.append(ol, start, startNote);
+    guide.append(start, startNote);
   };
 
   const select = (id: AssistantId) => {
@@ -166,9 +201,14 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     card.setAttribute("role", "radio");
     card.setAttribute("aria-checked", "false");
     card.dataset.assistant = a.id;
-    card.append(el("span", "cx-connect-card-name", a.name));
-    if (a.badge) card.append(el("span", "cx-connect-badge", a.badge));
-    card.append(el("span", "cx-connect-card-plan", a.plan));
+    const row = el("span", "cx-connect-card-head");
+    const logo = el("img", "cx-connect-logo");
+    logo.src = logoUrl(a.id);
+    logo.width = 24;
+    logo.height = 24;
+    logo.alt = "";
+    row.append(logo, el("span", "cx-connect-card-name", a.name));
+    card.append(row, el("span", "cx-connect-card-plan", a.plan));
     card.addEventListener("click", () => select(a.id));
     cards.set(a.id, card);
     grid.append(card);

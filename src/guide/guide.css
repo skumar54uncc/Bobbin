@@ -162,6 +162,19 @@
   font-weight: 700;
 }
 
+.cx-connect-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cx-connect-logo {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 6px;
+}
+
 .cx-connect-badge {
   padding: 2px 8px;
   font: var(--cx-ts-caption);
@@ -400,15 +413,67 @@
   cursor: pointer;
 }
 
+.cx-connect-step-title {
+  font-weight: 700;
+}
+
+.cx-connect-step-text {
+  margin: 0;
+  font: var(--cx-ts-caption);
+  font-weight: 400;
+}
+
+.cx-connect-instruction-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
 .cx-connect-instruction {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 8.5rem;
   margin: 0 0 12px;
   padding: 10px;
   font: 12px/1.5 var(--cx-font-mono);
   white-space: pre-wrap;
   word-break: break-word;
+  color: inherit;
   background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
   border-radius: 8px;
-  user-select: text;
+  resize: vertical;
+}
+
+.cx-copy-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.cx-copy-manual-hint {
+  margin: 0;
+  font: var(--cx-ts-caption);
+}
+
+.cx-copy-manual-box {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 6rem;
+  margin: 0;
+  padding: 10px;
+  font: 12px/1.5 var(--cx-font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: 8px;
+  resize: vertical;
 }
 
 .cx-connect-trouble-list {

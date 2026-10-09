@@ -1,16 +1,20 @@
 /** Popup footer, About Bobbin, and header taglines. Exact user-facing Phase 6 copy. */
 
 /** Store listing tagline, homepage hero, onboarding first screen, and the start of the manifest description. */
-export const PRODUCT_TAGLINE = "Read it once. Ask your AI anytime.";
+export const PRODUCT_TAGLINE = "The missing memory for your AI.";
+/** Homepage only: sits under the hero tagline. */
+export const HOMEPAGE_SECONDARY = "Read it once. Ask your AI anytime.";
 /** About Bobbin and the homepage brand line. */
 export const BRAND_LINE = "Bobbin keeps the thread of everything you read.";
-/** Chrome Web Store short description. 132 characters max. */
+/** Chrome Web Store short description and manifest description. 132 characters max. */
 export const STORE_SUMMARY =
-  "Bobbin remembers the pages you read so Claude, ChatGPT, Gemini, and Grok can answer questions about them. Free. No servers.";
+  "The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free.";
 
-/** Manifest description: tagline first, then a 132-character-safe rest. The store short description is STORE_SUMMARY. */
-export const MANIFEST_DESCRIPTION =
-  "Read it once. Ask your AI anytime. Remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free. No servers.";
+/** Manifest description: same sentence as the store short description. */
+export const MANIFEST_DESCRIPTION = STORE_SUMMARY;
+
+export const NOT_AFFILIATED =
+  "Bobbin is not affiliated with, endorsed by, or sponsored by Google, Anthropic, OpenAI, xAI, Meta, Microsoft, Perplexity, Muse, or LinkedIn. Their names are used only to describe compatibility.";
 
 export const TAGLINE_SYNC_OFF = "Private library of pages you read on this device";
 export const TAGLINE_SYNC_ON = "On this device and in your Google Drive";

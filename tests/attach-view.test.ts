@@ -82,11 +82,25 @@ describe("Ask any assistant", () => {
     await settle();
     expect(vi.mocked(deps.copy).mock.calls[0]![0]).not.toContain("Page text");
     expect(host.querySelector(".cx-attach-status")?.textContent).toBe("Copied. Paste it into any chat.");
+    expect(host.querySelector(".cx-copy-manual")).toBeNull();
     buttonText(host, "Insert into chat").click();
     await settle();
     expect(host.querySelector(".cx-attach-status")?.textContent).toBe(
       "Bobbin could not find a chat box. Click into the message box on the page, then try again, or use Copy."
     );
+  });
+
+  it("shows a selected box when Copy fails, and never says Copied", async () => {
+    const { host } = mount({ copy: vi.fn(async () => false) });
+    chip(host, "What did I read today").click();
+    await settle();
+    buttonText(host, "Copy").click();
+    await settle();
+    expect(host.querySelector(".cx-attach-status")?.textContent).not.toMatch(/Copied/);
+    const box = host.querySelector<HTMLTextAreaElement>(".cx-copy-manual-box")!;
+    expect(box.readOnly).toBe(true);
+    expect(box.value).toMatch(/^Context from my Bobbin browsing memory/);
+    expect(host.querySelector(".cx-copy-manual-hint")?.textContent).toMatch(/Press (Cmd|Ctrl)\+C to copy/);
   });
 
   it("says when there are no searches for that time", async () => {
