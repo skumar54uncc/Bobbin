@@ -1002,4 +1002,8 @@ document.addEventListener("DOMContentLoaded", () => {
   void import(/* webpackChunkName: "assistant-sync-options" */ "./assistant-sync-panel").then((mod) => {
     mod.mountAssistantSyncPanel();
   });
+  void import(/* webpackChunkName: "connect-options" */ "./connect-section").then((mod) => {
+    mod.mountConnectSection();
+    mod.mountWarnings();
+  });
 });

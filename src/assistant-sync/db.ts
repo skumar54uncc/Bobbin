@@ -452,6 +452,11 @@ export async function countUnsyncedVisits(): Promise<number> {
   return assistantSyncDb.visits.filter((row) => row.finalizedAt != null && !synced.has(`Visits:${row.id}`)).count();
 }
 
+/** Newest warnings first, for Settings. */
+export async function listSyncWarnings(limit = 200): Promise<SyncWarningRecord[]> {
+  return assistantSyncDb.warnings.orderBy("at").reverse().limit(limit).toArray();
+}
+
 /** The service worker points this at the offscreen Drive client. Tests replace it. */
 export type DriveFolderTrash = () => Promise<void>;
 

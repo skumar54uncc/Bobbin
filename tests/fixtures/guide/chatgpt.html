@@ -1,0 +1,18 @@
+<!-- SYNTHETIC: hand-written to test the pointer. Not copied from chatgpt.com. Elements marked data-expect are the targets. -->
+<!doctype html>
+<html><body>
+  <div role="dialog" aria-label="Settings">
+    <div role="tablist">
+      <button role="tab">General</button>
+      <button role="tab">Personalization</button>
+      <button role="tab" data-expect="connect">Plugins</button>
+    </div>
+    <section>
+      <h2>Additional ChatGPT settings</h2>
+      <div class="row">
+        <span>Connector search</span>
+        <button role="switch" aria-checked="false" aria-label="Connector search" data-expect="extra"></button>
+      </div>
+    </section>
+  </div>
+</body></html>

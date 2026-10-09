@@ -46,22 +46,11 @@ describe("assistant sync options", () => {
     expect(document.getElementById("cx-assistant-confirm")?.hidden).toBe(true);
     expect(document.getElementById("cx-assistant-retention")?.getAttribute("min")).toBe("7");
     expect(document.getElementById("cx-assistant-retention")?.getAttribute("max")).toBe("365");
-    const guides = [...document.querySelectorAll("[data-assistant-guide]")];
-    expect(guides.map((node) => node.getAttribute("data-assistant-guide"))).toEqual([
-      "muse",
-      "grok",
-      "chatgpt",
-      "claude",
-      "generic",
-    ]);
-    for (const guide of guides) {
-      const text = guide.querySelector("p")?.textContent ?? "";
-      expect(words(text)).toBeLessThan(150);
-      expect(text).toMatch(/Google Drive/);
-      expect(text).toMatch(/Cortex Memory/);
-      expect(text).toMatch(/About/);
-      expect(text).toMatch(/Pages doc/);
-    }
+    // Assistant guides moved to Connect your AI, rendered from src/config/assistants.ts.
+    expect(document.querySelectorAll("[data-assistant-guide]")).toHaveLength(0);
+    expect(document.getElementById("cx-connect-root")).toBeTruthy();
+    expect(document.querySelector('a.cx-nav-link[href="#cx-sec-connect"]')?.textContent).toBe("Connect your AI");
+    expect(document.getElementById("cx-warnings-show")?.closest("#cx-sec-privacy")).toBeTruthy();
     expect(document.getElementById("cx-opt-delete-all")?.textContent).toMatch(/Delete all indexed data/);
     expect(html).toMatch(/Type <strong>DELETE<\/strong>/);
   });

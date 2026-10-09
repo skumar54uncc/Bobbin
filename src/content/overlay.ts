@@ -31,7 +31,6 @@ import { createStreamRenderer, type StreamRenderer } from "./stream-renderer";
 import { createFocusTrap, focusOnceAfterTransition } from "./focus-trap";
 import { createForgetMenu } from "./forget-menu";
 import { renderPeopleView, type PersonRow } from "./people-view";
-import { renderAgentsView } from "./agents-view";
 import { mascotHtml } from "./mascot";
 import { installCoachMarks, type CoachMarksController } from "./coach-marks";
 import { installFeedbackCard } from "./feedback-card";
@@ -2431,18 +2430,16 @@ ${shadowCss}`;
     }
 
     if (currentMode === "agents") {
-      const host = document.createElement("div");
-      host.className = "cortex-agents-host";
-      bodyEl.appendChild(host);
-      renderAgentsView(host, {
-        openAssistSyncSettings: () => openExtensionOptionsFromOverlay("cx-sec-assistant"),
-        announce: announcePolite,
-      });
-      requestAnimationFrame(() => {
-        host
-          .querySelector<HTMLButtonElement>("[data-cortex-open-assist-sync]")
-          ?.focus({ preventScroll: true });
-      });
+      // An extension frame: Start setup needs an extension click to open the side panel.
+      const agentsHost = document.createElement("div");
+      agentsHost.className = "cortex-agents-host";
+      const frame = document.createElement("iframe");
+      frame.className = "cortex-agents-frame";
+      frame.title = "Connect AI Agents";
+      const theme = host.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      frame.src = chrome.runtime.getURL(`connect-frame.html?theme=${theme}`);
+      agentsHost.appendChild(frame);
+      bodyEl.appendChild(agentsHost);
       return;
     }
 

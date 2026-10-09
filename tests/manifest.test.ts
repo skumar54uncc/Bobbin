@@ -40,7 +40,8 @@ describe("manifest.json", () => {
     const [entry] = manifest.web_accessible_resources;
     expect(entry.use_dynamic_url).toBe(true);
     // The overlay links mascot.css and draws mascot/*.webp inside its shadow root on the page.
-    expect([...entry.resources].sort()).toEqual(["fonts/*.woff2", "icons/icon-48.png", "mascot.css", "mascot/*.webp"]);
+    // connect-frame.html is the Connect AI Agents tab: an extension frame inside the closed shadow root.
+    expect([...entry.resources].sort()).toEqual(["connect-frame.html", "fonts/*.woff2", "icons/icon-48.png", "mascot.css", "mascot/*.webp"]);
     expect(entry.matches).toEqual(["http://*/*", "https://*/*"]);
   });
 
@@ -87,7 +88,14 @@ describe("store listing fields (Phase 2.9)", () => {
     };
     expect(raw.permissions).toContain("identity");
     expect(raw.host_permissions).toEqual(["http://*/*", "https://*/*"]);
-    expect(raw.optional_host_permissions).toBeUndefined();
+    // Requested one site at a time by "Show me on the page" in the setup side panel. Never required.
+    expect(raw.optional_host_permissions).toEqual([
+      "https://claude.ai/*",
+      "https://chatgpt.com/*",
+      "https://gemini.google.com/*",
+      "https://grok.com/*",
+      "https://www.perplexity.ai/*",
+    ]);
     expect(raw.oauth2?.scopes).toEqual(["https://www.googleapis.com/auth/drive.file"]);
     expect(raw.oauth2?.client_id).toBe(
       "1001602130427-c4skn7nc1rglp56h5egnchv2khlafk5v.apps.googleusercontent.com"

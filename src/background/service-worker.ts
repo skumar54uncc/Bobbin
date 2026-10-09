@@ -15,6 +15,7 @@ import {
   ASSISTANT_SYNC_ALARM_PERIOD_MIN,
   ASSISTANT_SYNC_SOON_ALARM,
   countUnsyncedVisits,
+  listSyncWarnings,
   readSyncEngineState,
   setDriveFolderTrashHandler,
   writeSyncEngineState,
@@ -78,8 +79,11 @@ import {
   dwellReportPageOk,
   indexPayloadUrlMatchesTab,
   isOptionsPageSender,
+  isGuidePanelSender,
+  isExtensionPageSender,
   isPrivilegedExtensionSender,
 } from "../lib/message-security";
+import { GUIDE_KEY, GUIDE_PANEL_PATH } from "../guide/state";
 import {
   CORTEX_EXTENSION_BUS_CHANNEL,
   type CortexBusInbound,
@@ -1844,11 +1848,31 @@ async function warmContentScriptOnTab(tabId: number, url: string): Promise<void>
   }
 }
 
+/**
+ * Tabs whose side panel shows the setup guide. The restricted-page handlers below would
+ * otherwise point a new tab's panel back at search. Session storage keeps them across restarts.
+ */
+const guideTabs = new Set<number>();
+void chrome.storage.session
+  .get(GUIDE_KEY)
+  .then((got) => {
+    for (const key of Object.keys((got[GUIDE_KEY] as Record<string, unknown> | undefined) ?? {})) {
+      const id = Number(key.replace(/^tab:/, ""));
+      if (Number.isInteger(id)) guideTabs.add(id);
+    }
+  })
+  .catch(() => undefined);
+chrome.tabs.onRemoved.addListener((tabId) => guideTabs.delete(tabId));
+
+function panelForRestrictedTab(tabId: number, url: string | undefined): void {
+  if (!guideTabs.has(tabId)) enableSidePanelForRestrictedTab(tabId, url);
+}
+
 chrome.tabs.onActivated.addListener((activeInfo) => {
   void chrome.tabs.get(activeInfo.tabId, (tab) => {
     if (chrome.runtime.lastError || tab?.id == null) return;
     const url = tab.url ?? "";
-    enableSidePanelForRestrictedTab(tab.id, url);
+    panelForRestrictedTab(tab.id, url);
     void warmContentScriptOnTab(activeInfo.tabId, url);
   });
 });
@@ -1856,7 +1880,7 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (tab.id == null) return;
   if (changeInfo.url != null || changeInfo.status === "complete") {
-    enableSidePanelForRestrictedTab(tab.id, tab.url ?? changeInfo.url);
+    panelForRestrictedTab(tab.id, tab.url ?? changeInfo.url);
   }
   if (
     tab.id != null &&
@@ -3181,12 +3205,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
   }
 
   if (type === "CORTEX_ASSISTANT_SYNC") {
+    const parsed = parseMessage(AssistantSyncMessageSchema, msg);
+    // Status: any Cortex page, including the Connect frame inside the panel. Content scripts report the web page URL.
+    if (parsed?.action === "status" && isExtensionPageSender(sender)) {
+      void assistantSyncStatus().then(sendResponse, () => sendResponse({ ok: false, error: "status_failed" }));
+      return true;
+    }
     // Options opens in a tab, so sender.tab is set. A web page still cannot send this.
     if (!isPrivilegedExtensionSender(sender) && !isOptionsPageSender(sender)) {
       sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
       return true;
     }
-    const parsed = parseMessage(AssistantSyncMessageSchema, msg);
     if (!parsed) {
       sendResponse({ ok: false, error: "bad_action" });
       return true;
@@ -3196,8 +3225,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       void assistantSyncStatus().then(sendResponse, () => sendResponse({ ok: false, error: "status_failed" }));
       return true;
     }
-    // Interactive Enable must come from Settings (user gesture + getAuthToken).
-    if ((action === "enable" || action === "pages") && !isOptionsPageSender(sender)) {
+    // Interactive Enable comes from the Enable click in Settings or the setup side panel.
+    if (action === "enable" && !isOptionsPageSender(sender) && !isGuidePanelSender(sender)) {
+      sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
+      return true;
+    }
+    if (action === "pages" && !isOptionsPageSender(sender)) {
       sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
       return true;
     }
@@ -3224,6 +3257,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       if (action === "pages" && parsed.pages === "undo" && result.ok) await planAssistantFlush("now");
       sendResponse(result);
     });
+    return true;
+  }
+
+  if (type === "CORTEX_GUIDE_PANEL") {
+    const tabId = (msg as { tabId?: unknown }).tabId;
+    if (!isExtensionPageSender(sender) || typeof tabId !== "number" || !Number.isInteger(tabId)) {
+      sendResponse({ ok: false });
+      return true;
+    }
+    // Recorded before the write, so a restricted-page event for this tab cannot undo it.
+    guideTabs.add(tabId);
+    void chrome.sidePanel
+      .setOptions({ tabId, path: GUIDE_PANEL_PATH, enabled: true })
+      .then(
+        () => sendResponse({ ok: true }),
+        () => sendResponse({ ok: false })
+      );
+    return true;
+  }
+
+  if (type === "CORTEX_SYNC_WARNINGS") {
+    if (!isOptionsPageSender(sender)) {
+      sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
+      return true;
+    }
+    void listSyncWarnings().then(
+      (warnings) => sendResponse({ ok: true, warnings }),
+      () => sendResponse({ ok: false, error: "warnings_failed" })
+    );
     return true;
   }
 
@@ -3260,7 +3322,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       try {
         const section = String((msg as { section?: unknown }).section ?? "");
         // Whitelist only known options sections (Assist Sync deep link from Agents tab).
-        if (section === "cx-sec-assistant" || section === "cx-sec-capture") {
+        if (section === "cx-sec-assistant" || section === "cx-sec-capture" || section === "cx-sec-connect") {
           await chrome.tabs.create({
             url: chrome.runtime.getURL(`options.html#${section}`),
             active: true,

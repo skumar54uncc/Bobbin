@@ -17,6 +17,18 @@ export function isOptionsPageSender(
   return u.startsWith(chrome.runtime.getURL("options.html"));
 }
 
+/** The setup side panel. It opens beside the assistant tab, so it has no tab of its own. */
+export function isGuidePanelSender(sender: chrome.runtime.MessageSender): boolean {
+  if (sender.id !== chrome.runtime.id) return false;
+  return (sender.url ?? "").startsWith(chrome.runtime.getURL("guide-panel.html"));
+}
+
+/** Any Cortex extension page, including connect-frame.html framed in a web page. Not content scripts. */
+export function isExtensionPageSender(sender: chrome.runtime.MessageSender): boolean {
+  if (sender.id !== chrome.runtime.id) return false;
+  return (sender.url ?? "").startsWith(chrome.runtime.getURL(""));
+}
+
 /** Live index payloads must match the tab that sent CORTEX_INDEX. */
 export function indexPayloadUrlMatchesTab(
   payloadUrl: string,

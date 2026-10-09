@@ -1,0 +1,18 @@
+<!-- SYNTHETIC: hand-written to test the pointer. Not copied from claude.ai. Elements marked data-expect are the targets. -->
+<!doctype html>
+<html><body>
+  <nav><a href="/new">New chat</a><button aria-label="Open settings">Settings</button></nav>
+  <main>
+    <h1>Connectors</h1>
+    <p>Connect apps such as Google Drive so Claude can read your files.</p>
+    <ul>
+      <li class="card"><span>GitHub</span><button>Connect</button></li>
+      <li class="card" data-expect="connect"><span>Google Drive</span><button>Connect</button></li>
+    </ul>
+    <section hidden><span>Google Drive</span></section>
+    <form>
+      <label for="ins" data-expect="instructions">Instructions for Claude</label>
+      <textarea id="ins"></textarea>
+    </form>
+  </main>
+</body></html>

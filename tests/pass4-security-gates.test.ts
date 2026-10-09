@@ -41,7 +41,10 @@ describe("pass4 security gates", () => {
       source.indexOf('type === "CORTEX_ASSISTANT_SYNC"'),
       source.indexOf('type === "CORTEX_OPEN_OPTIONS"')
     );
-    expect(syncGate).toContain('(action === "enable" || action === "pages") && !isOptionsPageSender(sender)');
+    expect(syncGate).toContain('action === "enable" && !isOptionsPageSender(sender) && !isGuidePanelSender(sender)');
+    expect(syncGate).toContain('action === "pages" && !isOptionsPageSender(sender)');
+    // Status alone is open to Cortex pages such as the Connect frame; content scripts are not extension pages.
+    expect(syncGate).toContain('parsed?.action === "status" && isExtensionPageSender(sender)');
   });
 
   it("user settings normalize without spreading raw objects", () => {

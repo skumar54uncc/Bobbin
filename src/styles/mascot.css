@@ -147,14 +147,6 @@
   cursor: pointer;
 }
 .cx-m-action:active { box-shadow: inset 0 1px 2px rgba(46, 35, 29, 0.2); }
-.cortex-agents-hero {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px 12px;
-}
-.cortex-agents-mascot { grid-row: 1 / span 2; width: 96px; }
-.cortex-agents-hero > .cortex-agents-primary { grid-column: 2; justify-self: start; }
 .cortex-user-row { width: 100%; }
 .cortex-msg--user {
   width: fit-content;
@@ -275,7 +267,6 @@
 }
 :host([data-theme="dark"]) .cortex-turn-btn--primary,
 :host([data-theme="dark"]) .cortex-ask-send,
-:host([data-theme="dark"]) .cortex-agents-primary,
 :host([data-theme="dark"]) .cx-m-action {
   background: #9c3b21;
   color: #fffef9;

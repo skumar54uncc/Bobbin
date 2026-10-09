@@ -10,9 +10,9 @@ describe("overlay Agents tab wiring", () => {
     );
     expect(overlay).toMatch(/"agents"/);
     expect(overlay).toContain("Connect AI Agents");
-    expect(overlay).toContain("agents-view");
-    expect(overlay).toContain("renderAgentsView");
-    expect(overlay).toContain('openExtensionOptionsFromOverlay("cx-sec-assistant")');
+    // The tab frames connect-frame.html so Start setup runs in an extension click (sidePanel.open needs it).
+    expect(overlay).toContain("connect-frame.html");
+    expect(overlay).not.toContain("renderAgentsView");
     // People tab still present; Agents follows in rebuildTabs.
     const tabsBlock = overlay.slice(
       overlay.indexOf("function rebuildTabs"),

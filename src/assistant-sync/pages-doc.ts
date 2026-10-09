@@ -5,6 +5,7 @@
 import { domainFromUrl } from "./canonical-url";
 import type { SyncPostRecord, SyncProfileFields } from "./db";
 import { localVisitStamp } from "./local-time";
+import { visitPageType } from "./page-type";
 import type { MergedMemory } from "./merge";
 import { clipText } from "./page-text";
 import { THIS_DEVICE } from "./sheet";
@@ -193,7 +194,10 @@ export function buildDayDocs(merged: MergedMemory, posts: SyncPostRecord[], time
     add(visit.visitedAt, {
       id: visit.id,
       heading: heading(visit.id, time(visit.visitedAt), visit.title),
-      meta: pageMeta(visit.url, "LinkedIn profile", ["Read time", readTime(visit.dwellMinutes)]),
+      meta: pageMeta(visit.url, visitPageType(visit.pageType, visit.url) === "LinkedIn details" ? "LinkedIn details" : "LinkedIn profile", [
+        "Read time",
+        readTime(visit.dwellMinutes),
+      ]),
       label: WEBSITE_TEXT_LABEL,
       body,
       ...(aliases.length ? { aliases } : {}),

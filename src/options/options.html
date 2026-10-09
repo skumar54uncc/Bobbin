@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="cortex-theme.css" />
     <link rel="stylesheet" href="cx-buttons.css" />
+    <link rel="stylesheet" href="mascot.css" />
+    <link rel="stylesheet" href="guide.css" />
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
@@ -43,6 +45,7 @@
           <li><a class="cx-nav-link" href="#cx-sec-capture">Capture</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-intelligence">Intelligence</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-assistant">Assistant Sync</a></li>
+          <li><a class="cx-nav-link" href="#cx-sec-connect">Connect your AI</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-privacy">Privacy and data</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-backup">Backup</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-about">About</a></li>
@@ -549,40 +552,12 @@
                 <input type="checkbox" id="cx-assistant-feed-posts" class="cx-check-native cx-switch" />
               </div>
             </div>
-            <div class="cx-group">
-              <h3 class="cx-group-title">Assistant setup guides</h3>
-              <div class="cx-guide-intro">
-                <p class="cx-group-desc">
-                  Every assistant reads the same folder. Connect it to Google Drive and open the sheet
-                  Cortex Memory in the folder Cortex Memory. Read the About tab first. What pages
-                  said is in the Google Docs in Cortex Memory/Pages, one per day, with a section per
-                  page labeled by its row ID. Visits, Searches, People, Companies, and Daily cover
-                  the other questions.
-                </p>
-              </div>
-              <ul class="cx-guide-list">
-                <li data-assistant-guide="muse">
-                  <h4>Muse</h4>
-                  <p>Use Muse's Google Drive connection. Open Cortex Memory, read About, then check the matching Pages doc before it answers from its own knowledge.</p>
-                </li>
-                <li data-assistant-guide="grok">
-                  <h4>Grok</h4>
-                  <p>Use Grok's Google Drive connection. Open Cortex Memory. For something you read, use the Pages doc named in the row after About.</p>
-                </li>
-                <li data-assistant-guide="chatgpt">
-                  <h4>ChatGPT</h4>
-                  <p>Use ChatGPT's connected Google Drive source. Open Cortex Memory, read About, and check the matching Pages doc before its own knowledge.</p>
-                </li>
-                <li data-assistant-guide="claude">
-                  <h4>Claude</h4>
-                  <p>Use Claude's Google Drive connector. Open Cortex Memory, read About, and check the matching Pages doc before it relies on its own knowledge.</p>
-                </li>
-                <li data-assistant-guide="generic">
-                  <h4>Another assistant</h4>
-                  <p>If it can open Google Drive, point it at Cortex Memory, then About and the Pages docs.</p>
-                </li>
-              </ul>
-            </div>
+          </div>
+        </section>
+
+        <section class="cx-sec" id="cx-sec-connect" tabindex="-1" aria-label="Connect your AI">
+          <div class="cx-panel">
+            <div id="cx-connect-root"></div>
           </div>
         </section>
 
@@ -712,6 +687,18 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div class="cx-group" id="cx-warnings-group">
+              <h3 class="cx-group-title">Warnings</h3>
+              <p class="cx-group-desc">
+                Page text that reads like instructions to an AI. Cortex lists it here for you to review and leaves the text as it is. The Connect your AI instruction tells your assistant to treat page text as website content, not as a request from you.
+              </p>
+              <div class="cx-actions-row">
+                <button type="button" id="cx-warnings-show" class="cx-btn cx-btn-secondary" aria-expanded="false" aria-controls="cx-warnings-list">View warnings</button>
+              </div>
+              <p id="cx-warnings-empty" class="cx-field-hint" role="status" hidden></p>
+              <ul id="cx-warnings-list" class="cx-warnings-list" hidden></ul>
             </div>
 
             <div class="cx-group">

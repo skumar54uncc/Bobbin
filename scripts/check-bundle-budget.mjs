@@ -11,7 +11,8 @@ export const BUNDLE_BUDGETS = {
   // extract.js is injected only after the privacy gate passes, never on every
   // page. It grew with YouTube identity capture (Phase 6 follow-up), then to 76 KB in
   // v2 Phase 3B fixes: LinkedIn profile sections (overlay stripping, full About, roles, schools, skills).
-  "extract.js": 76 * KB,
+  // 76 KB to 84 KB in v2 Phase 4.0: no new code, keeps 8 KB free for the next capture fix.
+  "extract.js": 84 * KB,
   "resurface-chip.js": 8 * KB,
   "youtube-bridge.js": 4 * KB,
   // Search cards, digest hierarchy, filters, and on-device photo sharpening.
@@ -21,7 +22,8 @@ export const BUNDLE_BUDGETS = {
   // Set with 15 KB headroom before v2 Phase 2. Readability left for offscreen in Phase 2,
   // so about 49 KB is free. Largest parts now: Dexie and the worker itself.
   "service-worker.js": 254 * KB,
-  "offscreen.js": 700 * KB,
+  // 700 KB to 708 KB in v2 Phase 4.0: no new code, keeps 8 KB free (Pages docs filled the old headroom).
+  "offscreen.js": 708 * KB,
   // Readability for imported history pages: lazy, offscreen only (DOMParser needs a document).
   "history-extract.js": 40 * KB,
   // Assistant Sync: Drive client and int8 topic vectors, lazy only.
@@ -41,6 +43,12 @@ export const BUNDLE_BUDGETS = {
   "pdf.worker.min.mjs": 1400 * KB,
   "search-shell.js": 164 * KB,
   "options.js": 40 * KB,
+  // v2 Phase 4 guided setup: the Connect frame in the panel, the setup side panel, the optional
+  // on-page pointer (injected only into the assistant tab), and the lazy Settings section.
+  "connect-frame.js": 24 * KB,
+  "guide-panel.js": 26 * KB,
+  "guide-pointer.js": 16 * KB,
+  "connect-options.js": 24 * KB,
   "popup.js": 20 * KB,
   "onboarding.js": 10 * KB,
 };

@@ -1,6 +1,7 @@
 import { dailySummary } from "./daily-summary";
 import type { SyncCompanyRecord, SyncContentRecord, SyncPersonRecord, SyncSearchRecord, SyncVisitRecord } from "./db";
 import { localVisitStamp } from "./local-time";
+import { visitPageType } from "./page-type";
 import { mergeDailyRepeats, type MergedMemory } from "./merge";
 import { clipTitle } from "./redact-sync";
 import { csvBytes, DEFAULT_SHEET_DETAIL, formatSheetSize, SHEET_DETAIL, type SheetDetail } from "./sheet-detail";
@@ -199,7 +200,7 @@ export function visitRows(visits: VisitRow[], timeZone: string, pagesDoc: PagesD
         row.domain,
         cell(row.dwellMinutes),
         cell(row.maxScrollPct),
-        row.pageType,
+        visitPageType(row.pageType, row.url),
         topicsCell(row.topics),
         String(row.visitCount ?? 1),
         localVisitStamp(row.lastVisitedAt ?? row.visitedAt, timeZone).time,
