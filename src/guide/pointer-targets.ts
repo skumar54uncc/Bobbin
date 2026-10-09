@@ -17,6 +17,8 @@ export interface PointerTarget {
   controls?: string[];
   /** What the label on the page says. "{paste}" becomes Cmd+V or Ctrl+V. */
   label: string;
+  /** Look only inside the one open dialog: for a box whose label is not known. */
+  within?: "dialog";
 }
 
 /** Read from the target element only. */
@@ -55,17 +57,20 @@ export const POINTER_TARGETS: Readonly<Partial<Record<AssistantId, Readonly<Reco
       done: "toggle-on",
     },
   },
+  // Both steps start on the personalization-settings hub page.
   gemini: {
     connect: {
       targets: [
         { anchor: "Google Workspace", kind: "toggle", label: "Turn this on" },
         { anchor: "Connected apps", kind: "item", label: "Click Connected apps" },
-        { anchor: null, kind: "button", controls: ["Settings and help"], label: "Click Settings and help" },
       ],
       done: "toggle-on",
     },
     instructions: {
-      targets: [{ anchor: null, kind: "button", controls: ["+ Add", "Add"], label: "Click + Add, paste ({paste}), then Save" }],
+      targets: [
+        { anchor: null, kind: "button", controls: ["+ Add", "Add"], label: "Paste here ({paste}), then Submit" },
+        { anchor: "Instructions for Gemini", kind: "item", label: "Click Instructions for Gemini" },
+      ],
       done: null,
     },
   },
@@ -73,6 +78,20 @@ export const POINTER_TARGETS: Readonly<Partial<Record<AssistantId, Readonly<Reco
     connect: {
       targets: [{ anchor: "Google Drive", kind: "button", controls: CONNECT, label: "Click Connect" }],
       done: "connected",
+    },
+    instructions: {
+      targets: [{ anchor: null, kind: "textbox", within: "dialog", label: "Paste here ({paste}), then save" }],
+      done: "contains-cortex",
+    },
+  },
+  perplexity: {
+    connect: {
+      targets: [{ anchor: "Google Drive", kind: "button", controls: CONNECT, label: "Click Connect" }],
+      done: "connected",
+    },
+    instructions: {
+      targets: [{ anchor: "Custom instructions", kind: "textbox", label: "Paste here ({paste}), then save" }],
+      done: "contains-cortex",
     },
   },
 };

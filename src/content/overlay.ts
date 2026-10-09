@@ -476,7 +476,10 @@ ${shadowCss}`;
     .querySelector<HTMLElement>(".cortex-head-actions")
     ?.insertBefore(forgetMenu.root, shell.querySelector("[data-cortex-open-options]"));
 
-  let currentMode: OverlayMode = "search";
+  // The setup guide's "Attach to chat" link opens the side panel at Ask any assistant.
+  const openAttach = overlayShellMode && new URLSearchParams(location.search).get("open") === "attach";
+  let currentMode: OverlayMode = openAttach ? "agents" : "search";
+  if (openAttach) panel.setAttribute("data-mode", "agents");
   let currentConversationId: number | null = null;
 
   let selectedHitIndex = -1;
@@ -2447,7 +2450,7 @@ ${shadowCss}`;
       frame.className = "cortex-agents-frame";
       frame.title = "Connect AI Agents";
       const theme = host.getAttribute("data-theme") === "dark" ? "dark" : "light";
-      frame.src = chrome.runtime.getURL(`connect-frame.html?theme=${theme}`);
+      frame.src = chrome.runtime.getURL(`connect-frame.html?theme=${theme}${openAttach ? "&focus=attach" : ""}`);
       agentsHost.appendChild(frame);
       bodyEl.appendChild(agentsHost);
       return;

@@ -80,6 +80,11 @@ function controlFor(anchor: Element, t: PointerTarget, visible: IsVisible): Elem
  * no outline is better than a wrong one, and a title is never a target.
  */
 export function findTarget(root: Document | Element, t: PointerTarget, visible: IsVisible = isShown, skip: Node | null = null): Element | null {
+  if (t.within === "dialog") {
+    const dialogs = [...root.querySelectorAll("[role=dialog], dialog[open]")].filter((d) => visible(d) && (!skip || !skip.contains(d)));
+    if (dialogs.length !== 1) return null;
+    root = dialogs[0]!;
+  }
   const hits = new Set<Element>();
   if (t.anchor == null) {
     for (const el of root.querySelectorAll(SELECTOR[t.kind])) {

@@ -16,6 +16,8 @@ export interface GuideState {
   /** Done step ids, always a prefix of the steps: they complete strictly in order. */
   done: string[];
   result: "yes" | "no" | null;
+  /** A done step the user went back to. Later steps stay done. */
+  reopened?: string | null;
 }
 
 export function newGuideState(assistant: AssistantId, tabId: number): GuideState {

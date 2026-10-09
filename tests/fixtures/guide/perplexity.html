@@ -1,0 +1,19 @@
+<!-- SYNTHETIC: hand-written to test the pointer. Not copied from perplexity.ai. Elements marked data-expect are the targets: the controls the user acts on. -->
+<!doctype html>
+<html><body>
+  <main>
+    <h1>Connectors</h1>
+    <ul>
+      <li class="card"><div><h3>Gmail</h3></div><button>Connect</button></li>
+      <li class="card"><div><h3>Google Drive</h3><p>Search your files</p></div><button data-expect="connect">Connect</button></li>
+    </ul>
+    <section class="personalize">
+      <div class="field">
+        <span>Custom instructions</span>
+        <textarea data-expect="instructions"></textarea>
+      </div>
+      <button>Save</button>
+    </section>
+    <form class="composer"><textarea aria-label="Ask anything"></textarea></form>
+  </main>
+</body></html>

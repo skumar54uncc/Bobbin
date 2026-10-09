@@ -60,6 +60,12 @@ only. Plan note stays "Check your plan" until confirmed.
 
 The Cortex panel in Chrome's side panel no longer shows its own close button; Chrome has one.
 
-Open: Grok's custom instructions place was not filled in, so that step names "Settings > Customize
-(a hint: it may differ)" and opens nothing. Grok's plan note stays "Check your plan" until the free
-plan is confirmed.
+Live corrections (after Phase 4):
+
+- Gemini: both settings on https://gemini.google.com/personalization-settings (live); Saved info kept as a second link.
+- Grok: instructions at https://grok.com/?_s=personality (live); plan "Free plan works". The pointer outlines the instruction box only when it is the one text box in the one open dialog, since its label is not known.
+- Perplexity: free plan works with "@Google Drive"; connectors at https://www.perplexity.ai/computer/connectors (live); Add files from cloud moved to Troubleshooting.
+- Back, clickable done lines, and Start over in the side panel.
+- Other: general instructions, and a link to Attach to chat.
+
+Open: Muse's plan note stays "Check your plan" until confirmed.

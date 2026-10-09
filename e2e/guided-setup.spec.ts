@@ -174,6 +174,16 @@ test.describe("guided setup", () => {
     await expect(panel.locator(".cx-guide-primary")).toHaveText("Open a new chat");
   });
 
+  test("the Attach to chat link's panel opens at Ask any assistant", async ({ context, extensionId }) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 400, height: 900 });
+    await page.goto(`chrome-extension://${extensionId}/search-shell.html?open=attach`);
+    await expect.poll(() => page.frames().some((f) => f.url().includes("connect-frame.html?theme=") && f.url().includes("focus=attach"))).toBe(true);
+    const frame = page.frames().find((f) => f.url().includes("focus=attach"))!;
+    // The frame exists only in the Connect AI Agents tab.
+    await expect(frame.locator(".cx-attach-input")).toBeFocused();
+  });
+
   test("Insert into chat writes into the chat box and never sends", async ({ context, serviceWorker }) => {
     /** SYNTHETIC chat page: a form textarea and a contenteditable box, both counting sends. */
     const CHAT = `<!doctype html><html><head><title>Chat</title></head><body>

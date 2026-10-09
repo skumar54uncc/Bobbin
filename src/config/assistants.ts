@@ -25,10 +25,12 @@ export interface GuideStep {
   title: string;
   /** One sentence. */
   text: string;
-  /** The one primary button. It opens `open` and copies `copy`; with neither it marks the step done. */
-  button: string;
+  /** The one primary button. It opens `open` and copies `copy`. Null: no button, only "I did this". */
+  button: string | null;
   open: LinkKey | null;
   copy: "instruction" | "test" | null;
+  /** A second page for the same setting, offered as a small link. */
+  fallback?: LinkKey;
 }
 
 export interface AssistantConfig {
@@ -52,6 +54,8 @@ export interface AssistantConfig {
   /** At most 4. They go strictly in order. */
   steps: GuideStep[];
   troubleshooting: string[];
+  /** Offer Attach to chat under the steps, for assistants that may not reach Drive. */
+  attachHint?: boolean;
 }
 
 export const TEST_QUESTION = "What did I search on Google today?";
@@ -63,7 +67,7 @@ export const COMMON_TROUBLESHOOTING: readonly string[] = [
   "It mentions old data: Cortex keeps one file. Delete any old copies named Cortex Memory or Hindsight in Drive and empty the trash.",
   "Numbers look wrong: press Sync now and ask again after 3 minutes.",
   "ChatGPT ignores Drive: turn on Connector search.",
-  "Gemini says it has no Drive: start the question with @Google Drive.",
+  "Gemini or Perplexity says it has no Drive: start the question with @Google Drive.",
   "Muse forgets: send the Remember message again in a new chat.",
 ];
 
@@ -174,26 +178,28 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
     origin: "https://gemini.google.com/*",
     testPrefix: "@Google Drive ",
     home: live("https://gemini.google.com/", "Gemini"),
-    connect: live(null, "Settings and help > Connected apps > Google Workspace"),
-    instructions: live("https://gemini.google.com/saved-info", "Saved info"),
-    extra: null,
+    // One hub page holds both settings: Connected apps and Instructions for Gemini.
+    connect: live("https://gemini.google.com/personalization-settings", "Personalization settings > Connected apps > Google Workspace"),
+    instructions: live("https://gemini.google.com/personalization-settings", "Personalization settings > Instructions for Gemini"),
+    extra: live("https://gemini.google.com/saved-info", "Saved info"),
     newChat: live("https://gemini.google.com/", "New chat"),
     steps: [
       {
         id: "connect",
         title: "Turn on Google Workspace",
-        text: "Open Settings and help, then Connected apps, and turn on Google Workspace.",
-        button: "Open Gemini",
-        open: "home",
+        text: "Click Connected apps, then turn on Google Workspace.",
+        button: "Open Gemini settings",
+        open: "connect",
         copy: null,
       },
       {
         id: "instructions",
         title: "Add the Cortex instruction",
-        text: "Click + Add, paste the instruction, then save.",
-        button: "Copy and open saved info",
+        text: "Click Instructions for Gemini, then + Add, paste the instruction, and submit.",
+        button: "Copy and open Gemini settings",
         open: "instructions",
         copy: "instruction",
+        fallback: "extra",
       },
       testStep("newChat"),
     ],
@@ -202,7 +208,7 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
   {
     id: "grok",
     name: "Grok",
-    plan: "Check your plan",
+    plan: "Free plan works",
     badge: null,
     toolName: "Google Drive connector",
     instructionsMethod: "settings",
@@ -210,7 +216,7 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
     testPrefix: "",
     home: null,
     connect: live("https://grok.com/connectors", "Connectors > Google Drive"),
-    instructions: { url: null, path: "Settings > Customize (a hint: it may differ)", verified: "unverified" },
+    instructions: live("https://grok.com/?_s=personality", "Settings > Personality"),
     extra: null,
     newChat: live("https://grok.com/", "New chat"),
     steps: [
@@ -225,8 +231,8 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
       {
         id: "instructions",
         title: "Add the Cortex instruction",
-        text: "Paste the instruction into Grok's custom instructions, then save.",
-        button: "Copy instruction",
+        text: "Paste the instruction into the instruction box, then save.",
+        button: "Copy and open Grok instructions",
         open: "instructions",
         copy: "instruction",
       },
@@ -273,72 +279,76 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
   {
     id: "perplexity",
     name: "Perplexity",
-    plan: "Connectors need Perplexity Pro. Free: attach the sheet to a chat with Add files from cloud (one chat only).",
+    plan: "Free plan works. Start questions with @Google Drive.",
     badge: null,
     toolName: "Google Drive connector",
     instructionsMethod: "settings",
     origin: "https://www.perplexity.ai/*",
-    testPrefix: "",
+    testPrefix: "@Google Drive ",
     home: null,
-    connect: { url: null, path: "Connectors (needs Perplexity Pro)", verified: "unverified" },
-    instructions: live("https://www.perplexity.ai/#settings/personalize", "Settings > Personalize"),
+    connect: live("https://www.perplexity.ai/computer/connectors", "Connectors > Google Drive"),
+    instructions: live("https://www.perplexity.ai/#settings/personalize", "Settings > Personalize > Custom instructions"),
     extra: null,
     newChat: live("https://www.perplexity.ai/", "New chat"),
     steps: [
       {
+        id: "connect",
+        title: "Connect Google Drive",
+        text: "Click Connect next to Google Drive and allow access.",
+        button: "Open Perplexity connectors",
+        open: "connect",
+        copy: null,
+      },
+      {
         id: "instructions",
         title: "Add the Cortex instruction",
-        text: "Paste the instruction into Personalize, then save.",
+        text: "Paste the instruction into Custom instructions, then save.",
         button: "Copy and open settings",
         open: "instructions",
         copy: "instruction",
       },
-      {
-        id: "connect",
-        title: "Give it the sheet",
-        text: "With Pro, connect Google Drive in Connectors; on the free plan, attach the Cortex Memory sheet with Add files from cloud for one chat.",
-        button: "Done",
-        open: null,
-        copy: null,
-      },
       testStep("newChat"),
     ],
-    troubleshooting: ["Perplexity forgets the sheet on the free plan: attach it again with Add files from cloud. It lasts one chat."],
+    troubleshooting: ["Connectors not available: attach the Cortex Memory sheet to a chat with Add files from cloud. It lasts one chat."],
   },
   {
     id: "other",
     name: "Other",
     plan: "Any assistant that can read Google Drive files",
     badge: null,
-    toolName: "Google Drive access",
+    toolName: "Google Drive connection",
     instructionsMethod: "settings",
     origin: null,
     testPrefix: "",
     home: null,
-    connect: { url: null, path: "Your assistant's settings > Google Drive", verified: "unverified" },
-    instructions: { url: null, path: "Your assistant's custom instructions or memory", verified: "unverified" },
+    connect: { url: null, path: "Your assistant's settings > Connectors, Apps, Integrations, Plugins or Connected apps", verified: "unverified" },
+    instructions: { url: null, path: "Your assistant's Custom instructions, Personalization, or Memory", verified: "unverified" },
     extra: null,
     newChat: null,
     steps: [
       {
         id: "connect",
         title: "Connect Google Drive",
-        text: "Connect Google Drive in your assistant's settings.",
-        button: "Done",
+        text: "Open your assistant's settings and look for Connectors, Apps, Integrations, Plugins or Connected apps. Turn on Google Drive (and Google Docs and Sheets if listed separately).",
+        button: null,
         open: null,
         copy: null,
       },
       {
         id: "instructions",
         title: "Add the Cortex instruction",
-        text: "Paste the instruction into your assistant's custom instructions or memory.",
+        text: "Paste it into your assistant's Custom instructions, Personalization, or Memory. If it has none, paste it at the start of each new chat.",
         button: "Copy instruction",
         open: null,
         copy: "instruction",
       },
-      testStep(null),
+      testStep(
+        null,
+        "Ask in a new chat: What did I search on Google today? If it doesn't look in Drive, start the question with @Google Drive or Check my Cortex Memory:"
+      ),
     ],
     troubleshooting: [],
+    attachHint: true,
   },
 ];
 
@@ -404,6 +414,18 @@ export function standingInstructionFor(a: Pick<AssistantConfig, "toolName" | "in
 /** The step to do now: the first one not done. Steps go strictly in order. */
 export function currentStep(a: AssistantConfig, done: readonly string[]): GuideStep | null {
   return a.steps.find((s) => !done.includes(s.id)) ?? null;
+}
+
+/** The step on screen: a done step the user went back to, else the current one. */
+export function shownStep(a: AssistantConfig, done: readonly string[], reopened: string | null | undefined): GuideStep | null {
+  const back = reopened && done.includes(reopened) ? a.steps.find((s) => s.id === reopened) : undefined;
+  return back ?? currentStep(a, done);
+}
+
+/** The step "Back" opens: the one before, which is always done. */
+export function stepBefore(a: AssistantConfig, step: GuideStep): GuideStep | null {
+  const i = a.steps.indexOf(step);
+  return i > 0 ? a.steps[i - 1]! : null;
 }
 
 /**

@@ -27,8 +27,8 @@ const cases = Object.entries(POINTER_TARGETS).flatMap(([id, steps]) => Object.ke
 
 describe("pointer targets against SYNTHETIC fixtures", () => {
   it("covers the assistants with known pages", () => {
-    expect([...new Set(cases.map(([id]) => id))]).toEqual(["claude", "chatgpt", "gemini", "grok"]);
-    for (const id of ["muse", "perplexity", "other"] as const) expect(POINTER_TARGETS[id]).toBeUndefined();
+    expect([...new Set(cases.map(([id]) => id))]).toEqual(["claude", "chatgpt", "gemini", "grok", "perplexity"]);
+    for (const id of ["muse", "other"] as const) expect(POINTER_TARGETS[id]).toBeUndefined();
   });
 
   it.each(cases)("%s %s outlines exactly the marked control", (id, step) => {
@@ -56,6 +56,23 @@ describe("pointer targets against SYNTHETIC fixtures", () => {
     expect(label("chatgpt", "extra")).toBe("Turn this on");
     expect(label("gemini", "connect")).toBe("Turn this on");
     expect(label("grok", "connect")).toBe("Click Connect");
+    expect(label("gemini", "instructions")).toBe("Paste here (Cmd+V), then Submit");
+    expect(label("grok", "instructions")).toBe("Paste here (Cmd+V), then save");
+    expect(label("perplexity", "instructions")).toBe("Paste here (Cmd+V), then save");
+  });
+
+  it("Gemini: before + Add shows, points at Instructions for Gemini; before the toggle shows, at Connected apps", () => {
+    const doc = page(`<main><button>Connected apps</button><button id="ins">Instructions for Gemini</button></main>`);
+    expect(findFirst(doc, stepPointer("gemini", "instructions")!.targets, visible)?.el.id).toBe("ins");
+    expect(findFirst(doc, stepPointer("gemini", "connect")!.targets, visible)?.el.textContent).toBe("Connected apps");
+  });
+
+  it("Grok: the box with no known label is outlined only inside the one open dialog", () => {
+    const t = stepPointer("grok", "instructions")!.targets[0]!;
+    expect(findTarget(page(`<textarea></textarea>`), t, visible)).toBeNull();
+    expect(findTarget(page(`<div role="dialog"><textarea></textarea><textarea></textarea></div>`), t, visible)).toBeNull();
+    expect(findTarget(page(`<div role="dialog"><textarea></textarea></div><div role="dialog"><textarea></textarea></div>`), t, visible)).toBeNull();
+    expect(findTarget(page(`<textarea></textarea><div role="dialog"><textarea id="box"></textarea></div>`), t, visible)?.id).toBe("box");
   });
 });
 

@@ -308,6 +308,42 @@
   color: var(--cx-text-muted);
 }
 
+.cx-guide-done-item {
+  padding: 2px 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.cx-guide-done-item:hover,
+.cx-guide-done-item[aria-current="step"] {
+  color: var(--cx-text);
+  text-decoration: underline;
+}
+
+.cx-guide-done-item:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+}
+
+.cx-guide-back {
+  align-self: flex-start;
+}
+
+.cx-guide-fallback,
+.cx-guide-start-over {
+  align-self: flex-start;
+}
+
+.cx-guide-attach {
+  margin: 0;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text-muted);
+}
+
 .cx-guide-check-mark {
   display: inline-block;
   width: 1.2em;

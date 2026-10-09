@@ -35,4 +35,8 @@ if (attach) {
     insert: async (text) => ((await chrome.runtime.sendMessage({ type: "CORTEX_PACKET_INSERT", text })) as InsertReply | undefined) ?? { ok: false, reason: "blocked" },
     copy: copyText,
   });
+  if (new URLSearchParams(location.search).get("focus") === "attach") {
+    attach.scrollIntoView({ block: "start" });
+    attach.querySelector<HTMLInputElement>(".cx-attach-input")?.focus({ preventScroll: true });
+  }
 }

@@ -66,6 +66,7 @@ function install(assistant: AssistantId, over: Partial<Fake> & { done?: string[]
       create: async (...args: unknown[]) => log("tabs.create")(...args),
       onUpdated: { addListener: (fn: Listener) => fake.updated.push(fn) },
     },
+    sidePanel: { setOptions: async (...args: unknown[]) => log("sidePanel.setOptions")(...args) },
     scripting: { executeScript: async (...args: unknown[]) => log("scripting.executeScript")(...args) },
     storage: {
       session: {
@@ -105,6 +106,10 @@ const points = (fake: Fake) =>
 async function pageSaysDone(fake: Fake, step: string, sender: { id?: string; tab?: { id: number } } = { id: "cortex", tab: { id: 7 } }) {
   fake.messages.forEach((fn) => fn({ type: "CORTEX_GUIDE_DONE", assistant: state(fake).assistant, step }, sender, () => undefined));
   await settle();
+}
+
+async function save(fake: Fake, over: Partial<GuideState>) {
+  (fake.session[GUIDE_KEY] as GuideMap)[guideKeyFor(7)] = { ...state(fake), ...over };
 }
 
 async function tabLoaded(fake: Fake, url: string) {
@@ -231,7 +236,7 @@ describe("setup side panel", () => {
     await settle();
     const trouble = document.querySelector<HTMLDetailsElement>(".cx-connect-trouble")!;
     expect(trouble.open).toBe(true);
-    expect(trouble.querySelector("li")?.textContent).toMatch(/^Gemini says it has no Drive/);
+    expect(trouble.querySelector("li")?.textContent).toMatch(/^Gemini or Perplexity says it has no Drive/);
     expect(state(fake).result).toBe("no");
     buttonIn(card()!, "Yes")!.click();
     await settle();
@@ -261,24 +266,54 @@ describe("setup side panel", () => {
     expect(muse.calls.some((c) => c.name === "scripting.executeScript")).toBe(false);
   });
 
-  it("names unconfirmed places in words and never opens them", async () => {
-    const fake = install("grok", { done: ["connect"], tabUrl: "https://grok.com/" });
+  it("Gemini: both steps use the settings hub, with Saved info as a second way in", async () => {
+    const fake = install("gemini", { tabUrl: "https://gemini.google.com/app" });
     await boot();
-    expect(card()!.textContent).toContain("Find it at: Settings > Customize (a hint: it may differ)");
+    expect(primary().textContent).toBe("Open Gemini settings");
     primary().click();
     await settle();
-    expect(fake.clipboard).toHaveLength(1);
-    expect(navigations(fake)).toEqual([]);
-    expect(state(fake).done).toEqual(["connect"]);
+    expect(navigations(fake)).toEqual(["https://gemini.google.com/personalization-settings"]);
+    await tabLoaded(fake, "https://gemini.google.com/personalization-settings");
+    await pageSaysDone(fake, "connect");
+    // Step 2 is on the same page: no reload, the pointer moves on.
+    expect(navigations(fake)).toHaveLength(1);
+    expect(points(fake).at(-1)).toBe("point:instructions");
+    expect(primary().textContent).toBe("Copy instruction");
+    buttonIn(card()!, "Or open Saved info")!.click();
+    await settle();
+    expect(navigations(fake).at(-1)).toBe("https://gemini.google.com/saved-info");
   });
 
-  it("a step with nothing to open or copy has a Done button", async () => {
-    const fake = install("other", { tabUrl: "chrome://newtab/" });
+  it("Grok: Copy and open Grok instructions opens the personality page and points at the box", async () => {
+    const fake = install("grok", { done: ["connect"], tabUrl: "https://grok.com/" });
     await boot();
-    expect(primary().textContent).toBe("Done");
+    expect(card()!.textContent).not.toContain("Find it at");
     primary().click();
     await settle();
+    expect(fake.clipboard).toEqual([standingInstructionFor(assistantById("grok")!)]);
+    expect(navigations(fake)).toEqual(["https://grok.com/?_s=personality"]);
+    await tabLoaded(fake, "https://grok.com/?_s=personality");
+    expect(points(fake).at(-1)).toBe("point:instructions");
+  });
+
+  it("Other: step 1 has no button, only I did this, and Attach to chat is offered", async () => {
+    const fake = install("other", { tabUrl: "chrome://newtab/" });
+    await boot();
+    expect(card()!.querySelector(".cx-guide-primary")).toBeNull();
+    expect(card()!.textContent).toContain("Connectors, Apps, Integrations, Plugins or Connected apps");
+    buttonIn(card()!, "I did this")!.click();
+    await settle();
     expect(state(fake).done).toEqual(["connect"]);
+    expect(primary().textContent).toBe("Copy instruction");
+    const hint = document.querySelector(".cx-guide-attach")!;
+    expect(hint.textContent).toBe("No Google Drive access? Use Attach to chat in the Cortex side panel instead.");
+    buttonIn(hint, "Attach to chat")!.click();
+    await settle();
+    expect(fake.calls.find((c) => c.name === "sidePanel.setOptions")?.args).toEqual([{ tabId: 7, path: "search-shell.html?open=attach", enabled: true }]);
+    expect(document.querySelector(".cx-guide-attach")).toBeTruthy();
+    install("claude");
+    await boot();
+    expect(document.querySelector(".cx-guide-attach")).toBeNull();
   });
 
   it("Muse: Copy and open Muse copies the Remember message; no pointer, so I did this is the way on", async () => {
@@ -307,6 +342,55 @@ describe("setup side panel", () => {
     expect(names.slice(names.indexOf("identity.getAuthToken"))).toEqual(["identity.getAuthToken", "send:enable", "send:status"]);
     expect(fake.calls.find((c) => c.name === "identity.getAuthToken")?.args).toEqual([{ interactive: true }]);
     expect(document.querySelector(".cx-guide-sync")).toBeNull();
+  });
+
+  it("Back reopens the step before with its button and pointer; later steps keep their checkmarks", async () => {
+    const fake = install("chatgpt", { tabUrl: "https://chatgpt.com/" });
+    await boot();
+    expect(buttonIn(card()!, "Back")).toBeUndefined();
+    buttonIn(card()!, "I did this")!.click();
+    await settle();
+    buttonIn(card()!, "I did this")!.click();
+    await settle();
+    expect(card()!.dataset.step).toBe("instructions");
+    buttonIn(card()!, "Back")!.click();
+    await settle();
+    expect(card()!.dataset.step).toBe("extra");
+    expect(state(fake).done).toEqual(["connect", "extra"]);
+    expect(navigations(fake).at(-1)).toBe("https://chatgpt.com/settings/personalization");
+    expect(primary().textContent).toBe("Open personalization");
+    expect(document.querySelector(".cx-guide-progress")?.textContent).toBe("Step 2 of 4");
+    await tabLoaded(fake, "https://chatgpt.com/settings/personalization");
+    expect(points(fake).at(-1)).toBe("point:extra");
+    // The toggle is already on: a reopened step waits for the user's click.
+    await pageSaysDone(fake, "extra");
+    expect(card()!.dataset.step).toBe("extra");
+    buttonIn(card()!, "I did this")!.click();
+    await settle();
+    expect(state(fake).reopened).toBeNull();
+    expect(card()!.dataset.step).toBe("instructions");
+    expect(navigations(fake).at(-1)).toBe("https://chatgpt.com/settings/personalization?instructions=chatgpt");
+  });
+
+  it("every done line reopens its step, and Start over clears only this checklist", async () => {
+    const fake = install("claude", { done: ["connect", "instructions", "test"], tabUrl: "https://claude.ai/new" });
+    await boot();
+    expect(document.querySelector(".cx-guide-success")).toBeTruthy();
+    const lines = [...document.querySelectorAll<HTMLButtonElement>(".cx-guide-done-item")];
+    expect(lines.map((b) => b.dataset.step)).toEqual(["connect", "instructions", "test"]);
+    lines[0]!.click();
+    await settle();
+    expect(card()!.dataset.step).toBe("connect");
+    expect(primary().textContent).toBe("Open Claude connectors");
+    expect(navigations(fake).at(-1)).toBe("https://claude.ai/customize/connectors");
+    expect(document.querySelectorAll(".cx-guide-done-item")).toHaveLength(3);
+    expect(document.querySelector('.cx-guide-done-item[aria-current="step"]')?.getAttribute("data-step")).toBe("connect");
+    await save(fake, { result: "yes" });
+    buttonIn(document, "Start over")!.click();
+    await settle();
+    expect(state(fake)).toEqual({ assistant: "claude", tabId: 7, done: [], result: null, reopened: null });
+    expect(card()!.dataset.step).toBe("connect");
+    expect(buttonIn(document, "Start over")).toBeUndefined();
   });
 
   it("explains how to start again when no guide belongs to this tab", async () => {

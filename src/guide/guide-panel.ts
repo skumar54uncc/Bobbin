@@ -10,7 +10,9 @@ import {
   onAssistantSite,
   openableUrl,
   samePage,
+  shownStep,
   standingInstructionFor,
+  stepBefore,
   stepUrl,
   testQuestionFor,
   troubleshootingFor,
@@ -52,8 +54,11 @@ function button(className: string, text: string): HTMLButtonElement {
 export function primaryLabel(a: AssistantConfig, step: GuideStep, tabUrl: string | undefined): string {
   const url = stepUrl(a, step);
   if (step.copy && url && samePage(url, tabUrl)) return step.copy === "test" ? "Copy the test question" : "Copy instruction";
-  return step.button;
+  return step.button ?? "";
 }
+
+/** The side panel path that opens Ask any assistant in the Connect AI Agents tab. */
+export const ATTACH_PANEL_PATH = "search-shell.html?open=attach";
 
 const root = document.getElementById("cx-guide-root");
 let state: GuideState | null = null;
@@ -76,11 +81,11 @@ function hide(): void {
   if (state) void chrome.tabs.sendMessage(state.tabId, { type: HIDE_MESSAGE }).catch(() => undefined);
 }
 
-/** Points at the current step's control when the tab is on the assistant's site. Draws nothing otherwise. */
+/** Points at the shown step's control when the tab is on the assistant's site. Draws nothing otherwise. */
 async function point(): Promise<void> {
   const a = state ? assistantById(state.assistant) : undefined;
   if (!state || !a) return;
-  const step = currentStep(a, state.done);
+  const step = shownStep(a, state.done, state.reopened);
   const tab = await chrome.tabs.get(state.tabId).catch(() => null);
   if (!step || !stepPointer(a.id, step.id) || !tab || !onAssistantSite(a, tab.url)) {
     hide();
@@ -112,10 +117,24 @@ async function go(url: string): Promise<void> {
 async function complete(stepId: string, how: "manual" | "auto"): Promise<void> {
   const a = state ? assistantById(state.assistant) : undefined;
   if (!state || !a) return;
+  if (state.reopened && state.reopened === stepId) {
+    // A step the user went back to closes only by their click: a toggle that is already on
+    // would otherwise send them straight on again.
+    if (how === "auto") return;
+    await save({ ...state, reopened: null });
+    status = "";
+    manualCopy = null;
+    render();
+    const next = currentStep(a, state.done);
+    const url = next ? stepUrl(a, next) : null;
+    if (url) await go(url);
+    else await point();
+    return;
+  }
   const finished = a.steps.find((s) => s.id === stepId);
   const done = completeStep(a, state.done, stepId);
   if (!finished || !done) return;
-  await save({ ...state, done });
+  await save({ ...state, done, reopened: null });
   manualCopy = null;
   const keepPage = how === "auto" && stepPointer(a.id, stepId)?.done === "contains-cortex";
   status = keepPage ? "Done. Click Save on the page if you have not yet." : how === "auto" ? `Done: ${finished.title}.` : "";
@@ -125,6 +144,30 @@ async function complete(stepId: string, how: "manual" | "auto"): Promise<void> {
   const url = stepUrl(a, next);
   if (url) await go(url);
   else await point();
+}
+
+/** Opens a done step again with its button and pointer. Later steps keep their checkmarks. */
+async function reopen(stepId: string): Promise<void> {
+  const a = state ? assistantById(state.assistant) : undefined;
+  if (!state || !a || !state.done.includes(stepId)) return;
+  await save({ ...state, reopened: stepId });
+  status = "";
+  manualCopy = null;
+  render();
+  const step = a.steps.find((s) => s.id === stepId)!;
+  const url = stepUrl(a, step);
+  if (url) await go(url);
+  else await point();
+}
+
+/** Clears this assistant's checklist. Nothing else changes. */
+async function startOver(): Promise<void> {
+  if (!state) return;
+  await save({ ...state, done: [], result: null, reopened: null });
+  status = "";
+  manualCopy = null;
+  render();
+  await point();
 }
 
 async function runPrimary(a: AssistantConfig, step: GuideStep): Promise<void> {
@@ -142,22 +185,18 @@ async function runPrimary(a: AssistantConfig, step: GuideStep): Promise<void> {
   }
   const url = stepUrl(a, step);
   if (url) await go(url);
-  if (!step.copy && !url) {
-    await complete(step.id, "manual");
-    return;
-  }
   render();
 }
 
-function progress(a: AssistantConfig, current: GuideStep | null): HTMLElement {
+function progress(a: AssistantConfig, current: GuideStep | null, done: readonly string[]): HTMLElement {
   const wrap = el("div", "cx-guide-progress");
   const dots = el("span", "cx-guide-dots");
   dots.setAttribute("aria-hidden", "true");
   const at = current ? a.steps.indexOf(current) : a.steps.length;
-  a.steps.forEach((_, i) => {
+  a.steps.forEach((s, i) => {
     const dot = el("span", "cx-guide-dot");
-    if (i < at) dot.classList.add("is-done");
     if (i === at) dot.classList.add("is-current");
+    else if (done.includes(s.id)) dot.classList.add("is-done");
     dots.append(dot);
   });
   wrap.append(dots, el("span", undefined, current ? `Step ${at + 1} of ${a.steps.length}` : "All steps done"));
@@ -195,15 +234,29 @@ function stepCard(a: AssistantConfig, s: GuideStep, current: GuideState): HTMLEl
   const card = el("section", "cx-guide-step");
   card.dataset.step = s.id;
   card.setAttribute("aria-current", "step");
+  const before = stepBefore(a, s);
+  if (before) {
+    const back = button("cx-guide-link cx-guide-back", "Back");
+    back.addEventListener("click", () => void reopen(before.id));
+    card.append(back);
+  }
   card.append(el("h2", "cx-guide-step-title", s.title), el("p", "cx-guide-text", s.text));
   const link = s.open ? a[s.open] : null;
   if (link && !openableUrl(link)) card.append(el("p", "cx-guide-hint", `Find it at: ${link.path}`));
 
-  const actions = el("div", "cx-guide-actions");
-  const primary = button("cx-btn cx-btn-primary cx-guide-primary", primaryLabel(a, s, tabUrl));
-  primary.addEventListener("click", () => void runPrimary(a, s));
-  actions.append(primary);
-  card.append(actions);
+  if (s.button) {
+    const actions = el("div", "cx-guide-actions");
+    const primary = button("cx-btn cx-btn-primary cx-guide-primary", primaryLabel(a, s, tabUrl));
+    primary.addEventListener("click", () => void runPrimary(a, s));
+    actions.append(primary);
+    card.append(actions);
+  }
+  const fallback = s.fallback ? openableUrl(a[s.fallback]) : null;
+  if (fallback && s.fallback) {
+    const alt = button("cx-guide-link cx-guide-fallback", `Or open ${a[s.fallback]!.path}`);
+    alt.addEventListener("click", () => void go(fallback));
+    card.append(alt);
+  }
 
   if (s.id === "test") {
     const ask = el("div", "cx-guide-ask");
@@ -249,13 +302,13 @@ function render(): void {
     return;
   }
   const current = state;
-  const step = currentStep(a, current.done);
+  const step = shownStep(a, current.done, current.reopened);
 
   const head = el("header", "cx-guide-head");
   const mascot = el("div", "cx-guide-mascot");
   mascot.innerHTML = mascotHtml(step ? "wave" : "connected", 64);
   const headText = el("div");
-  headText.append(el("h1", "cx-guide-title", `Set up ${a.name}`), progress(a, step));
+  headText.append(el("h1", "cx-guide-title", `Set up ${a.name}`), progress(a, step, current.done));
   head.append(mascot, headText);
   root.append(head, el("p", "cx-guide-plan", a.plan));
 
@@ -266,9 +319,15 @@ function render(): void {
     const list = el("ul", "cx-guide-done");
     for (const s of finished) {
       const li = el("li");
+      const open = button("cx-guide-done-item", "");
+      open.dataset.step = s.id;
+      if (s === step) open.setAttribute("aria-current", "step");
+      open.setAttribute("aria-label", `${s.title}, done. Open this step again`);
       const mark = el("span", "cx-guide-check-mark", "\u2713");
       mark.setAttribute("aria-hidden", "true");
-      li.append(mark, `${s.title}, done`);
+      open.append(mark, `${s.title}, done`);
+      open.addEventListener("click", () => void reopen(s.id));
+      li.append(open);
       list.append(li);
     }
     root.append(list);
@@ -277,13 +336,33 @@ function render(): void {
   if (step) root.append(stepCard(a, step, current));
   else root.append(el("p", "cx-guide-success", `${a.name} is connected to your Cortex memory.`));
 
+  if (a.attachHint) {
+    const hint = el("p", "cx-guide-attach");
+    const attach = button("cx-guide-link", "Attach to chat");
+    attach.addEventListener("click", () => void openAttach());
+    hint.append("No Google Drive access? Use ", attach, " in the Cortex side panel instead.");
+    root.append(hint);
+  }
+
   const trouble = el("details", "cx-connect-trouble");
   trouble.open = current.result === "no";
   const list = el("ul", "cx-connect-trouble-list");
   list.replaceChildren(...troubleshootingFor(a).map((t) => el("li", undefined, t)));
   trouble.append(el("summary", undefined, "Troubleshooting"), list);
   root.append(trouble);
+  if (current.done.length) {
+    const over = button("cx-guide-link cx-guide-start-over", "Start over");
+    over.addEventListener("click", () => void startOver());
+    root.append(over);
+  }
   if (current.result === "no") requestAnimationFrame(() => trouble.scrollIntoView?.({ block: "start" }));
+}
+
+/** Swaps this tab's side panel to the Cortex panel, open at Ask any assistant. */
+async function openAttach(): Promise<void> {
+  if (!state) return;
+  hide();
+  await chrome.sidePanel.setOptions({ tabId: state.tabId, path: ATTACH_PANEL_PATH, enabled: true }).catch(() => undefined);
 }
 
 async function refreshSync(): Promise<void> {

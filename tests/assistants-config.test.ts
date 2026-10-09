@@ -11,6 +11,8 @@ import {
   samePage,
   standingInstructionFor,
   stepUrl,
+  shownStep,
+  stepBefore,
   testQuestionFor,
   troubleshootingFor,
   type AssistantConfig,
@@ -43,9 +45,9 @@ describe("assistant config", () => {
       claude: "Free plan works",
       chatgpt: "Needs a ChatGPT plan with apps.",
       gemini: "Free plan works. Start questions with @Google Drive.",
-      grok: "Check your plan",
+      grok: "Free plan works",
       muse: "Check your plan",
-      perplexity: "Connectors need Perplexity Pro. Free: attach the sheet to a chat with Add files from cloud (one chat only).",
+      perplexity: "Free plan works. Start questions with @Google Drive.",
       other: "Any assistant that can read Google Drive files",
     });
   });
@@ -73,16 +75,21 @@ describe("assistant config", () => {
         "https://chatgpt.com/settings/personalization?instructions=chatgpt",
         "https://chatgpt.com/",
       ],
-      gemini: ["https://gemini.google.com/", "https://gemini.google.com/saved-info", "https://gemini.google.com/"],
-      // The instructions place in Grok is not confirmed: it is named in words, never opened.
-      grok: ["https://grok.com/connectors", null, "https://grok.com/"],
+      // Both Gemini settings live on one hub page.
+      gemini: ["https://gemini.google.com/personalization-settings", "https://gemini.google.com/personalization-settings", "https://gemini.google.com/"],
+      grok: ["https://grok.com/connectors", "https://grok.com/?_s=personality", "https://grok.com/"],
       muse: ["https://muse.ai/", "https://muse.ai/", "https://muse.ai/"],
-      perplexity: ["https://www.perplexity.ai/#settings/personalize", null, "https://www.perplexity.ai/"],
+      perplexity: ["https://www.perplexity.ai/computer/connectors", "https://www.perplexity.ai/#settings/personalize", "https://www.perplexity.ai/"],
       other: [null, null, null],
     });
     expect(get("claude").instructions?.verified).toBe("live");
     expect(get("grok").connect?.verified).toBe("live");
-    expect(get("grok").instructions?.verified).toBe("unverified");
+    expect(get("grok").instructions?.verified).toBe("live");
+    expect(get("perplexity").connect?.verified).toBe("live");
+    // Saved info stays as a second way in for the Gemini instruction.
+    const geminiStep = get("gemini").steps[1]!;
+    expect(geminiStep.fallback).toBe("extra");
+    expect(openableUrl(get("gemini")[geminiStep.fallback!])).toBe("https://gemini.google.com/saved-info");
     expect(get("chatgpt").connect?.path).toBe("Settings > Integrations > Plugins > Google Drive");
     expect(get("muse").connect?.path).toBe("Settings > Connectors > Available > Google Drive, Google Docs and Google Sheets");
     // Muse has no pointer and nothing completes itself there.
@@ -93,19 +100,20 @@ describe("assistant config", () => {
     expect(Object.fromEntries(ASSISTANTS.map((a) => [a.id, a.steps.map((s) => s.button)]))).toEqual({
       claude: ["Open Claude connectors", "Copy and open settings", "Open a new chat"],
       chatgpt: ["Open ChatGPT", "Open personalization", "Copy and open instructions", "Open a new chat"],
-      gemini: ["Open Gemini", "Copy and open saved info", "Open a new chat"],
-      grok: ["Open Grok connectors", "Copy instruction", "Open a new chat"],
+      gemini: ["Open Gemini settings", "Copy and open Gemini settings", "Open a new chat"],
+      grok: ["Open Grok connectors", "Copy and open Grok instructions", "Open a new chat"],
       muse: ["Open Muse", "Copy and open Muse", "Open a new chat"],
-      perplexity: ["Copy and open settings", "Done", "Open a new chat"],
-      other: ["Done", "Copy instruction", "Copy the test question"],
+      perplexity: ["Open Perplexity connectors", "Copy and open settings", "Open a new chat"],
+      // Other's first step has no button: only "I did this".
+      other: [null, "Copy instruction", "Copy the test question"],
     });
     for (const a of ASSISTANTS) {
       expect(a.steps.length).toBeLessThanOrEqual(4);
       expect(new Set(a.steps.map((s) => s.id)).size).toBe(a.steps.length);
       for (const s of a.steps) {
         expect(s.title.length).toBeGreaterThan(0);
-        // One sentence, except where the owner wrote the steps word for word (Muse).
-        if (a.id !== "muse") expect(s.text.replace(/\.$/, "")).not.toMatch(/\.\s/);
+        // One sentence, except where the owner wrote the steps word for word (Muse, Other).
+        if (a.id !== "muse" && a.id !== "other") expect(s.text.replace(/\.$/, "")).not.toMatch(/\.\s/);
       }
     }
   });
@@ -119,6 +127,7 @@ describe("assistant config", () => {
       grok: "Google Drive connector",
       muse: "Google connector",
       perplexity: "Google Drive connector",
+      other: "Google Drive connection",
     });
     for (const a of ASSISTANTS) {
       const text = standingInstructionFor(a);
@@ -133,22 +142,27 @@ describe("assistant config", () => {
     expect(Object.fromEntries(ASSISTANTS.map((a) => [a.id, firstUrl(a)]))).toEqual({
       claude: "https://claude.ai/customize/connectors",
       chatgpt: "https://chatgpt.com/",
-      gemini: "https://gemini.google.com/",
+      gemini: "https://gemini.google.com/personalization-settings",
       grok: "https://grok.com/connectors",
       muse: "https://muse.ai/",
-      perplexity: "https://www.perplexity.ai/#settings/personalize",
+      perplexity: "https://www.perplexity.ai/computer/connectors",
       other: null,
     });
   });
 
-  it("ends every guide with the test, copying the question; Gemini's starts with @Google Drive", () => {
+  it("ends every guide with the test, copying the question; Gemini's and Perplexity's start with @Google Drive", () => {
     for (const a of ASSISTANTS) {
       const last = a.steps.at(-1)!;
       expect(last.id).toBe("test");
       expect(last.copy).toBe("test");
     }
     expect(testQuestionFor(get("gemini"))).toBe("@Google Drive What did I search on Google today?");
-    expect(testQuestionFor(get("claude"))).toBe("What did I search on Google today?");
+    expect(testQuestionFor(get("perplexity"))).toBe("@Google Drive What did I search on Google today?");
+    for (const id of ["claude", "chatgpt", "grok", "muse", "other"]) expect(testQuestionFor(get(id))).toBe("What did I search on Google today?");
+    expect(get("other").steps[2]!.text).toBe(
+      "Ask in a new chat: What did I search on Google today? If it doesn't look in Drive, start the question with @Google Drive or Check my Cortex Memory:"
+    );
+    expect(get("other").attachHint).toBe(true);
   });
 
   it("knows each assistant's own site", () => {
@@ -204,6 +218,23 @@ describe("step order", () => {
   });
 });
 
+describe("going back", () => {
+  it("shows a done step the user reopened, else the current one", () => {
+    const a = get("claude");
+    expect(shownStep(a, ["connect", "instructions"], "connect")?.id).toBe("connect");
+    // Only a done step can be reopened.
+    expect(shownStep(a, ["connect"], "test")?.id).toBe("instructions");
+    expect(shownStep(a, ["connect"], null)?.id).toBe("instructions");
+    expect(shownStep(a, ["connect", "instructions", "test"], "instructions")?.id).toBe("instructions");
+  });
+
+  it("Back opens the step before, and step 1 has none", () => {
+    const a = get("chatgpt");
+    expect(stepBefore(a, a.steps[0]!)).toBeNull();
+    expect(stepBefore(a, a.steps[2]!)?.id).toBe("extra");
+  });
+});
+
 describe("troubleshooting", () => {
   it("carries the items, the assistant's own first", () => {
     expect(COMMON_TROUBLESHOOTING).toEqual([
@@ -212,13 +243,17 @@ describe("troubleshooting", () => {
       "It mentions old data: Cortex keeps one file. Delete any old copies named Cortex Memory or Hindsight in Drive and empty the trash.",
       "Numbers look wrong: press Sync now and ask again after 3 minutes.",
       "ChatGPT ignores Drive: turn on Connector search.",
-      "Gemini says it has no Drive: start the question with @Google Drive.",
+      "Gemini or Perplexity says it has no Drive: start the question with @Google Drive.",
       "Muse forgets: send the Remember message again in a new chat.",
     ]);
     const chatgpt = troubleshootingFor(get("chatgpt"));
     expect(chatgpt[0]).toMatch(/^ChatGPT ignores Drive/);
     expect(chatgpt).toHaveLength(COMMON_TROUBLESHOOTING.length);
     expect(troubleshootingFor(get("claude"))).toHaveLength(COMMON_TROUBLESHOOTING.length + 1);
+    // Add files from cloud lives in Perplexity's troubleshooting only, not its steps or plan.
+    const perplexity = get("perplexity");
+    expect(perplexity.troubleshooting.join(" ")).toContain("Add files from cloud");
+    expect(JSON.stringify([perplexity.plan, perplexity.steps])).not.toContain("Add files from cloud");
   });
 
   it("never says SI and points only at steps that exist", () => {
