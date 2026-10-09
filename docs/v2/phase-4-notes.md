@@ -52,6 +52,14 @@ step plus "I did this", no "Show me on the page" checkbox (the pointer is on by 
 floating card on the page, and steps that complete themselves where the target shows it. The
 manifest no longer lists `optional_host_permissions`. Details: docs/guided-setup.md.
 
+Muse (owner's flow): Muse has no direct settings links, so its three steps are words only, opening
+https://muse.ai (live). Step 1 connects Google Drive, Google Docs and Google Sheets under
+Settings > Connectors > Available; step 2 copies the "Remember this permanently: " message and
+opens Muse; step 3 is the test in another new chat. No pointer and no auto-complete: "I did this"
+only. Plan note stays "Check your plan" until confirmed.
+
+The Cortex panel in Chrome's side panel no longer shows its own close button; Chrome has one.
+
 Open: Grok's custom instructions place was not filled in, so that step names "Settings > Customize
 (a hint: it may differ)" and opens nothing. Grok's plan note stays "Check your plan" until the free
 plan is confirmed.

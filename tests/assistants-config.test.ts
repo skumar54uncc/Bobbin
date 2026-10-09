@@ -76,7 +76,7 @@ describe("assistant config", () => {
       gemini: ["https://gemini.google.com/", "https://gemini.google.com/saved-info", "https://gemini.google.com/"],
       // The instructions place in Grok is not confirmed: it is named in words, never opened.
       grok: ["https://grok.com/connectors", null, "https://grok.com/"],
-      muse: [null, null, null, null],
+      muse: ["https://muse.ai/", "https://muse.ai/", "https://muse.ai/"],
       perplexity: ["https://www.perplexity.ai/#settings/personalize", null, "https://www.perplexity.ai/"],
       other: [null, null, null],
     });
@@ -84,7 +84,9 @@ describe("assistant config", () => {
     expect(get("grok").connect?.verified).toBe("live");
     expect(get("grok").instructions?.verified).toBe("unverified");
     expect(get("chatgpt").connect?.path).toBe("Settings > Integrations > Plugins > Google Drive");
-    expect(get("muse").connect?.path).toBe("Settings > Connectors > Google Drive and Google Docs");
+    expect(get("muse").connect?.path).toBe("Settings > Connectors > Available > Google Drive, Google Docs and Google Sheets");
+    // Muse has no pointer and nothing completes itself there.
+    expect(get("muse").origin).toBeNull();
   });
 
   it("keeps the flows short, with one primary button per step", () => {
@@ -93,7 +95,7 @@ describe("assistant config", () => {
       chatgpt: ["Open ChatGPT", "Open personalization", "Copy and open instructions", "Open a new chat"],
       gemini: ["Open Gemini", "Copy and open saved info", "Open a new chat"],
       grok: ["Open Grok connectors", "Copy instruction", "Open a new chat"],
-      muse: ["Done", "Done", "Copy the Remember message", "Copy the test question"],
+      muse: ["Open Muse", "Copy and open Muse", "Open a new chat"],
       perplexity: ["Copy and open settings", "Done", "Open a new chat"],
       other: ["Done", "Copy instruction", "Copy the test question"],
     });
@@ -102,8 +104,8 @@ describe("assistant config", () => {
       expect(new Set(a.steps.map((s) => s.id)).size).toBe(a.steps.length);
       for (const s of a.steps) {
         expect(s.title.length).toBeGreaterThan(0);
-        // One sentence.
-        expect(s.text.replace(/\.$/, "")).not.toMatch(/\.\s/);
+        // One sentence, except where the owner wrote the steps word for word (Muse).
+        if (a.id !== "muse") expect(s.text.replace(/\.$/, "")).not.toMatch(/\.\s/);
       }
     }
   });
@@ -133,7 +135,7 @@ describe("assistant config", () => {
       chatgpt: "https://chatgpt.com/",
       gemini: "https://gemini.google.com/",
       grok: "https://grok.com/connectors",
-      muse: null,
+      muse: "https://muse.ai/",
       perplexity: "https://www.perplexity.ai/#settings/personalize",
       other: null,
     });

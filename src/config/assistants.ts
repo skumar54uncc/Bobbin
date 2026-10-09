@@ -73,10 +73,13 @@ const MUSE_FORGETS = COMMON_TROUBLESHOOTING[6]!;
 
 const live = (url: string | null, path: string): AssistantLink => ({ url, path, verified: "live" });
 
-const testStep = (open: LinkKey | null): GuideStep => ({
+const testStep = (
+  open: LinkKey | null,
+  text = "Paste the question into a new chat, send it, and check the answer says it is in your log."
+): GuideStep => ({
   id: "test",
   title: "Test it in a new chat",
-  text: "Paste the question into a new chat, send it, and check the answer says it is in your log.",
+  text,
   button: open ? "Open a new chat" : "Copy the test question",
   open,
   copy: "test",
@@ -240,30 +243,30 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
     instructionsMethod: "message",
     origin: null,
     testPrefix: "",
-    home: null,
-    connect: live(null, "Settings > Connectors > Google Drive and Google Docs"),
+    // Muse has no direct links to its settings: the steps say where to click.
+    home: live("https://muse.ai/", "Muse"),
+    connect: live(null, "Settings > Connectors > Available > Google Drive, Google Docs and Google Sheets"),
     instructions: null,
     extra: null,
-    newChat: null,
+    newChat: live("https://muse.ai/", "Muse"),
     steps: [
-      { id: "open", title: "Open Muse", text: "Open Muse in this tab.", button: "Done", open: null, copy: null },
       {
         id: "connect",
-        title: "Connect Google Drive and Google Docs",
-        text: "Open Settings, then Connectors, and connect Google Drive and Google Docs.",
-        button: "Done",
-        open: null,
+        title: "Connect Google Drive, Docs and Sheets",
+        text: "Open Settings, then Connectors. Under Available, connect Google Drive, Google Docs and Google Sheets. All three are needed.",
+        button: "Open Muse",
+        open: "home",
         copy: null,
       },
       {
         id: "instructions",
         title: "Send the Remember message",
-        text: "Paste the Remember message into a chat and send it.",
-        button: "Copy the Remember message",
-        open: null,
+        text: "Start a new chat, paste, and send.",
+        button: "Copy and open Muse",
+        open: "home",
         copy: "instruction",
       },
-      testStep(null),
+      testStep("newChat", "Start another new chat and ask: What did I search on Google today?"),
     ],
     troubleshooting: [MUSE_FORGETS],
   },

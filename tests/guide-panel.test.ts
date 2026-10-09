@@ -273,12 +273,24 @@ describe("setup side panel", () => {
   });
 
   it("a step with nothing to open or copy has a Done button", async () => {
-    const fake = install("muse", { tabUrl: "chrome://newtab/" });
+    const fake = install("other", { tabUrl: "chrome://newtab/" });
     await boot();
     expect(primary().textContent).toBe("Done");
     primary().click();
     await settle();
-    expect(state(fake).done).toEqual(["open"]);
+    expect(state(fake).done).toEqual(["connect"]);
+  });
+
+  it("Muse: Copy and open Muse copies the Remember message; no pointer, so I did this is the way on", async () => {
+    const fake = install("muse", { done: ["connect"], tabUrl: "https://muse.ai/chat" });
+    await boot();
+    expect(fake.calls.some((c) => c.name === "scripting.executeScript")).toBe(false);
+    expect(primary().textContent).toBe("Copy and open Muse");
+    primary().click();
+    await settle();
+    expect(fake.clipboard[0]).toMatch(/^Remember this permanently: My browsing history lives/);
+    expect(navigations(fake)).toEqual(["https://muse.ai/"]);
+    expect(buttonIn(card()!, "I did this")).toBeTruthy();
   });
 
   it("puts Turn on Assistant Sync first, with Enable signing in from the click", async () => {

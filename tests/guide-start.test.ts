@@ -56,8 +56,14 @@ describe("Start setup", () => {
 
   it("opens a plain new tab for assistants without a confirmed link", async () => {
     const { calls } = fakeChrome();
-    await startGuide("muse");
+    await startGuide("other");
     expect(calls[0]).toEqual(["tabs.create", { active: true }]);
+  });
+
+  it("opens Muse's home page, where its steps start", async () => {
+    const { calls } = fakeChrome();
+    await startGuide("muse");
+    expect(calls[0]).toEqual(["tabs.create", { url: "https://muse.ai/", active: true }]);
   });
 
   it("explains how to see the steps when Chrome refuses the side panel", async () => {

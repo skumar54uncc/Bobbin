@@ -371,12 +371,17 @@ ${shadowCss}`;
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.5 1.5M16.9 16.9l1.5 1.5M18.4 5.6 16.9 7.1M7.1 16.9 5.6 18.4"/></svg>
           </button>
-          <button type="button" class="cortex-icon-btn cortex-x" data-act="close" aria-label="Close">
+          ${
+            // Chrome's side panel has its own close button.
+            overlayShellMode
+              ? ""
+              : `<button type="button" class="cortex-icon-btn cortex-x" data-act="close" aria-label="Close">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M18 6 6 18"/>
               <path d="m6 6 12 12"/>
             </svg>
-          </button>
+          </button>`
+          }
         </div>
       </div>
       <p id="cortex-forget-status" class="cortex-forget-status" role="status" hidden></p>

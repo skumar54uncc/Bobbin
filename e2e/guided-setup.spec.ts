@@ -115,17 +115,17 @@ test.describe("guided setup", () => {
     expect(panel.options).toMatchObject({ path: "guide-panel.html", enabled: true });
     expect(panel.state?.assistant).toBe("claude");
 
-    // Muse has no confirmed link: a new tab page, which Cortex otherwise gives the search panel.
+    // Other has no link: a new tab page, which Cortex otherwise gives the search panel.
     await page.bringToFront();
     // A second real click into this frame does not reach it in headless Playwright; evaluate runs as a user gesture.
-    await frame.click('.cx-connect-card[data-assistant="muse"]');
+    await frame.click('.cx-connect-card[data-assistant="other"]');
     await frame.evaluate(() => (document.querySelector(".cx-connect-start") as HTMLButtonElement).click());
     await expect(frame.locator(".cx-connect-start")).toBeEnabled();
     await page.waitForTimeout(1500);
     await expect(frame.locator(".cx-connect-start-note")).toHaveText("Cortex opens a new tab and shows these steps in the side panel beside it.");
-    const musePanel = await panelFor("chrome://newtab");
-    expect(musePanel.options).toMatchObject({ path: "guide-panel.html", enabled: true });
-    expect(musePanel.state?.assistant).toBe("muse");
+    const otherPanel = await panelFor("chrome://newtab");
+    expect(otherPanel.options).toMatchObject({ path: "guide-panel.html", enabled: true });
+    expect(otherPanel.state?.assistant).toBe("other");
     // The stub has a "Google Drive" title but no control: nothing is drawn on the page.
     await page.waitForTimeout(3500);
     expect(await assistantTab.locator("[data-cortex-guide]").count()).toBe(0);
