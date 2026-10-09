@@ -6,21 +6,20 @@ export const GUIDE_PANEL_PATH = "guide-panel.html";
 export const POINTER_SCRIPT = "guide-pointer.js";
 export const POINT_MESSAGE = "CORTEX_GUIDE_POINT";
 export const HIDE_MESSAGE = "CORTEX_GUIDE_POINT_HIDE";
+/** Sent by the pointer when it reads that the current step is done. */
+export const DONE_MESSAGE = "CORTEX_GUIDE_DONE";
 
 export interface GuideState {
   assistant: AssistantId;
   /** The tab the guide walks through. The side panel is set for this tab only. */
   tabId: number;
-  /** Step ids the user ticked. */
+  /** Done step ids, always a prefix of the steps: they complete strictly in order. */
   done: string[];
-  /** Step the tab's address matches, or null. Only a highlight: steps never need it. */
-  highlight: string | null;
   result: "yes" | "no" | null;
-  pointer: boolean;
 }
 
 export function newGuideState(assistant: AssistantId, tabId: number): GuideState {
-  return { assistant, tabId, done: [], highlight: null, result: null, pointer: false };
+  return { assistant, tabId, done: [], result: null };
 }
 
 /** Keyed "tab:<id>": integer-like keys would sort by number and lose the newest-first order. */

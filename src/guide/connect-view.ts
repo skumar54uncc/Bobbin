@@ -2,16 +2,7 @@
  * Connect your AI: status, assistant grid, the chosen assistant's guide, troubleshooting.
  * Rendered in Settings and in connect-frame.html inside the Cortex panel.
  */
-import {
-  ASSISTANTS,
-  firstUrl,
-  openableUrl,
-  standingInstructionFor,
-  troubleshootingFor,
-  type AssistantConfig,
-  type AssistantId,
-} from "../config/assistants";
-import { copyText } from "./clipboard";
+import { ASSISTANTS, firstUrl, troubleshootingFor, type AssistantConfig, type AssistantId } from "../config/assistants";
 import { mascotHtml } from "../content/mascot";
 
 export const CONNECT_TITLE = "Connect your AI to your Cortex memory";
@@ -47,22 +38,6 @@ function button(className: string, text: string): HTMLButtonElement {
   const b = el("button", className, text);
   b.type = "button";
   return b;
-}
-
-/** Where a step's link is: an Open button when the link was confirmed, the path in words otherwise. */
-function stepItem(a: AssistantConfig, index: number, onCopy: (b: HTMLButtonElement) => void): HTMLLIElement {
-  const s = a.steps[index]!;
-  const li = el("li", "cx-connect-step");
-  li.dataset.step = s.id;
-  li.append(el("p", "cx-connect-step-text", s.text));
-  const link = s.open ? a[s.open] : null;
-  if (link && !openableUrl(link)) li.append(el("p", "cx-connect-step-path", `Find it at: ${link.path}`));
-  if (s.copy) {
-    const copy = button("cx-btn cx-btn-secondary cx-connect-copy", "Copy instruction");
-    copy.addEventListener("click", () => onCopy(copy));
-    li.append(copy);
-  }
-  return li;
 }
 
 export function renderConnectView(container: HTMLElement, deps: ConnectDeps): ConnectView {
@@ -123,22 +98,13 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     guide.hidden = !a;
     if (!a) return;
     guide.append(el("h3", "cx-connect-h", `Set up ${a.name}`));
-    if (a.tip) guide.append(el("p", "cx-connect-tip", a.tip));
-    const instruction = standingInstructionFor(a);
-    const copied = el("p", "cx-connect-copied");
-    copied.setAttribute("role", "status");
-    const onCopy = (b: HTMLButtonElement) =>
-      void copyText(instruction).then((ok) => {
-        copied.textContent = ok ? "Copied. Paste it where the step says." : "Select the instruction below and copy it.";
-        b.focus();
-      });
     const ol = el("ol", "cx-connect-steps");
     if (!syncOn) ol.append(enableStep());
-    a.steps.forEach((_, i) => ol.append(stepItem(a, i, onCopy)));
-    const preview = el("details", "cx-connect-preview");
-    const pre = el("pre", "cx-connect-instruction", instruction);
-    pre.tabIndex = 0;
-    preview.append(el("summary", undefined, "See the instruction"), pre);
+    for (const s of a.steps) {
+      const li = el("li", "cx-connect-step", s.title);
+      li.dataset.step = s.id;
+      ol.append(li);
+    }
 
     const start = button("cx-btn cx-btn-primary cx-connect-start", "Start setup");
     start.dataset.assistant = a.id;
@@ -159,7 +125,7 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
           start.disabled = false;
         });
     });
-    guide.append(ol, copied, preview, start, startNote);
+    guide.append(ol, start, startNote);
   };
 
   const select = (id: AssistantId) => {

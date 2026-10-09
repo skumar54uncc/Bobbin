@@ -51,6 +51,13 @@ describe("Connect your AI view", () => {
     expect(guide.hidden).toBe(false);
     expect(guide.querySelector(".cx-connect-h")?.textContent).toBe("Set up Grok");
     expect(guide.querySelector(".cx-connect-step--sync")).toBeNull();
+    // Step titles only: the side panel does the copying and the opening.
+    expect([...guide.querySelectorAll(".cx-connect-steps li")].map((li) => li.textContent)).toEqual([
+      "Connect Google Drive",
+      "Add the Cortex instruction",
+      "Test it in a new chat",
+    ]);
+    expect(guide.querySelector(".cx-connect-copy, .cx-connect-preview, pre")).toBeNull();
     guide.querySelector<HTMLButtonElement>(".cx-connect-start")!.click();
     await settle();
     expect(deps.start).toHaveBeenCalledWith("grok");

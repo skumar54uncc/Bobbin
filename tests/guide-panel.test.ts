@@ -8,28 +8,29 @@ type Listener = (...args: unknown[]) => void;
 interface Fake {
   session: Record<string, unknown>;
   updated: Listener[];
+  messages: Listener[];
   calls: { name: string; args: unknown[] }[];
   clipboard: string[];
-  granted: boolean;
   tabUrl: string;
   syncOn: boolean;
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 async function settle(): Promise<void> {
-  for (let i = 0; i < 6; i += 1) await tick();
+  for (let i = 0; i < 8; i += 1) await tick();
 }
 
-function install(assistant: AssistantId, over: Partial<Fake> = {}): Fake {
+function install(assistant: AssistantId, over: Partial<Fake> & { done?: string[] } = {}): Fake {
+  const { done = [], ...rest } = over;
   const fake: Fake = {
-    session: { [GUIDE_KEY]: { [guideKeyFor(7)]: newGuideState(assistant, 7) } },
+    session: { [GUIDE_KEY]: { [guideKeyFor(7)]: { ...newGuideState(assistant, 7), done } } },
     updated: [],
+    messages: [],
     calls: [],
     clipboard: [],
-    granted: true,
     tabUrl: "https://claude.ai/customize/connectors",
     syncOn: true,
-    ...over,
+    ...rest,
   };
   const log = (name: string) => (...args: unknown[]) => {
     fake.calls.push({ name, args });
@@ -48,6 +49,7 @@ function install(assistant: AssistantId, over: Partial<Fake> = {}): Fake {
         }
         return { ok: true };
       },
+      onMessage: { addListener: (fn: Listener) => fake.messages.push(fn) },
     },
     identity: {
       getAuthToken: (details: { interactive: boolean }, cb: (t?: string) => void) => {
@@ -63,12 +65,6 @@ function install(assistant: AssistantId, over: Partial<Fake> = {}): Fake {
       sendMessage: async (...args: unknown[]) => log("tabs.sendMessage")(...args),
       create: async (...args: unknown[]) => log("tabs.create")(...args),
       onUpdated: { addListener: (fn: Listener) => fake.updated.push(fn) },
-    },
-    permissions: {
-      request: async (...args: unknown[]) => {
-        log("permissions.request")(...args);
-        return fake.granted;
-      },
     },
     scripting: { executeScript: async (...args: unknown[]) => log("scripting.executeScript")(...args) },
     storage: {
@@ -96,8 +92,27 @@ async function boot(): Promise<void> {
 }
 
 const state = (fake: Fake): GuideState => (fake.session[GUIDE_KEY] as GuideMap)[guideKeyFor(7)]!;
-const step = (id: string) => document.querySelector<HTMLElement>(`.cx-guide-step[data-step="${id}"]`)!;
+const card = () => document.querySelector<HTMLElement>(".cx-guide-step");
 const buttonIn = (el: ParentNode, text: string) => [...el.querySelectorAll("button")].find((b) => b.textContent === text);
+const primary = () => card()!.querySelector<HTMLButtonElement>(".cx-guide-primary")!;
+const navigations = (fake: Fake) => fake.calls.filter((c) => c.name === "tabs.update").map((c) => (c.args[1] as { url: string }).url);
+const points = (fake: Fake) =>
+  fake.calls
+    .filter((c) => c.name === "tabs.sendMessage")
+    .map((c) => c.args[1] as { type: string; step?: string })
+    .map((m) => (m.type === "CORTEX_GUIDE_POINT" ? `point:${m.step}` : "hide"));
+
+async function pageSaysDone(fake: Fake, step: string, sender: { id?: string; tab?: { id: number } } = { id: "cortex", tab: { id: 7 } }) {
+  fake.messages.forEach((fn) => fn({ type: "CORTEX_GUIDE_DONE", assistant: state(fake).assistant, step }, sender, () => undefined));
+  await settle();
+}
+
+async function tabLoaded(fake: Fake, url: string) {
+  fake.tabUrl = url;
+  fake.updated.forEach((fn) => fn(7, { url }, {}));
+  fake.updated.forEach((fn) => fn(7, { status: "complete" }, {}));
+  await settle();
+}
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -110,115 +125,160 @@ afterEach(() => {
 });
 
 describe("setup side panel", () => {
-  it("shows a numbered checklist with a picture placeholder per step", async () => {
+  it("shows one step at a time, with progress dots and no pictures or checkboxes", async () => {
     install("claude");
     await boot();
-    const steps = [...document.querySelectorAll(".cx-guide-step")].map((li) => (li as HTMLElement).dataset.step);
-    expect(steps).toEqual(["connect", "instructions", "test"]);
-    expect(document.querySelectorAll(".cx-guide-shot")).toHaveLength(3);
-    expect(document.querySelector(".cx-guide-shot figcaption")?.textContent).toMatch(/^What you'll see: /);
-    expect(document.querySelector(".cx-guide-title")?.textContent).toBe("Set up Claude");
+    expect(document.querySelectorAll(".cx-guide-step")).toHaveLength(1);
+    expect(card()!.dataset.step).toBe("connect");
+    expect(card()!.querySelector(".cx-guide-step-title")?.textContent).toBe("Connect Google Drive");
+    expect(document.querySelector(".cx-guide-progress")?.textContent).toBe("Step 1 of 3");
+    expect(document.querySelectorAll(".cx-guide-dot")).toHaveLength(3);
+    expect(document.querySelector(".cx-guide-plan")?.textContent).toBe("Free plan works");
+    expect(primary().textContent).toBe("Open Claude connectors");
+    expect(buttonIn(card()!, "I did this")).toBeTruthy();
+    expect(document.querySelector(".cx-guide-shot, figure, input[type=checkbox], .cx-guide-pointer, .cx-connect-preview")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Show me on the page|Picture/);
   });
 
-  it("highlights the step the tab is on, and follows the tab without requiring it", async () => {
+  it("goes strictly in order: being on a later step's page never skips ahead", async () => {
     const fake = install("chatgpt", { tabUrl: "https://chatgpt.com/settings/personalization" });
     await boot();
-    expect(step("extra").classList.contains("is-here")).toBe(true);
-    expect(step("extra").getAttribute("aria-current")).toBe("step");
-    fake.updated.forEach((fn) => fn(7, { url: "https://chatgpt.com/settings/personalization?instructions=chatgpt" }, {}));
-    await settle();
-    expect(step("instructions").classList.contains("is-here")).toBe(true);
-    expect(step("extra").classList.contains("is-here")).toBe(false);
-    // Other tabs never move the highlight.
-    fake.updated.forEach((fn) => fn(8, { url: "https://chatgpt.com/settings/personalization" }, {}));
-    await settle();
-    expect(step("instructions").classList.contains("is-here")).toBe(true);
-    // Ticking works with no highlight at all.
-    fake.updated.forEach((fn) => fn(7, { url: "https://chatgpt.com/" }, {}));
-    await settle();
-    expect(document.querySelector(".is-here")).toBeNull();
-    const box = step("connect").querySelector<HTMLInputElement>("input[type=checkbox]")!;
-    box.checked = true;
-    box.dispatchEvent(new Event("change"));
-    await settle();
-    expect(state(fake).done).toEqual(["connect"]);
-    expect(document.querySelector(".cx-guide-progress")?.textContent).toBe("1 of 4 steps done");
+    expect(card()!.dataset.step).toBe("connect");
+    await tabLoaded(fake, "https://chatgpt.com/settings/personalization?instructions=chatgpt");
+    expect(card()!.dataset.step).toBe("connect");
+    // A done signal for a later step (the toggle was already on) is ignored.
+    await pageSaysDone(fake, "extra");
+    await pageSaysDone(fake, "instructions");
+    expect(state(fake).done).toEqual([]);
+    expect(card()!.dataset.step).toBe("connect");
+    expect(navigations(fake)).toEqual([]);
   });
 
-  it("copies the instruction and opens only confirmed links in its own tab", async () => {
+  it("ignores done signals from other tabs and other senders", async () => {
     const fake = install("claude");
     await boot();
-    buttonIn(step("instructions"), "Copy instruction")!.click();
-    await settle();
-    expect(fake.clipboard).toEqual([standingInstructionFor(assistantById("claude")!)]);
-    // Claude's instructions link is unverified: the path in words, no Open button.
-    expect(buttonIn(step("instructions"), "Open")).toBeUndefined();
-    expect(step("instructions").textContent).toContain("Find it at: Settings > Account > Instructions for Claude");
-    buttonIn(step("connect"), "Open")!.click();
-    await settle();
-    expect(fake.calls.filter((c) => c.name === "tabs.update").map((c) => c.args)).toEqual([
-      [7, { url: "https://claude.ai/customize/connectors", active: true }],
-    ]);
-    expect(fake.calls.some((c) => c.name === "scripting.executeScript")).toBe(false);
+    await pageSaysDone(fake, "connect", { id: "cortex", tab: { id: 8 } });
+    await pageSaysDone(fake, "connect", { id: "someone-else", tab: { id: 7 } });
+    await pageSaysDone(fake, "connect", { id: "cortex" });
+    expect(state(fake).done).toEqual([]);
   });
 
-  it("asks Yes or No at the end, and No opens that assistant's troubleshooting", async () => {
-    const fake = install("gemini", { tabUrl: "https://gemini.google.com/app" });
+  it("after a step is done, opens the next step's page and points at its target", async () => {
+    const fake = install("claude");
     await boot();
-    expect(step("test").textContent).toContain("Open a NEW chat and ask: @Google Drive What did I search on Google today?");
-    buttonIn(step("test"), "No")!.click();
+    expect(points(fake)).toEqual(["point:connect"]);
+    await pageSaysDone(fake, "connect");
+    expect(state(fake).done).toEqual(["connect"]);
+    expect(navigations(fake)).toEqual(["https://claude.ai/new#settings/account"]);
+    expect(document.querySelector(".cx-guide-done")?.textContent).toBe("\u2713Connect Google Drive, done");
+    expect(document.querySelector(".cx-guide-progress")?.textContent).toBe("Step 2 of 3");
+    expect(card()!.dataset.step).toBe("instructions");
+    await tabLoaded(fake, "https://claude.ai/new#settings/account");
+    expect(points(fake).at(-1)).toBe("point:instructions");
+    // On the step's own page, the button only copies.
+    expect(primary().textContent).toBe("Copy instruction");
+  });
+
+  it("I did this moves on the same way", async () => {
+    const fake = install("chatgpt", { tabUrl: "https://chatgpt.com/" });
+    await boot();
+    buttonIn(card()!, "I did this")!.click();
+    await settle();
+    expect(state(fake).done).toEqual(["connect"]);
+    expect(navigations(fake)).toEqual(["https://chatgpt.com/settings/personalization"]);
+    expect(card()!.dataset.step).toBe("extra");
+  });
+
+  it("stays on the page after the instruction box fills itself, so an unsaved paste is kept", async () => {
+    const fake = install("claude", { done: ["connect"], tabUrl: "https://claude.ai/new#settings/account" });
+    await boot();
+    const before = points(fake).length;
+    await pageSaysDone(fake, "instructions");
+    expect(state(fake).done).toEqual(["connect", "instructions"]);
+    expect(navigations(fake)).toEqual([]);
+    // The next step has no target: the "Now click Save" outline stays.
+    expect(points(fake).length).toBe(before);
+    expect(card()!.textContent).toContain("Click Save on the page if you have not yet.");
+    // Settings over a chat is not a new chat: the test still opens one.
+    expect(primary().textContent).toBe("Open a new chat");
+  });
+
+  it("Copy and open settings copies the instruction, then opens the page", async () => {
+    const fake = install("claude", { done: ["connect"] });
+    await boot();
+    expect(primary().textContent).toBe("Copy and open settings");
+    primary().click();
+    await settle();
+    expect(fake.clipboard).toEqual([standingInstructionFor(assistantById("claude")!)]);
+    expect(navigations(fake)).toEqual(["https://claude.ai/new#settings/account"]);
+    expect(state(fake).done).toEqual(["connect"]);
+  });
+
+  it("Open a new chat copies the test question; Gemini's starts with @Google Drive", async () => {
+    const fake = install("gemini", { done: ["connect", "instructions"], tabUrl: "https://gemini.google.com/saved-info" });
+    await boot();
+    expect(primary().textContent).toBe("Open a new chat");
+    primary().click();
+    await settle();
+    expect(fake.clipboard).toEqual(["@Google Drive What did I search on Google today?"]);
+    expect(navigations(fake)).toEqual(["https://gemini.google.com/"]);
+  });
+
+  it("asks Yes or No at the end; No opens troubleshooting and Yes finishes", async () => {
+    const fake = install("gemini", { done: ["connect", "instructions"], tabUrl: "https://gemini.google.com/app" });
+    await boot();
+    buttonIn(card()!, "No")!.click();
     await settle();
     const trouble = document.querySelector<HTMLDetailsElement>(".cx-connect-trouble")!;
     expect(trouble.open).toBe(true);
     expect(trouble.querySelector("li")?.textContent).toMatch(/^Gemini says it has no Drive/);
     expect(state(fake).result).toBe("no");
-    buttonIn(step("test"), "Yes")!.click();
+    buttonIn(card()!, "Yes")!.click();
     await settle();
     expect(document.querySelector(".cx-guide-success")?.textContent).toBe("Gemini is connected to your Cortex memory.");
+    expect(document.querySelector(".cx-guide-progress")?.textContent).toBe("All steps done");
+    expect(card()).toBeNull();
   });
 
-  it("asks for one assistant's site only when Show me on the page is turned on", async () => {
+  it("points by default on the assistant's site, without asking for any permission", async () => {
     const fake = install("claude");
     await boot();
-    expect(fake.calls.some((c) => c.name === "permissions.request")).toBe(false);
-    const toggle = document.querySelector<HTMLInputElement>(".cx-guide-pointer input[type=checkbox]")!;
-    toggle.checked = true;
-    toggle.dispatchEvent(new Event("change"));
-    await settle();
-    expect(fake.calls.filter((c) => c.name === "permissions.request").map((c) => c.args)).toEqual([[{ origins: ["https://claude.ai/*"] }]]);
     expect(fake.calls.filter((c) => c.name === "scripting.executeScript").map((c) => c.args)).toEqual([
       [{ target: { tabId: 7 }, files: ["guide-pointer.js"] }],
     ]);
     expect(fake.calls.find((c) => c.name === "tabs.sendMessage")?.args).toEqual([7, { type: "CORTEX_GUIDE_POINT", assistant: "claude", step: "connect" }]);
   });
 
-  it("injects nothing when the permission is refused or the tab left the assistant's site", async () => {
-    const refused = install("claude", { granted: false });
-    await boot();
-    const toggle = document.querySelector<HTMLInputElement>(".cx-guide-pointer input[type=checkbox]")!;
-    toggle.checked = true;
-    toggle.dispatchEvent(new Event("change"));
-    await settle();
-    expect(toggle.checked).toBe(false);
-    expect(refused.calls.some((c) => c.name === "scripting.executeScript")).toBe(false);
-
+  it("injects nothing off the assistant's site, for steps without a target, or for assistants without a site", async () => {
     const away = install("claude", { tabUrl: "https://mail.example.com/" });
     await boot();
-    const again = document.querySelector<HTMLInputElement>(".cx-guide-pointer input[type=checkbox]")!;
-    again.checked = true;
-    again.dispatchEvent(new Event("change"));
-    await settle();
     expect(away.calls.some((c) => c.name === "scripting.executeScript")).toBe(false);
-    expect(document.querySelector(".cx-guide-pointer-note")?.textContent).toBe("Open Claude in this tab and Cortex will point the way.");
+    const test = install("claude", { done: ["connect", "instructions"], tabUrl: "https://claude.ai/new" });
+    await boot();
+    expect(test.calls.some((c) => c.name === "scripting.executeScript")).toBe(false);
+    const muse = install("muse", { tabUrl: "chrome://newtab/" });
+    await boot();
+    expect(muse.calls.some((c) => c.name === "scripting.executeScript")).toBe(false);
   });
 
-  it("offers no pointer for assistants without a site or targets", async () => {
-    install("muse", { tabUrl: "chrome://newtab/" });
+  it("names unconfirmed places in words and never opens them", async () => {
+    const fake = install("grok", { done: ["connect"], tabUrl: "https://grok.com/" });
     await boot();
-    expect(document.querySelector(".cx-guide-pointer")).toBeNull();
-    install("perplexity", { tabUrl: "https://www.perplexity.ai/" });
+    expect(card()!.textContent).toContain("Find it at: Settings > Customize (a hint: it may differ)");
+    primary().click();
+    await settle();
+    expect(fake.clipboard).toHaveLength(1);
+    expect(navigations(fake)).toEqual([]);
+    expect(state(fake).done).toEqual(["connect"]);
+  });
+
+  it("a step with nothing to open or copy has a Done button", async () => {
+    const fake = install("muse", { tabUrl: "chrome://newtab/" });
     await boot();
-    expect(document.querySelector(".cx-guide-pointer")).toBeNull();
+    expect(primary().textContent).toBe("Done");
+    primary().click();
+    await settle();
+    expect(state(fake).done).toEqual(["open"]);
   });
 
   it("puts Turn on Assistant Sync first, with Enable signing in from the click", async () => {
@@ -229,7 +289,9 @@ describe("setup side panel", () => {
     expect(fake.calls.some((c) => c.name === "identity.getAuthToken")).toBe(false);
     buttonIn(sync, "Enable")!.click();
     await settle();
-    const names = fake.calls.map((c) => (c.name === "runtime.sendMessage" ? `send:${(c.args[0] as { action: string }).action}` : c.name));
+    const names = fake.calls
+      .filter((c) => c.name === "identity.getAuthToken" || c.name === "runtime.sendMessage")
+      .map((c) => (c.name === "runtime.sendMessage" ? `send:${(c.args[0] as { action: string }).action}` : c.name));
     expect(names.slice(names.indexOf("identity.getAuthToken"))).toEqual(["identity.getAuthToken", "send:enable", "send:status"]);
     expect(fake.calls.find((c) => c.name === "identity.getAuthToken")?.args).toEqual([{ interactive: true }]);
     expect(document.querySelector(".cx-guide-sync")).toBeNull();

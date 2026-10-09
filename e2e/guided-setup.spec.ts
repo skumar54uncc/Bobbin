@@ -15,6 +15,12 @@ async function openAll(page: Page): Promise<void> {
 
 const STUB = (title: string) => `<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1><span>Google Drive</span></body></html>`;
 
+/** SYNTHETIC stand-ins for Claude's pages, hand-written for the test. */
+const CLAUDE_CONNECTORS = `<!doctype html><html><head><title>Connectors</title></head><body><h1>Connectors</h1><ul>
+<li><h3>GitHub</h3><button>Connect</button></li><li><h3>Google Drive</h3><button id="drive">Connect</button></li></ul></body></html>`;
+const CLAUDE_SETTINGS = `<!doctype html><html><head><title>Settings</title></head><body><h1>Settings</h1>
+<label for="ins">Instructions for Claude</label><br><textarea id="ins" rows="4" cols="40"></textarea><button>Save</button></body></html>`;
+
 test.describe("guided setup", () => {
   test("Connect view wraps at every panel width, accordions open and closed", async ({ context, extensionId }) => {
     const page = await context.newPage();
@@ -46,7 +52,7 @@ test.describe("guided setup", () => {
       await page.evaluate(async (id) => {
         const tabs = await chrome.tabs.query({});
         const map = Object.fromEntries(
-          tabs.map((t) => [`tab:${t.id}`, { assistant: id, tabId: t.id, done: [], highlight: null, result: "no", pointer: false }])
+          tabs.map((t) => [`tab:${t.id}`, { assistant: id, tabId: t.id, done: [], result: "no" }])
         );
         await chrome.storage.session.set({ cortex_guide: map });
       }, assistant);
@@ -117,13 +123,16 @@ test.describe("guided setup", () => {
     const musePanel = await panelFor("chrome://newtab");
     expect(musePanel.options).toMatchObject({ path: "guide-panel.html", enabled: true });
     expect(musePanel.state?.assistant).toBe("muse");
-    // The guide does nothing on the assistant's page by itself: no Cortex card until asked.
+    // The stub has a "Google Drive" title but no control: nothing is drawn on the page.
+    await page.waitForTimeout(3500);
     expect(await assistantTab.locator("[data-cortex-guide]").count()).toBe(0);
   });
 
-  test("Show me on the page draws the card on the assistant tab only", async ({ context, extensionId, serviceWorker }) => {
-    await context.route("https://claude.ai/**", (route) => route.fulfill({ contentType: "text/html", body: STUB("Claude connectors") }));
-    await context.route("https://cortex-e2e.test/**", (route) => route.fulfill({ contentType: "text/html", body: STUB("Some article") }));
+  test("the pointer outlines the control on the assistant tab only, then follows the steps in order", async ({ context, extensionId }) => {
+    await context.route("https://claude.ai/**", (route) =>
+      route.fulfill({ contentType: "text/html", body: new URL(route.request().url()).pathname === "/new" ? CLAUDE_SETTINGS : CLAUDE_CONNECTORS })
+    );
+    await context.route("https://cortex-e2e.test/**", (route) => route.fulfill({ contentType: "text/html", body: CLAUDE_CONNECTORS }));
     const other = await context.newPage();
     await other.goto("https://cortex-e2e.test/article");
     const claude = await context.newPage();
@@ -134,22 +143,31 @@ test.describe("guided setup", () => {
     await panel.evaluate(async () => {
       const own = (await chrome.tabs.getCurrent())!;
       const [target] = await chrome.tabs.query({ url: "https://claude.ai/*" });
-      const state = { assistant: "claude", tabId: target!.id, done: [], highlight: null, result: null, pointer: false };
+      const state = { assistant: "claude", tabId: target!.id, done: [], result: null };
       await chrome.storage.session.set({ cortex_guide: { [`tab:${own.id}`]: state } });
     });
     await panel.goto(`chrome-extension://${extensionId}/guide-panel.html`);
-    await panel.check(".cx-guide-pointer input[type=checkbox]");
-    await expect(panel.locator(".cx-guide-pointer-note")).toHaveText("Look for the Cortex card on the page.");
+    // On by default: no checkbox, no permission prompt.
+    await expect(panel.locator("input[type=checkbox]")).toHaveCount(0);
     await expect(claude.locator("[data-cortex-guide]")).toHaveCount(1);
     expect(await other.locator("[data-cortex-guide]").count()).toBe(0);
-    const granted = await serviceWorker.evaluate(() => chrome.permissions.contains({ origins: ["https://claude.ai/*"] }));
-    expect(granted).toBe(true);
-    // Clicks pass through: the page's own text is still the top element under the outline.
+    // It outlines the Connect button, and clicks still reach it.
     const top = await claude.evaluate(() => {
-      const span = [...document.querySelectorAll("span")].find((s) => s.textContent === "Google Drive")!;
-      const r = span.getBoundingClientRect();
-      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.textContent;
+      const r = document.getElementById("drive")!.getBoundingClientRect();
+      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.id;
     });
-    expect(top).toBe("Google Drive");
+    expect(top).toBe("drive");
+
+    await panel.click("text=I did this");
+    await expect.poll(() => claude.url()).toBe("https://claude.ai/new#settings/account");
+    await expect(panel.locator(".cx-guide-progress")).toHaveText("Step 2 of 3");
+    await expect(panel.locator(".cx-guide-done")).toContainText("Connect Google Drive, done");
+    await expect(claude.locator("[data-cortex-guide]")).toHaveCount(1);
+    // The user pastes; the step completes itself and the tab stays so Save is not lost.
+    await claude.fill("#ins", 'My browsing history lives in my Google Drive folder "Cortex Memory".');
+    await expect(panel.locator(".cx-guide-progress")).toHaveText("Step 3 of 3");
+    await expect(panel.locator(".cx-guide-step")).toContainText("Click Save on the page if you have not yet.");
+    expect(claude.url()).toBe("https://claude.ai/new#settings/account");
+    await expect(panel.locator(".cx-guide-primary")).toHaveText("Open a new chat");
   });
 });

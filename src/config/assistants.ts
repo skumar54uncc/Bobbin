@@ -1,34 +1,34 @@
 /**
  * Guided setup for each assistant. Every link carries how it was confirmed:
  * "live" (seen working by the owner), "docs" (official documentation), or "unverified".
- * Unverified links never get a button: the guide shows the text path only.
- * Update links here only; docs/guided-setup.md says how.
+ * Unverified links are never opened: the step names the place in words instead.
+ * Update links here only; docs/guided-setup.md says how. What the on-page pointer
+ * outlines for each step lives in src/guide/pointer-targets.ts.
  */
 
 export type Verified = "live" | "docs" | "unverified";
 
 export interface AssistantLink {
-  /** Opened by an Open button only when `verified` is not "unverified". */
   url: string | null;
-  /** Where to click, in words. Always shown. */
+  /** Where it is, in words. */
   path: string;
   verified: Verified;
 }
 
 export type AssistantId = "claude" | "chatgpt" | "gemini" | "grok" | "muse" | "perplexity" | "other";
 
-export type LinkKey = "connect" | "instructions" | "extra";
+export type LinkKey = "home" | "connect" | "instructions" | "extra" | "newChat";
 
 export interface GuideStep {
   id: string;
+  /** Shown as the one line once the step is done. */
+  title: string;
   /** One sentence. */
   text: string;
-  /** Caption of the "what you'll see" picture. */
-  see: string;
-  /** Open button: navigates the assistant tab to this link, when the link may be opened. */
+  /** The one primary button. It opens `open` and copies `copy`; with neither it marks the step done. */
+  button: string;
   open: LinkKey | null;
-  /** Copy button: copies the standing instruction. */
-  copy: boolean;
+  copy: "instruction" | "test" | null;
 }
 
 export interface AssistantConfig {
@@ -40,21 +40,21 @@ export interface AssistantConfig {
   toolName: string;
   /** Where the standing instruction goes: a settings box, or a chat message the assistant is told to remember. */
   instructionsMethod: "settings" | "message";
-  /** Site the optional "Show me on the page" pointer may run on, or null when there is none. */
+  /** The assistant's site, where the pointer may run, or null when Cortex does not know it. */
   origin: string | null;
+  /** Text the copied test question starts with. */
+  testPrefix: string;
+  home: AssistantLink | null;
   connect: AssistantLink | null;
   instructions: AssistantLink | null;
-  extra: (AssistantLink & { label: string }) | null;
-  tip: string | null;
+  extra: AssistantLink | null;
+  newChat: AssistantLink | null;
+  /** At most 4. They go strictly in order. */
   steps: GuideStep[];
   troubleshooting: string[];
 }
 
 export const TEST_QUESTION = "What did I search on Google today?";
-
-const step = (id: string, text: string, see: string, open: LinkKey | null = null, copy = false): GuideStep => ({ id, text, see, open, copy });
-const testStep = (prefix = ""): GuideStep =>
-  step("test", `Open a NEW chat and ask: ${prefix}${TEST_QUESTION}`, "A new chat with the question typed in");
 
 /** Troubleshooting for every assistant. */
 export const COMMON_TROUBLESHOOTING: readonly string[] = [
@@ -71,6 +71,17 @@ const CHATGPT_DRIVE = COMMON_TROUBLESHOOTING[4]!;
 const GEMINI_DRIVE = COMMON_TROUBLESHOOTING[5]!;
 const MUSE_FORGETS = COMMON_TROUBLESHOOTING[6]!;
 
+const live = (url: string | null, path: string): AssistantLink => ({ url, path, verified: "live" });
+
+const testStep = (open: LinkKey | null): GuideStep => ({
+  id: "test",
+  title: "Test it in a new chat",
+  text: "Paste the question into a new chat, send it, and check the answer says it is in your log.",
+  button: open ? "Open a new chat" : "Copy the test question",
+  open,
+  copy: "test",
+});
+
 export const ASSISTANTS: readonly AssistantConfig[] = [
   {
     id: "claude",
@@ -80,58 +91,108 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
     toolName: "Google Drive connector",
     instructionsMethod: "settings",
     origin: "https://claude.ai/*",
-    connect: { url: "https://claude.ai/customize/connectors", path: "Customize > Connectors > Google Drive", verified: "docs" },
-    instructions: { url: "https://claude.ai/new#settings/account", path: "Settings > Account > Instructions for Claude", verified: "unverified" },
+    testPrefix: "",
+    home: null,
+    connect: { url: "https://claude.ai/customize/connectors", path: "Customize > Connectors", verified: "live" },
+    instructions: live("https://claude.ai/new#settings/account", "Settings > Account > Instructions for Claude"),
     extra: null,
-    tip: null,
+    newChat: live("https://claude.ai/new", "New chat"),
     steps: [
-      step("connect", "Connect Google Drive: find Google Drive in Connectors, click Connect, and allow access.", "Claude's Connectors page with Google Drive", "connect"),
-      step("instructions", "Copy the instruction and paste it into Settings > Account > Instructions for Claude, then save.", "The Instructions for Claude box with the instruction pasted in", "instructions", true),
-      testStep(),
+      {
+        id: "connect",
+        title: "Connect Google Drive",
+        text: "Click Connect next to Google Drive and allow access.",
+        button: "Open Claude connectors",
+        open: "connect",
+        copy: null,
+      },
+      {
+        id: "instructions",
+        title: "Add the Cortex instruction",
+        text: "Paste the instruction into Instructions for Claude, then save.",
+        button: "Copy and open settings",
+        open: "instructions",
+        copy: "instruction",
+      },
+      testStep("newChat"),
     ],
     troubleshooting: ["Claude says it cannot see Drive: in a new chat, open the + menu, then Connectors, and turn Google Drive on."],
   },
   {
     id: "chatgpt",
     name: "ChatGPT",
-    plan: "Needs a ChatGPT plan with apps (connectors). Free accounts may not show them.",
+    plan: "Needs a ChatGPT plan with apps.",
     badge: null,
     toolName: "Google Drive app",
     instructionsMethod: "settings",
     origin: "https://chatgpt.com/*",
-    connect: { url: null, path: "Settings > Plugins (or Apps) > Google Drive", verified: "live" },
-    instructions: { url: "https://chatgpt.com/settings/personalization?instructions=chatgpt", path: "Settings > Personalization > Custom instructions", verified: "live" },
-    extra: {
-      url: "https://chatgpt.com/settings/personalization",
-      path: "Settings > Personalization > Additional ChatGPT settings > Connector search",
-      verified: "live",
-      label: "Connector search",
-    },
-    tip: null,
+    testPrefix: "",
+    home: live("https://chatgpt.com/", "ChatGPT"),
+    connect: live(null, "Settings > Integrations > Plugins > Google Drive"),
+    instructions: live("https://chatgpt.com/settings/personalization?instructions=chatgpt", "Settings > Personalization > Custom instructions"),
+    extra: live("https://chatgpt.com/settings/personalization", "Settings > Personalization > Connector search"),
+    newChat: live("https://chatgpt.com/", "New chat"),
     steps: [
-      step("connect", "Connect Google Drive: open Settings, then Plugins (or Apps), choose Google Drive, and approve.", "ChatGPT's Plugins list with Google Drive"),
-      step("extra", "Turn ON Connector search in Personalization, under Additional ChatGPT settings. It starts off.", "The Connector search switch turned on", "extra"),
-      step("instructions", "Copy the instruction and paste it into Custom instructions, then save.", "Custom instructions with the instruction pasted in", "instructions", true),
-      testStep(),
+      {
+        id: "connect",
+        title: "Connect Google Drive",
+        text: "Open Settings, then Integrations, then Plugins, choose Google Drive, and approve.",
+        button: "Open ChatGPT",
+        open: "home",
+        copy: null,
+      },
+      {
+        id: "extra",
+        title: "Turn on Connector search",
+        text: "Turn on Connector search; it starts off.",
+        button: "Open personalization",
+        open: "extra",
+        copy: null,
+      },
+      {
+        id: "instructions",
+        title: "Add the Cortex instruction",
+        text: "Paste the instruction into Custom instructions, then save.",
+        button: "Copy and open instructions",
+        open: "instructions",
+        copy: "instruction",
+      },
+      testStep("newChat"),
     ],
     troubleshooting: [CHATGPT_DRIVE],
   },
   {
     id: "gemini",
     name: "Gemini",
-    plan: "Free plan. Ask with @Google Drive.",
+    plan: "Free plan works. Start questions with @Google Drive.",
     badge: null,
     toolName: "Google Drive (@Google Drive)",
     instructionsMethod: "settings",
     origin: "https://gemini.google.com/*",
-    connect: { url: null, path: "Settings and help > Connected apps > Google Workspace ON", verified: "live" },
-    instructions: { url: "https://gemini.google.com/saved-info", path: "Saved info", verified: "live" },
+    testPrefix: "@Google Drive ",
+    home: live("https://gemini.google.com/", "Gemini"),
+    connect: live(null, "Settings and help > Connected apps > Google Workspace"),
+    instructions: live("https://gemini.google.com/saved-info", "Saved info"),
     extra: null,
-    tip: "Start every question with @Google Drive",
+    newChat: live("https://gemini.google.com/", "New chat"),
     steps: [
-      step("connect", "Open Settings and help, then Connected apps, and turn Google Workspace ON.", "Connected apps with Google Workspace switched on"),
-      step("instructions", "Copy the instruction and add it to Saved info.", "Saved info with the instruction added", "instructions", true),
-      testStep("@Google Drive "),
+      {
+        id: "connect",
+        title: "Turn on Google Workspace",
+        text: "Open Settings and help, then Connected apps, and turn on Google Workspace.",
+        button: "Open Gemini",
+        open: "home",
+        copy: null,
+      },
+      {
+        id: "instructions",
+        title: "Add the Cortex instruction",
+        text: "Click + Add, paste the instruction, then save.",
+        button: "Copy and open saved info",
+        open: "instructions",
+        copy: "instruction",
+      },
+      testStep("newChat"),
     ],
     troubleshooting: [GEMINI_DRIVE],
   },
@@ -143,14 +204,30 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
     toolName: "Google Drive connector",
     instructionsMethod: "settings",
     origin: "https://grok.com/*",
-    connect: { url: "https://grok.com/connectors", path: "Connectors > Google Drive", verified: "docs" },
+    testPrefix: "",
+    home: null,
+    connect: live("https://grok.com/connectors", "Connectors > Google Drive"),
     instructions: { url: null, path: "Settings > Customize (a hint: it may differ)", verified: "unverified" },
     extra: null,
-    tip: null,
+    newChat: live("https://grok.com/", "New chat"),
     steps: [
-      step("connect", "Connect Google Drive on Grok's Connectors page and allow access.", "Grok's Connectors page with Google Drive", "connect"),
-      step("instructions", "Copy the instruction and paste it into Grok's custom instructions. Look under Settings > Customize.", "Grok's custom instructions with the instruction pasted in", null, true),
-      testStep(),
+      {
+        id: "connect",
+        title: "Connect Google Drive",
+        text: "Click Connect next to Google Drive and allow access.",
+        button: "Open Grok connectors",
+        open: "connect",
+        copy: null,
+      },
+      {
+        id: "instructions",
+        title: "Add the Cortex instruction",
+        text: "Paste the instruction into Grok's custom instructions, then save.",
+        button: "Copy instruction",
+        open: "instructions",
+        copy: "instruction",
+      },
+      testStep("newChat"),
     ],
     troubleshooting: [],
   },
@@ -162,15 +239,31 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
     toolName: "Google connector",
     instructionsMethod: "message",
     origin: null,
-    connect: { url: null, path: "Settings > Connectors > Google Drive and Google Docs", verified: "live" },
+    testPrefix: "",
+    home: null,
+    connect: live(null, "Settings > Connectors > Google Drive and Google Docs"),
     instructions: null,
     extra: null,
-    tip: null,
+    newChat: null,
     steps: [
-      step("open", "Open Muse in this tab.", "Muse's home screen"),
-      step("connect", "Open Settings, then Connectors, and connect Google Drive and Google Docs.", "Muse's Connectors with Google Drive and Google Docs"),
-      step("instructions", "Copy the instruction, paste it as a chat message, and send it. It starts with Remember this permanently.", "A Muse chat with the Remember message sent", null, true),
-      testStep(),
+      { id: "open", title: "Open Muse", text: "Open Muse in this tab.", button: "Done", open: null, copy: null },
+      {
+        id: "connect",
+        title: "Connect Google Drive and Google Docs",
+        text: "Open Settings, then Connectors, and connect Google Drive and Google Docs.",
+        button: "Done",
+        open: null,
+        copy: null,
+      },
+      {
+        id: "instructions",
+        title: "Send the Remember message",
+        text: "Paste the Remember message into a chat and send it.",
+        button: "Copy the Remember message",
+        open: null,
+        copy: "instruction",
+      },
+      testStep(null),
     ],
     troubleshooting: [MUSE_FORGETS],
   },
@@ -182,14 +275,30 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
     toolName: "Google Drive connector",
     instructionsMethod: "settings",
     origin: "https://www.perplexity.ai/*",
+    testPrefix: "",
+    home: null,
     connect: { url: null, path: "Connectors (needs Perplexity Pro)", verified: "unverified" },
-    instructions: { url: "https://www.perplexity.ai/#settings/personalize", path: "Settings > Personalize", verified: "live" },
+    instructions: live("https://www.perplexity.ai/#settings/personalize", "Settings > Personalize"),
     extra: null,
-    tip: null,
+    newChat: live("https://www.perplexity.ai/", "New chat"),
     steps: [
-      step("instructions", "Copy the instruction and paste it into Settings, Personalize, then save.", "Personalize with the instruction pasted in", "instructions", true),
-      step("connect", "With Pro, connect Google Drive in Connectors. On the free plan, attach the Cortex Memory sheet with Add files from cloud in each chat.", "Connectors, or Add files from cloud"),
-      testStep(),
+      {
+        id: "instructions",
+        title: "Add the Cortex instruction",
+        text: "Paste the instruction into Personalize, then save.",
+        button: "Copy and open settings",
+        open: "instructions",
+        copy: "instruction",
+      },
+      {
+        id: "connect",
+        title: "Give it the sheet",
+        text: "With Pro, connect Google Drive in Connectors; on the free plan, attach the Cortex Memory sheet with Add files from cloud for one chat.",
+        button: "Done",
+        open: null,
+        copy: null,
+      },
+      testStep("newChat"),
     ],
     troubleshooting: ["Perplexity forgets the sheet on the free plan: attach it again with Add files from cloud. It lasts one chat."],
   },
@@ -201,19 +310,34 @@ export const ASSISTANTS: readonly AssistantConfig[] = [
     toolName: "Google Drive access",
     instructionsMethod: "settings",
     origin: null,
+    testPrefix: "",
+    home: null,
     connect: { url: null, path: "Your assistant's settings > Google Drive", verified: "unverified" },
     instructions: { url: null, path: "Your assistant's custom instructions or memory", verified: "unverified" },
     extra: null,
-    tip: null,
+    newChat: null,
     steps: [
-      step("connect", "Connect Google Drive in your assistant's settings.", "Your assistant's Google Drive connection"),
-      step("instructions", "Copy the instruction and paste it into your assistant's custom instructions or memory.", "Custom instructions with the instruction pasted in", null, true),
-      testStep(),
+      {
+        id: "connect",
+        title: "Connect Google Drive",
+        text: "Connect Google Drive in your assistant's settings.",
+        button: "Done",
+        open: null,
+        copy: null,
+      },
+      {
+        id: "instructions",
+        title: "Add the Cortex instruction",
+        text: "Paste the instruction into your assistant's custom instructions or memory.",
+        button: "Copy instruction",
+        open: null,
+        copy: "instruction",
+      },
+      testStep(null),
     ],
     troubleshooting: [],
   },
 ];
-
 
 /** "https://claude.ai/*" to "https://claude.ai". */
 export function originOf(pattern: string): string {
@@ -239,19 +363,26 @@ export function assistantById(id: string): AssistantConfig | undefined {
   return ASSISTANTS.find((a) => a.id === id);
 }
 
-/** A link an Open button may use: an https URL that was confirmed live or in official docs. */
+/** A link Cortex may open: an https URL that was confirmed live or in official docs. */
 export function openableUrl(link: AssistantLink | null): string | null {
   if (!link?.url || link.verified === "unverified") return null;
   return link.url.startsWith("https://") ? link.url : null;
 }
 
-/** The page "Start setup" opens: the first step's link that may be opened, or null to stay on a new tab. */
+/** The page a step's button opens, or null. */
+export function stepUrl(a: AssistantConfig, step: GuideStep): string | null {
+  return step.open ? openableUrl(a[step.open]) : null;
+}
+
+/** The page "Start setup" opens: the first step's page, or null to stay on a new tab. */
 export function firstUrl(a: AssistantConfig): string | null {
-  for (const s of a.steps) {
-    const url = s.open ? openableUrl(a[s.open]) : null;
-    if (url) return url;
-  }
-  return openableUrl(a.connect) ?? openableUrl(a.instructions) ?? openableUrl(a.extra);
+  const first = a.steps[0];
+  return first ? stepUrl(a, first) : null;
+}
+
+/** The question the test step copies. */
+export function testQuestionFor(a: Pick<AssistantConfig, "testPrefix">): string {
+  return `${a.testPrefix}${TEST_QUESTION}`;
 }
 
 /** The standing instruction the user pastes once. Muse gets it as a message to remember. */
@@ -267,25 +398,29 @@ export function standingInstructionFor(a: Pick<AssistantConfig, "toolName" | "in
   return a.instructionsMethod === "message" ? `Remember this permanently: ${text}` : text;
 }
 
-/** The step to highlight for the assistant tab's address: the last step whose openable link the address is on. */
-export function stepForUrl(a: AssistantConfig, url: string): string | null {
-  let found: string | null = null;
-  for (const s of a.steps) {
-    const link = s.open ? openableUrl(a[s.open]) : null;
-    if (link && sameTarget(link, url)) found = s.id;
-  }
-  return found;
+/** The step to do now: the first one not done. Steps go strictly in order. */
+export function currentStep(a: AssistantConfig, done: readonly string[]): GuideStep | null {
+  return a.steps.find((s) => !done.includes(s.id)) ?? null;
 }
 
-function sameTarget(link: string, url: string): boolean {
+/**
+ * Marks a step done, only when it is the current one. A later step never completes while an
+ * earlier one is unfinished, so a stray signal from the page cannot skip ahead.
+ */
+export function completeStep(a: AssistantConfig, done: readonly string[], stepId: string): string[] | null {
+  const now = currentStep(a, done);
+  if (!now || now.id !== stepId) return null;
+  return [...done, stepId];
+}
+
+/** True when the address is exactly the page the link opens (a trailing slash aside). */
+export function samePage(link: string, url: string | undefined): boolean {
+  if (!url) return false;
   try {
     const want = new URL(link);
     const now = new URL(url);
-    if (want.origin !== now.origin) return false;
-    for (const [key, value] of want.searchParams) if (now.searchParams.get(key) !== value) return false;
-    const path = want.pathname.replace(/\/$/, "");
-    if (!path) return now.hash === want.hash;
-    return now.pathname.replace(/\/$/, "") === path || now.pathname.startsWith(`${path}/`);
+    const path = (u: URL) => u.pathname.replace(/\/$/, "");
+    return want.origin === now.origin && path(want) === path(now) && want.search === now.search && want.hash === now.hash;
   } catch {
     return false;
   }

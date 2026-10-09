@@ -37,13 +37,6 @@
     "http://*/*",
     "https://*/*"
   ],
-  "optional_host_permissions": [
-    "https://claude.ai/*",
-    "https://chatgpt.com/*",
-    "https://gemini.google.com/*",
-    "https://grok.com/*",
-    "https://www.perplexity.ai/*"
-  ],
   "background": {
     "service_worker": "service-worker.js"
   },

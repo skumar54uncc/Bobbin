@@ -3,11 +3,15 @@ import {
   ASSISTANTS,
   COMMON_TROUBLESHOOTING,
   assistantById,
+  completeStep,
+  currentStep,
   firstUrl,
   onAssistantSite,
   openableUrl,
+  samePage,
   standingInstructionFor,
-  stepForUrl,
+  stepUrl,
+  testQuestionFor,
   troubleshootingFor,
   type AssistantConfig,
   type AssistantLink,
@@ -17,7 +21,7 @@ import { POINTER_TARGETS } from "../src/guide/pointer-targets";
 const get = (id: string): AssistantConfig => assistantById(id)!;
 
 function links(a: AssistantConfig): AssistantLink[] {
-  return [a.connect, a.instructions, a.extra].filter((l): l is AssistantLink => l != null);
+  return [a.home, a.connect, a.instructions, a.extra, a.newChat].filter((l): l is AssistantLink => l != null);
 }
 
 const TEMPLATE = (tool: string) =>
@@ -37,8 +41,8 @@ describe("assistant config", () => {
   it("uses the plan notes from the live checks", () => {
     expect(Object.fromEntries(ASSISTANTS.map((a) => [a.id, a.plan]))).toEqual({
       claude: "Free plan works",
-      chatgpt: "Needs a ChatGPT plan with apps (connectors). Free accounts may not show them.",
-      gemini: "Free plan. Ask with @Google Drive.",
+      chatgpt: "Needs a ChatGPT plan with apps.",
+      gemini: "Free plan works. Start questions with @Google Drive.",
       grok: "Check your plan",
       muse: "Check your plan",
       perplexity: "Connectors need Perplexity Pro. Free: attach the sheet to a chat with Add files from cloud (one chat only).",
@@ -46,7 +50,7 @@ describe("assistant config", () => {
     });
   });
 
-  it("gives every link a verified flag, https only, and buttons only for confirmed links", () => {
+  it("gives every link a verified flag, https only, and opens only confirmed links", () => {
     for (const a of ASSISTANTS) {
       for (const link of links(a)) {
         expect(["live", "docs", "unverified"]).toContain(link.verified);
@@ -59,26 +63,49 @@ describe("assistant config", () => {
     expect(openableUrl({ url: "http://claude.ai/", path: "x", verified: "live" })).toBeNull();
   });
 
-  it("keeps each URL and its flag exactly as confirmed", () => {
-    const table = ASSISTANTS.flatMap((a) =>
-      links(a)
-        .filter((l) => l.url)
-        .map((l) => [a.id, l.url, l.verified])
-    );
-    expect(table).toEqual([
-      ["claude", "https://claude.ai/customize/connectors", "docs"],
-      ["claude", "https://claude.ai/new#settings/account", "unverified"],
-      ["chatgpt", "https://chatgpt.com/settings/personalization?instructions=chatgpt", "live"],
-      ["chatgpt", "https://chatgpt.com/settings/personalization", "live"],
-      ["gemini", "https://gemini.google.com/saved-info", "live"],
-      ["grok", "https://grok.com/connectors", "docs"],
-      ["perplexity", "https://www.perplexity.ai/#settings/personalize", "live"],
-    ]);
-    expect(get("claude").instructions?.path).toBe("Settings > Account > Instructions for Claude");
-    expect(get("chatgpt").connect?.path).toBe("Settings > Plugins (or Apps) > Google Drive");
-    expect(get("gemini").connect?.path).toBe("Settings and help > Connected apps > Google Workspace ON");
-    expect(get("muse").connect?.path).toBe("Settings > Connectors > Google Drive and Google Docs");
+  it("opens exactly these pages, step by step", () => {
+    const table = Object.fromEntries(ASSISTANTS.map((a) => [a.id, a.steps.map((s) => stepUrl(a, s))]));
+    expect(table).toEqual({
+      claude: ["https://claude.ai/customize/connectors", "https://claude.ai/new#settings/account", "https://claude.ai/new"],
+      chatgpt: [
+        "https://chatgpt.com/",
+        "https://chatgpt.com/settings/personalization",
+        "https://chatgpt.com/settings/personalization?instructions=chatgpt",
+        "https://chatgpt.com/",
+      ],
+      gemini: ["https://gemini.google.com/", "https://gemini.google.com/saved-info", "https://gemini.google.com/"],
+      // The instructions place in Grok is not confirmed: it is named in words, never opened.
+      grok: ["https://grok.com/connectors", null, "https://grok.com/"],
+      muse: [null, null, null, null],
+      perplexity: ["https://www.perplexity.ai/#settings/personalize", null, "https://www.perplexity.ai/"],
+      other: [null, null, null],
+    });
+    expect(get("claude").instructions?.verified).toBe("live");
+    expect(get("grok").connect?.verified).toBe("live");
     expect(get("grok").instructions?.verified).toBe("unverified");
+    expect(get("chatgpt").connect?.path).toBe("Settings > Integrations > Plugins > Google Drive");
+    expect(get("muse").connect?.path).toBe("Settings > Connectors > Google Drive and Google Docs");
+  });
+
+  it("keeps the flows short, with one primary button per step", () => {
+    expect(Object.fromEntries(ASSISTANTS.map((a) => [a.id, a.steps.map((s) => s.button)]))).toEqual({
+      claude: ["Open Claude connectors", "Copy and open settings", "Open a new chat"],
+      chatgpt: ["Open ChatGPT", "Open personalization", "Copy and open instructions", "Open a new chat"],
+      gemini: ["Open Gemini", "Copy and open saved info", "Open a new chat"],
+      grok: ["Open Grok connectors", "Copy instruction", "Open a new chat"],
+      muse: ["Done", "Done", "Copy the Remember message", "Copy the test question"],
+      perplexity: ["Copy and open settings", "Done", "Open a new chat"],
+      other: ["Done", "Copy instruction", "Copy the test question"],
+    });
+    for (const a of ASSISTANTS) {
+      expect(a.steps.length).toBeLessThanOrEqual(4);
+      expect(new Set(a.steps.map((s) => s.id)).size).toBe(a.steps.length);
+      for (const s of a.steps) {
+        expect(s.title.length).toBeGreaterThan(0);
+        // One sentence.
+        expect(s.text.replace(/\.$/, "")).not.toMatch(/\.\s/);
+      }
+    }
   });
 
   it("substitutes each tool name into the standing instruction, and prefixes Muse", () => {
@@ -100,11 +127,11 @@ describe("assistant config", () => {
     expect(get("muse").instructionsMethod).toBe("message");
   });
 
-  it("opens the first confirmed link, or a plain new tab when there is none", () => {
+  it("opens the first step's page, or a plain new tab when there is none", () => {
     expect(Object.fromEntries(ASSISTANTS.map((a) => [a.id, firstUrl(a)]))).toEqual({
       claude: "https://claude.ai/customize/connectors",
-      chatgpt: "https://chatgpt.com/settings/personalization",
-      gemini: "https://gemini.google.com/saved-info",
+      chatgpt: "https://chatgpt.com/",
+      gemini: "https://gemini.google.com/",
       grok: "https://grok.com/connectors",
       muse: null,
       perplexity: "https://www.perplexity.ai/#settings/personalize",
@@ -112,19 +139,14 @@ describe("assistant config", () => {
     });
   });
 
-  it("matches the tab address to a step for the highlight", () => {
-    expect(stepForUrl(get("claude"), "https://claude.ai/customize/connectors")).toBe("connect");
-    expect(stepForUrl(get("claude"), "https://claude.ai/customize/connectors/google-drive")).toBe("connect");
-    // Unverified: no Open button, so the address never highlights it either.
-    expect(stepForUrl(get("claude"), "https://claude.ai/new#settings/account")).toBeNull();
-    expect(stepForUrl(get("chatgpt"), "https://chatgpt.com/settings/personalization")).toBe("extra");
-    expect(stepForUrl(get("chatgpt"), "https://chatgpt.com/settings/personalization?instructions=chatgpt")).toBe("instructions");
-    expect(stepForUrl(get("gemini"), "https://gemini.google.com/saved-info")).toBe("instructions");
-    expect(stepForUrl(get("gemini"), "https://gemini.google.com/app")).toBeNull();
-    expect(stepForUrl(get("perplexity"), "https://www.perplexity.ai/#settings/personalize")).toBe("instructions");
-    expect(stepForUrl(get("perplexity"), "https://www.perplexity.ai/search/abc")).toBeNull();
-    expect(stepForUrl(get("grok"), "https://evil.example/connectors")).toBeNull();
-    expect(stepForUrl(get("grok"), "not a url")).toBeNull();
+  it("ends every guide with the test, copying the question; Gemini's starts with @Google Drive", () => {
+    for (const a of ASSISTANTS) {
+      const last = a.steps.at(-1)!;
+      expect(last.id).toBe("test");
+      expect(last.copy).toBe("test");
+    }
+    expect(testQuestionFor(get("gemini"))).toBe("@Google Drive What did I search on Google today?");
+    expect(testQuestionFor(get("claude"))).toBe("What did I search on Google today?");
   });
 
   it("knows each assistant's own site", () => {
@@ -134,18 +156,54 @@ describe("assistant config", () => {
     expect(onAssistantSite(get("gemini"), undefined)).toBe(false);
   });
 
-  it("ends every guide with the new chat test question", () => {
-    for (const a of ASSISTANTS) {
-      const last = a.steps[a.steps.length - 1]!;
-      expect(last.id).toBe("test");
-      expect(last.text).toMatch(/^Open a NEW chat and ask: (@Google Drive )?What did I search on Google today\?$/);
-    }
-    expect(get("gemini").steps.at(-1)!.text).toBe("Open a NEW chat and ask: @Google Drive What did I search on Google today?");
-    expect(get("gemini").tip).toBe("Start every question with @Google Drive");
-    expect(get("chatgpt").steps.map((s) => s.id)).toContain("extra");
+  it("matches a step's page by path, query, and hash", () => {
+    expect(samePage("https://chatgpt.com/settings/personalization", "https://chatgpt.com/settings/personalization")).toBe(true);
+    expect(samePage("https://chatgpt.com/settings/personalization?instructions=chatgpt", "https://chatgpt.com/settings/personalization")).toBe(false);
+    expect(samePage("https://claude.ai/new#settings/account", "https://claude.ai/new")).toBe(false);
+    expect(samePage("https://claude.ai/new#settings/account", "https://claude.ai/new#settings/account")).toBe(true);
+    // Settings open over a chat is not a new chat.
+    expect(samePage("https://claude.ai/new", "https://claude.ai/new#settings/account")).toBe(false);
+    expect(samePage("https://chatgpt.com/settings/personalization", "https://chatgpt.com/settings/personalization?instructions=chatgpt")).toBe(false);
+    expect(samePage("https://chatgpt.com/", "https://chatgpt.com")).toBe(true);
+    expect(samePage("https://grok.com/connectors", "https://evil.example/connectors")).toBe(false);
+    expect(samePage("https://grok.com/connectors", "not a url")).toBe(false);
+  });
+});
+
+describe("step order", () => {
+  it("the current step is always the first one not done", () => {
+    const a = get("chatgpt");
+    expect(currentStep(a, [])?.id).toBe("connect");
+    expect(currentStep(a, ["connect"])?.id).toBe("extra");
+    expect(currentStep(a, ["connect", "extra", "instructions", "test"])).toBeNull();
   });
 
-  it("carries the troubleshooting items, the assistant's own first", () => {
+  it("never completes a later step while an earlier one is unfinished", () => {
+    for (const a of ASSISTANTS) {
+      for (const later of a.steps.slice(1)) expect(completeStep(a, [], later.id)).toBeNull();
+    }
+    const a = get("chatgpt");
+    // The tab already on the personalization page, or the toggle already on, must not skip step 1.
+    expect(completeStep(a, [], "extra")).toBeNull();
+    expect(completeStep(a, [], "instructions")).toBeNull();
+    expect(completeStep(get("gemini"), [], "instructions")).toBeNull();
+  });
+
+  it("completes only in order, and ignores repeats and unknown steps", () => {
+    const a = get("claude");
+    let done: string[] = [];
+    for (const s of a.steps) {
+      const next = completeStep(a, done, s.id);
+      expect(next).toEqual([...done, s.id]);
+      expect(completeStep(a, next!, s.id)).toBeNull();
+      done = next!;
+    }
+    expect(completeStep(a, [], "nope")).toBeNull();
+  });
+});
+
+describe("troubleshooting", () => {
+  it("carries the items, the assistant's own first", () => {
     expect(COMMON_TROUBLESHOOTING).toEqual([
       "The assistant says it cannot find the sheet: confirm Assistant Sync is on, open the sheet once in Google Drive, and reconnect Drive in the assistant.",
       'It answers from general knowledge: start a new chat, paste the instruction again, and begin questions with "Check my Cortex Memory:".',

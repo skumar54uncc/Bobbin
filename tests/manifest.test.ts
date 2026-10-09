@@ -88,14 +88,8 @@ describe("store listing fields (Phase 2.9)", () => {
     };
     expect(raw.permissions).toContain("identity");
     expect(raw.host_permissions).toEqual(["http://*/*", "https://*/*"]);
-    // Requested one site at a time by "Show me on the page" in the setup side panel. Never required.
-    expect(raw.optional_host_permissions).toEqual([
-      "https://claude.ai/*",
-      "https://chatgpt.com/*",
-      "https://gemini.google.com/*",
-      "https://grok.com/*",
-      "https://www.perplexity.ai/*",
-    ]);
+    // The setup pointer runs under the existing host access; nothing extra is requested.
+    expect(raw.optional_host_permissions).toBeUndefined();
     expect(raw.oauth2?.scopes).toEqual(["https://www.googleapis.com/auth/drive.file"]);
     expect(raw.oauth2?.client_id).toBe(
       "1001602130427-c4skn7nc1rglp56h5egnchv2khlafk5v.apps.googleusercontent.com"

@@ -1,9 +1,18 @@
-import type { PointerTarget } from "./pointer-targets";
+import type { DoneCheck, PointerTarget } from "./pointer-targets";
 
-const CLICKABLE =
-  "button, a[href], label, summary, input, select, [role=button], [role=switch], [role=checkbox], [role=tab], [role=menuitem], [role=menuitemcheckbox], [role=link], [role=option]";
+const ACTIONABLE =
+  "button, a[href], input:not([type=hidden]), textarea, select, [contenteditable=''], [contenteditable=true], [role=button], [role=switch], [role=checkbox], [role=textbox], [role=link], [role=menuitem], [role=menuitemcheckbox], [role=tab], [role=option]";
+const BUTTON = "button, a[href], [role=button], [role=link], [role=menuitem]";
+const ITEM = "button, a[href], [role=button], [role=link], [role=menuitem], [role=tab], [role=option]";
+const TOGGLE = "[role=switch], [role=checkbox], [role=menuitemcheckbox], input[type=checkbox]";
+const TEXTBOX = "textarea, [contenteditable=''], [contenteditable=true], [role=textbox], input[type=text], input:not([type])";
 
-const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+const SELECTOR: Record<PointerTarget["kind"], string> = { button: BUTTON, item: ITEM, textbox: TEXTBOX, toggle: TOGGLE };
+
+/** How far up from the name Cortex looks for its control: a row or a small card, not the page. */
+const MAX_LEVELS = 4;
+
+const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 
 export type IsVisible = (el: Element) => boolean;
 
@@ -13,76 +22,105 @@ export function isShown(el: Element): boolean {
   return r.width > 0 && r.height > 0;
 }
 
-function leaves(list: Element[]): Element[] {
-  const unique = [...new Set(list)];
-  return unique.filter((e) => !unique.some((o) => o !== e && e.contains(o)));
+function named(el: Element, names: readonly string[], anchor: string | null): boolean {
+  const own = [norm(el.textContent), norm(el.getAttribute("aria-label"))];
+  return names.some((n) => {
+    const want = norm(n);
+    return own.includes(want) || (anchor != null && own.includes(norm(`${n} ${anchor}`)));
+  });
 }
 
-/**
- * One element, or null when the matches point at more than one place: a wrong arrow is worse than none.
- * A label beside its switch is one place: when exactly one match can be clicked, that one wins.
- */
-function single(found: Element[]): Element | null {
-  const clickable = leaves(found.map((e) => e.closest(CLICKABLE)).filter((e): e is Element => e != null));
-  if (clickable.length) return clickable.length === 1 ? clickable[0]! : null;
-  const plain = leaves(found);
-  return plain.length === 1 ? plain[0]! : null;
+function fits(el: Element, t: PointerTarget): boolean {
+  if (!el.matches(SELECTOR[t.kind])) return false;
+  if ((el as HTMLButtonElement).disabled) return false;
+  return t.kind !== "button" || !t.controls || named(el, t.controls, t.anchor);
 }
 
-function byLabel(root: ParentNode, name: string, visible: IsVisible): Element[] {
+/** Elements whose aria-label or own text is exactly the name. */
+function anchorsFor(root: Document | Element, name: string, visible: IsVisible, skip: Node | null): Element[] {
   const want = norm(name);
-  return [...root.querySelectorAll("[aria-label]")].filter((e) => norm(e.getAttribute("aria-label") ?? "") === want && visible(e));
-}
-
-function byText(root: Node, name: string, visible: IsVisible, skip: Node | null): Element[] {
-  const want = norm(name);
+  const found = new Set<Element>();
+  for (const el of root.querySelectorAll("[aria-label]")) if (norm(el.getAttribute("aria-label")) === want && visible(el)) found.add(el);
   const doc = root.ownerDocument ?? (root as Document);
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const found: Element[] = [];
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const parent = node.parentElement;
     if (!parent || (skip && skip.contains(parent))) continue;
-    if (norm(node.nodeValue ?? "") !== want) continue;
+    if (norm(node.nodeValue) !== want) continue;
     if (parent.closest("script, style, noscript, template")) continue;
-    if (visible(parent)) found.push(parent);
+    if (visible(parent)) found.add(parent);
   }
-  return found;
+  return [...found];
 }
 
-/** Finds the target by each name in turn (aria-label, then visible text), then by CSS selector. */
-export function findTarget(root: Document | Element, target: PointerTarget, visible: IsVisible = isShown, skip: Node | null = null): Element | null {
-  for (const name of target.names) {
-    const one = single(byLabel(root, name, visible)) ?? single(byText(root, name, visible, skip));
-    if (one) return one;
+/** The one control of the right kind that belongs to this name, or null. */
+function controlFor(anchor: Element, t: PointerTarget, visible: IsVisible): Element | null {
+  const own = anchor.closest(ACTIONABLE);
+  if (own && fits(own, t)) return own;
+  if (t.kind === "item") return null;
+  if (t.kind === "textbox") {
+    const label = anchor.closest("label");
+    const box = label?.htmlFor ? anchor.ownerDocument.getElementById(label.htmlFor) : null;
+    if (box && fits(box, t) && visible(box)) return box;
   }
-  for (const selector of target.selectors) {
-    let found: Element[] = [];
-    try {
-      found = [...root.querySelectorAll(selector)].filter(visible);
-    } catch {
-      continue;
-    }
-    const one = single(found);
-    if (one) return one;
+  // Climb to the smallest box around the name that holds any control: its row or card.
+  // Look no further, so another service's button is never picked.
+  let node = anchor.parentElement;
+  for (let level = 0; node && level < MAX_LEVELS; level += 1, node = node.parentElement) {
+    const controls = [...node.querySelectorAll(ACTIONABLE)].filter(visible);
+    if (!controls.length) continue;
+    const near = controls.filter((e) => fits(e, t));
+    return near.length === 1 ? near[0]! : null;
   }
   return null;
 }
 
-/** Looks again until the target shows up or time runs out. */
-export function waitForTarget(
-  find: () => Element | null,
-  timeoutMs = 3000,
-  everyMs = 200,
-  now: () => number = Date.now
-): Promise<Element | null> {
-  const until = now() + timeoutMs;
-  return new Promise((resolve) => {
-    const tick = () => {
-      const hit = find();
-      if (hit) return resolve(hit);
-      if (now() >= until) return resolve(null);
-      setTimeout(tick, everyMs);
-    };
-    tick();
-  });
+/**
+ * Finds the control the user acts on. Returns null unless exactly one control matches:
+ * no outline is better than a wrong one, and a title is never a target.
+ */
+export function findTarget(root: Document | Element, t: PointerTarget, visible: IsVisible = isShown, skip: Node | null = null): Element | null {
+  const hits = new Set<Element>();
+  if (t.anchor == null) {
+    for (const el of root.querySelectorAll(SELECTOR[t.kind])) {
+      if ((!skip || !skip.contains(el)) && fits(el, t) && visible(el)) hits.add(el);
+    }
+  } else {
+    for (const anchor of anchorsFor(root, t.anchor, visible, skip)) {
+      const control = controlFor(anchor, t, visible);
+      if (control) hits.add(control);
+    }
+  }
+  return hits.size === 1 ? [...hits][0]! : null;
+}
+
+/** The first target in order that is found with confidence. */
+export function findFirst(
+  root: Document | Element,
+  targets: readonly PointerTarget[],
+  visible: IsVisible = isShown,
+  skip: Node | null = null
+): { index: number; el: Element } | null {
+  for (const [index, t] of targets.entries()) {
+    const el = findTarget(root, t, visible, skip);
+    if (el) return { index, el };
+  }
+  return null;
+}
+
+/** Reads only the target element. */
+export function isDone(check: DoneCheck, el: Element): boolean {
+  if (check === "toggle-on") return el.getAttribute("aria-checked") === "true" || (el as HTMLInputElement).checked === true;
+  if (check === "contains-cortex") {
+    const value = (el as HTMLTextAreaElement).value ?? el.textContent ?? "";
+    return value.includes("Cortex Memory");
+  }
+  const text = `${norm(el.textContent)} ${norm(el.getAttribute("aria-label"))}`;
+  return /\b(connected|disconnect)\b/.test(text) || el.getAttribute("aria-pressed") === "true";
+}
+
+/** After connecting, the Connect button usually becomes a Connected or Disconnect control. */
+export function connectedControl(root: Document | Element, t: PointerTarget, visible: IsVisible = isShown, skip: Node | null = null): Element | null {
+  if (t.kind !== "button" || t.anchor == null) return null;
+  return findTarget(root, { ...t, controls: ["Connected", "Disconnect"] }, visible, skip);
 }
