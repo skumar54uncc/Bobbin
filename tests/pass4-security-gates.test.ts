@@ -58,6 +58,11 @@ describe("pass4 security gates", () => {
     expect(isConnectFrameSender({ id: "cortex", tab, url: "https://example.com/connect-frame.html" })).toBe(false);
     expect(isConnectFrameSender({ id: "other", tab, url: "chrome-extension://cortex/connect-frame.html" })).toBe(false);
     expect(isConnectFrameSender({ id: "cortex", url: "chrome-extension://cortex/options.html" })).toBe(false);
+    // use_dynamic_url: getURL names the dynamic id, the frame still reports the extension id.
+    vi.stubGlobal("chrome", { runtime: { id: "cortex", getURL: (p: string) => `chrome-extension://aaf0d472-dynamic/${p}` } });
+    expect(isConnectFrameSender({ id: "cortex", tab, url: "chrome-extension://cortex/connect-frame.html" })).toBe(true);
+    expect(isConnectFrameSender({ id: "cortex", tab, url: "chrome-extension://aaf0d472-dynamic/connect-frame.html" })).toBe(true);
+    expect(isConnectFrameSender({ id: "cortex", tab, url: "chrome-extension://elsewhere/connect-frame.html" })).toBe(false);
     vi.unstubAllGlobals();
   });
 

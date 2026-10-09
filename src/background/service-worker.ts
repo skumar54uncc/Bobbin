@@ -15,6 +15,8 @@ import {
   ASSISTANT_SYNC_ALARM_PERIOD_MIN,
   ASSISTANT_SYNC_SOON_ALARM,
   countUnsyncedVisits,
+  listSyncPageTexts,
+  listSyncSearches,
   listSyncWarnings,
   readSyncEngineState,
   setDriveFolderTrashHandler,
@@ -131,6 +133,9 @@ import { openOverlayOnTab } from "../lib/overlay-injector";
 import { requestExtraction } from "../lib/extract-injector";
 import { canonicalLinkedInUrl, sameLinkedInProfile, sanitizePersonDetail, type LinkedInEntity } from "../lib/capture/linkedin";
 import { deletePerson, listPeople, upsertPerson } from "../lib/people";
+import { MAX_PACKET_CHARS } from "../attach/packet";
+import { buildPacketItems, parsePacketRequest, type PacketDeps } from "../attach/packet-items";
+import { insertIntoField, type InsertResult } from "../attach/insert-field";
 import { cacheProfilePhoto, getProfilePhoto, profilesWithPhotos } from "../lib/profile-photos";
 import { applyDwellReport, readingTimeFor, type DwellLedger } from "../lib/reading-time";
 import { FLUSH_LOG_KEY, appendFlushLog, flushLogEntry } from "../assistant-sync/flush-log";
@@ -1495,6 +1500,16 @@ function searchViaOffscreen(
       });
   });
 }
+
+const packetDeps: PacketDeps = {
+  searchPages: async (query, from, to) => {
+    const res = await searchViaOffscreen(query, { from, to });
+    return res.ok ? res.hits : [];
+  },
+  listPeople: (from, to) => listPeople({ since: from, until: to, limit: 200 }),
+  listSearches: listSyncSearches,
+  pageTexts: listSyncPageTexts,
+};
 
 async function shouldSkipIndexing(
   urlStr: string,
@@ -3289,6 +3304,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       (warnings) => sendResponse({ ok: true, warnings }),
       () => sendResponse({ ok: false, error: "warnings_failed" })
     );
+    return true;
+  }
+
+  // Attach to chat: only the Connect frame inside the Cortex panel asks.
+  if (type === "CORTEX_PACKET_ITEMS") {
+    const req = parsePacketRequest(msg);
+    if (!isConnectFrameSender(sender) || !req) {
+      sendResponse({ ok: false });
+      return true;
+    }
+    void buildPacketItems(req, packetDeps).then(
+      (items) => sendResponse({ ok: true, items }),
+      () => sendResponse({ ok: false })
+    );
+    return true;
+  }
+
+  // Writes into the chat page's focused field after the Insert click. Never submits.
+  if (type === "CORTEX_PACKET_INSERT") {
+    const text = String((msg as { text?: unknown }).text ?? "").slice(0, MAX_PACKET_CHARS);
+    if (!isConnectFrameSender(sender) || !text.trim()) {
+      sendResponse({ ok: false, reason: "rejected" });
+      return true;
+    }
+    void (async () => {
+      // The panel inside a page writes to that page; the side panel writes to the active tab.
+      const tabId = sender.tab?.id ?? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
+      if (tabId == null) return { ok: false, reason: "blocked" };
+      const [run] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func: insertIntoField, args: [text] });
+      const result = (run?.result as InsertResult | undefined) ?? { ok: false, reason: "rejected" };
+      if (result.ok && sender.tab?.id != null) {
+        chrome.tabs.sendMessage(sender.tab.id, { type: "CORTEX_CLOSE_SEARCH" }, { frameId: 0 }, () => void chrome.runtime.lastError);
+      }
+      return result;
+    })().then(sendResponse, () => sendResponse({ ok: false, reason: "blocked" }));
     return true;
   }
 

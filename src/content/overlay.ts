@@ -286,6 +286,11 @@ export function openCortexOverlay(opts?: OpenCortexOverlayOptions): void {
   existingRoot?.remove();
   overlayHost = null;
   overlayShadowRoot = null;
+  // Attach to chat writes here after the panel takes focus (src/attach/insert-field.ts).
+  if (!overlayShellMode) {
+    const field = document.activeElement;
+    (window as unknown as { __cortexLastField?: Element | null }).__cortexLastField = field && field !== document.body ? field : null;
+  }
 
   const previousFocus =
     document.activeElement instanceof HTMLElement ? document.activeElement : null;

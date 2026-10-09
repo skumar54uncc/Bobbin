@@ -412,6 +412,163 @@
   padding: 18px;
 }
 
+/* Ask any assistant (Attach to chat), below Connect in the panel frame. */
+.cx-attach {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 18px 18px;
+  padding: 14px;
+  color: var(--cx-text);
+  overflow-wrap: anywhere;
+  border: 1px solid var(--cx-border);
+  border-radius: var(--radius-card, 16px);
+  background: var(--cx-surface-raised);
+}
+
+.cx-attach * {
+  box-sizing: border-box;
+}
+
+.cx-attach .cx-connect-lead {
+  font: var(--cx-ts-caption);
+}
+
+.cx-attach-form {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cx-attach-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--cx-text);
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: 10px;
+}
+
+.cx-attach-input:focus-visible,
+.cx-attach-chip:focus-visible,
+.cx-attach-remove:focus-visible,
+.cx-attach-toggle input:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+}
+
+.cx-attach-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cx-attach-chip {
+  padding: 4px 10px;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text);
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.cx-attach-chip:hover {
+  background: var(--cx-accent-soft);
+}
+
+.cx-attach-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cx-attach-preview[hidden] {
+  display: none;
+}
+
+.cx-attach-header {
+  margin: 0;
+  font-weight: 700;
+}
+
+.cx-attach-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.cx-attach-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 8px;
+  padding: 6px 8px;
+  font: var(--cx-ts-caption);
+  background: var(--cx-surface);
+  border-radius: 8px;
+}
+
+.cx-attach-line {
+  flex: 1;
+  min-width: 0;
+}
+
+.cx-attach-remove {
+  padding: 0;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text-muted);
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.cx-attach-excerpt {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--cx-text-muted);
+}
+
+.cx-attach-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: var(--cx-ts-caption);
+  cursor: pointer;
+}
+
+.cx-attach-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--brick, #9c3b21);
+}
+
+.cx-attach-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cx-attach-status {
+  margin: 0;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text-muted);
+}
+
+.cx-attach-status:empty {
+  display: none;
+}
+
 @media (max-width: 360px) {
   .cx-connect-mascot .cx-m {
     width: 56px;

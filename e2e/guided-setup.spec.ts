@@ -173,4 +173,68 @@ test.describe("guided setup", () => {
     expect(claude.url()).toBe("https://claude.ai/new#settings/account");
     await expect(panel.locator(".cx-guide-primary")).toHaveText("Open a new chat");
   });
+
+  test("Insert into chat writes into the chat box and never sends", async ({ context, serviceWorker }) => {
+    /** SYNTHETIC chat page: a form textarea and a contenteditable box, both counting sends. */
+    const CHAT = `<!doctype html><html><head><title>Chat</title></head><body>
+<form id="f"><textarea id="ta"></textarea><button>Send</button></form>
+<div id="ce" contenteditable="true" style="min-height:40px"></div>
+<script>window.sends=0;document.getElementById("f").addEventListener("submit",e=>{e.preventDefault();window.sends++});
+document.addEventListener("keydown",e=>{if(e.key==="Enter")window.sends++},true);</script></body></html>`;
+    await context.route("https://chat-e2e.test/**", (route) => route.fulfill({ contentType: "text/html", body: CHAT }));
+    const page = await context.newPage();
+    await page.goto("https://chat-e2e.test/");
+    const embed = (field: string) =>
+      serviceWorker.evaluate(async (id) => {
+        const [tab] = await chrome.tabs.query({ url: "https://chat-e2e.test/*" });
+        await chrome.scripting.executeScript({
+          target: { tabId: tab!.id! },
+          args: [id],
+          // Same as opening the Cortex panel: remember the focused box, then frame the panel.
+          func: (fieldId: string) => {
+            const box = document.getElementById(fieldId) as HTMLElement;
+            box.focus();
+            (window as unknown as { __cortexLastField?: Element }).__cortexLastField = box;
+            if (document.querySelector("iframe")) return;
+            const frame = document.createElement("iframe");
+            frame.src = chrome.runtime.getURL("connect-frame.html");
+            frame.style.cssText = "width:420px;height:800px;border:0";
+            document.body.append(frame);
+          },
+        });
+      }, field);
+    await embed("ta");
+    await expect.poll(() => page.frames().some((f) => f.url().includes("connect-frame.html"))).toBe(true);
+    const frame = page.frames().find((f) => f.url().includes("connect-frame.html"))!;
+    await expect(frame.locator("#cx-attach-title")).toHaveText("Ask any assistant");
+    await expect(frame.locator(".cx-attach-chip")).toHaveCount(3);
+    // Nothing indexed in this profile: the template answers with an empty state.
+    await frame.click('.cx-attach-chip[data-template="read-today"]');
+    await expect(frame.locator(".cx-attach-status")).toHaveText("Nothing found for that. Try other words or a template.");
+    await noSideScroll(frame, "attach");
+
+    const insert = (text: string) => frame.evaluate((t) => chrome.runtime.sendMessage({ type: "CORTEX_PACKET_INSERT", text: t }), text);
+    await page.locator("iframe").focus();
+    expect(await insert("Context from my Cortex browsing memory: 1 item")).toEqual({ ok: true });
+    await expect(page.locator("#ta")).toHaveValue("Context from my Cortex browsing memory: 1 item");
+
+    await embed("ce");
+    await page.locator("iframe").focus();
+    expect(await insert("Packet for the rich box")).toEqual({ ok: true });
+    await expect(page.locator("#ce")).toHaveText("Packet for the rich box");
+    expect(await page.evaluate(() => (window as unknown as { sends: number }).sends)).toBe(0);
+
+    // A page with no box: nothing is written, and the reply says so.
+    await serviceWorker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ url: "https://chat-e2e.test/*" });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab!.id! },
+        func: () => {
+          delete (window as unknown as { __cortexLastField?: Element }).__cortexLastField;
+        },
+      });
+    });
+    await page.locator("iframe").focus();
+    expect(await insert("nowhere")).toEqual({ ok: false, reason: "nofield" });
+  });
 });

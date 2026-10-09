@@ -26,10 +26,13 @@ export function isGuidePanelSender(sender: chrome.runtime.MessageSender): boolea
 /**
  * The Connect frame inside the Cortex panel. It sits in a web page, so sender.tab is set, but
  * sender.url is the extension page: a content script or the page itself reports the page URL.
+ * connect-frame.html uses use_dynamic_url, so getURL() for it can name the dynamic id while the
+ * frame reports the extension id: accept either.
  */
 export function isConnectFrameSender(sender: chrome.runtime.MessageSender): boolean {
   if (sender.id !== chrome.runtime.id) return false;
-  return (sender.url ?? "").startsWith(chrome.runtime.getURL("connect-frame.html"));
+  const url = sender.url ?? "";
+  return [`chrome-extension://${chrome.runtime.id}/connect-frame.html`, chrome.runtime.getURL("connect-frame.html")].some((u) => url.startsWith(u));
 }
 
 /** Any Cortex extension page, including connect-frame.html framed in a web page. Not content scripts. */

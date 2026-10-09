@@ -3,6 +3,9 @@
  * Start setup and Enable run in an extension click (sidePanel.open and interactive sign-in need one).
  * Only the panel can frame it: the URL is dynamic, so a web page cannot load it on its own.
  */
+import { renderAttachView, type InsertReply } from "../attach/attach-view";
+import type { PacketItem } from "../attach/packet";
+import { copyText } from "./clipboard";
 import { renderConnectView } from "./connect-view";
 import { enableFromClick } from "./enable-sync";
 import { startGuide } from "./start";
@@ -20,4 +23,16 @@ if (root) {
     start: startGuide,
   });
   keepFresh(view.refresh);
+}
+
+const attach = document.getElementById("cx-attach-root");
+if (attach) {
+  renderAttachView(attach, {
+    request: async (req) => {
+      const res = (await chrome.runtime.sendMessage({ type: "CORTEX_PACKET_ITEMS", ...req })) as { ok?: boolean; items?: PacketItem[] } | undefined;
+      return res?.ok ? (res.items ?? []) : null;
+    },
+    insert: async (text) => ((await chrome.runtime.sendMessage({ type: "CORTEX_PACKET_INSERT", text })) as InsertReply | undefined) ?? { ok: false, reason: "blocked" },
+    copy: copyText,
+  });
 }
