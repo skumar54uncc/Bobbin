@@ -22,10 +22,12 @@ describe("assistant sync options", () => {
 
   it("puts consent above Enable and keeps each assistant guide under 150 words", () => {
     const consent = document.getElementById("cx-assistant-consent")?.textContent ?? "";
-    expect(consent).toMatch(/page titles, URLs, excerpts of pages you read for 5 minutes or more, searches, LinkedIn profiles, and topics/);
+    expect(consent).toMatch(/page titles, URLs, searches, LinkedIn profiles, and topics/);
+    expect(consent).toMatch(/one Google Doc per day with the text of pages you read \(20 seconds on screen or scrolled 30 percent\), up to 4,000 characters each/);
+    expect(consent).toMatch(/Text of LinkedIn feed posts syncs only when you turn on Save text of LinkedIn posts I scroll past/);
     expect(consent).toMatch(/folder named Cortex Memory/);
     expect(consent).toMatch(/drive\.file/);
-    expect(consent).toMatch(/relevant rows/);
+    expect(consent).toMatch(/relevant rows and page text/);
     const enable = document.getElementById("cx-assistant-enable");
     const consentNode = document.getElementById("cx-assistant-consent");
     expect(enable).toBeTruthy();
@@ -58,7 +60,7 @@ describe("assistant sync options", () => {
       expect(text).toMatch(/Google Drive/);
       expect(text).toMatch(/Cortex Memory/);
       expect(text).toMatch(/About/);
-      expect(text).toMatch(/Content/);
+      expect(text).toMatch(/Pages doc/);
     }
     expect(document.getElementById("cx-opt-delete-all")?.textContent).toMatch(/Delete all indexed data/);
     expect(html).toMatch(/Type <strong>DELETE<\/strong>/);

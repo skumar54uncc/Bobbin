@@ -17,7 +17,7 @@ The [HTML version](privacy-policy.html) (for GitHub Pages) includes the Cortex i
 | Extracted page text (chunked) | Your device (IndexedDB) | Search, Ask, Digest |
 | Visit timestamps / URLs / titles | Your device | Recency ranking, digests |
 | Settings (blocklist, pause, chat mode, optional API key) | `chrome.storage.local` on your device | Extension behavior |
-| Assistant Sync copy (titles, URLs, long-read excerpts, searches, LinkedIn profiles, topics) | Folder `Cortex Memory` in your Google Drive, only if you enable it | So an assistant you connect can answer from that file |
+| Assistant Sync copy (titles, URLs, searches, LinkedIn profiles, topics, and the text of pages you read in daily Pages docs) | Folder `Cortex Memory` in your Google Drive, only if you enable it | So an assistant you connect can answer from that file |
 
 **Cortex does not operate a backend that receives your indexed content.** There is no Cortex account and no Cortex server that stores your browsing. Optional Assistant Sync writes a copy into a folder you own in Google Drive.
 
@@ -36,7 +36,7 @@ Sensitive sites (banking, health, email, login pages), your blocklist, and admin
 
 ## Optional Assistant Sync
 
-Assistant Sync stays off until you press Enable. It uses the Google scope `drive.file`, which covers only files Cortex creates. The copy lives in one folder named Cortex Memory in your Google Drive. You own that file. Drive writes run only while sync is enabled. Delete all indexed data, after you type DELETE, removes the local library and moves that folder to the Drive trash. See [data-deletion.html](data-deletion.html).
+Assistant Sync stays off until you press Enable. It uses the Google scope `drive.file`, which covers only files Cortex creates. The copy lives in one folder named Cortex Memory in your Google Drive: a spreadsheet with page titles, URLs, searches, LinkedIn profiles you opened, and topic labels, and a Pages folder with one Google Doc per day. The day docs hold the text of pages you read (on screen and focused for 20 seconds, or scrolled 30%, up to 4,000 characters per page) and the headline, location, About, Experience, and Education of LinkedIn profiles you opened. Text of LinkedIn feed posts (author, up to 1,500 characters, time seen) is saved only if you turn on *Save text of LinkedIn posts I scroll past*, which is off by default. Photos, contact info, and messages are never synced. Day docs older than your retention (14 days with Compact sheet detail) move to the Drive trash. You own these files. Drive writes run only while sync is enabled. Delete all indexed data, after you type DELETE, removes the local library and moves that folder to the Drive trash. See [data-deletion.html](data-deletion.html).
 
 ## Optional cloud chat (Gemini)
 

@@ -9,6 +9,8 @@ import {
 } from "../shared/extension-settings";
 import { doubleShiftSwitch } from "./double-shift";
 import { createDwellTracker, DWELL_TICK_MS, pageScrollPct, videoPlaying, type DwellTracker } from "./dwell";
+import { createFeedWatcher, isLinkedInFeed, type SeenPost } from "./feed-posts";
+import { ASSISTANT_SYNC_FEED_POSTS_KEY } from "../assistant-sync/preference-keys";
 import { shouldReindexAfterMutation } from "./mutation-throttle";
 import { devLog } from "../lib/extension-logger";
 
@@ -93,12 +95,36 @@ async function refreshDwell(): Promise<void> {
       .then((res) => (res as { ok?: boolean } | undefined)?.ok === true)
       .catch(() => false));
   if (ask !== dwellAsk) return;
+  void refreshFeed(allowed, ask);
   if (allowed) {
     startDwell();
     return;
   }
   dwell?.end();
   stopDwell();
+}
+
+// LinkedIn feed posts, only with "Save text of LinkedIn posts I scroll past" on and the page allowed.
+let feed: ReturnType<typeof createFeedWatcher> | null = null;
+
+function sendPost(post: SeenPost): void {
+  if (!isExtensionRuntimeAlive()) return;
+  void sendRuntimeMessage({ type: "CORTEX_FEED_POST", url: location.href, seenAt: Date.now(), ...post }).catch(() => undefined);
+}
+
+async function refreshFeed(allowed: boolean, ask: number): Promise<void> {
+  const want =
+    allowed &&
+    isLinkedInFeed(location.href) &&
+    (await chrome.storage.local.get(ASSISTANT_SYNC_FEED_POSTS_KEY).then((s) => s[ASSISTANT_SYNC_FEED_POSTS_KEY] === true, () => false));
+  if (ask !== dwellAsk) return;
+  if (want && !feed) {
+    feed = createFeedWatcher({ root: document, visible: () => document.visibilityState === "visible", send: sendPost });
+    feed.scan();
+  } else if (!want && feed) {
+    feed.stop();
+    feed = null;
+  }
 }
 
 function sendDwell(report: { url: string; activeMs: number; maxScrollPct: number; final: boolean }): void {
@@ -223,6 +249,7 @@ const mo = new MutationObserver(() => {
   if (mutationTimer !== undefined) return;
   mutationTimer = window.setTimeout(() => {
     mutationTimer = undefined;
+    feed?.scan();
     onLocationLikeChange("mutation");
   }, 950);
 });
@@ -299,6 +326,7 @@ void getUserSettings()
 // Turning the setting off applies to open tabs, not only to the next load.
 chrome.storage?.onChanged?.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes[ASSISTANT_SYNC_FEED_POSTS_KEY]) void refreshDwell();
   if (!changes[USER_SETTINGS_KEY]) return;
   // Pause, block list and allowlist changes apply to the page already open.
   void refreshDwell();

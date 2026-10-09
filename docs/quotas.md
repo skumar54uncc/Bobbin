@@ -37,6 +37,10 @@ What the page states, and what Cortex relies on:
 | Drive `files.list` | Drive API, not Sheets | Enable with no stored ids: finds the existing sheet, then the existing folder |
 | Drive `files.create` | Drive API, not Sheets | Enable when no file exists: the folder (only if none exists), then the spreadsheet |
 | Drive `files.get` x2 | Drive API, not Sheets | Verification only |
+| Drive `files.update` (media upload of HTML into a Google Doc) | Drive API, not Sheets | After a sheet write, once per changed day of Pages docs, at most 6 per pass. An unchanged day sends nothing. |
+| Drive `files.create` (multipart, Google Doc) | Drive API, not Sheets | First upload of a day's Pages doc |
+| Drive `files.create` (folder) and `files.list` | Drive API, not Sheets | Once, to make or find the Pages folder; `files.list` again only if a day doc's stored id is lost |
+| Drive `files.update` (`trashed`) | Drive API, not Sheets | A day doc past retention, or restoring a trashed day doc or Pages folder |
 
 Cortex never calls Sheets `spreadsheets.create`. With only the drive.file scope it returned
 `403 PERMISSION_DENIED` ("The caller does not have permission") in live testing on 2026-10-08, so the
@@ -46,7 +50,8 @@ parents the Cortex Memory folder).
 Verification runs on Enable, on the first flush after a browser start when the last check is 24 hours old or
 more, and after a flush whose outcome is unknown (a 5xx, a dropped connection, or a crash mid-flush).
 
-Drive API quotas are separate and are not quoted here because Cortex makes at most two Drive calls per
-verification.
+Drive API quotas are separate and are not quoted here. Pages docs add Drive calls: while browsing, usually
+one `files.update` per flush (today's doc), since only changed days are uploaded. Check the Drive API quota
+page in the Google Cloud console before a large rollout.
 
 `docs/sync.md` has the cadence and the per-user math.

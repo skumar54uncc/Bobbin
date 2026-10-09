@@ -38,3 +38,8 @@ export function domainFromUrl(raw: string): string {
     return "";
   }
 }
+
+/** Same page: a hash, a tracking key, or a trailing slash is not a different visit. */
+export function samePage(a: string, b: string): boolean {
+  return (canonicalizeUrl(a) ?? a.split("#")[0]) === (canonicalizeUrl(b) ?? b.split("#")[0]);
+}

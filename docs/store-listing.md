@@ -27,7 +27,7 @@ Ask anything you've read, watched or scanned. Pages, YouTube, tables and images,
 
 Cortex is a private memory for your browser. After you agree on the welcome page, it indexes what you read, watch and open, and lets you search it or ask questions in plain language. Indexing, search and the language model all run on your device. There is no Cortex server, no account and no tracking.
 
-Optional Assistant Sync copies that same memory into a folder named Cortex Memory in your own Google Drive, only after you press Enable. The Google permission is drive.file (files Cortex creates, not your whole Drive). Optional Cloud Chat uses your own Gemini API key and sends only short text snippets, never whole pages, PDFs or images. Assist Sync and Cloud Chat are features of the same private memory.
+Optional Assistant Sync copies that same memory into a folder named Cortex Memory in your own Google Drive, only after you press Enable: a spreadsheet index plus one Google Doc per day with the text of pages you read. The Google permission is drive.file (files Cortex creates, not your whole Drive). Optional Cloud Chat uses your own Gemini API key and sends only short text snippets, never whole pages, PDFs or images. Assist Sync and Cloud Chat are features of the same private memory.
 
 What Cortex remembers:
 - Articles and pages you read
@@ -53,6 +53,17 @@ Privacy by design:
 - Incognito windows are never indexed (`incognito: not_allowed`)
 - Delete all indexed data, after you type DELETE, removes the local library and moves the Cortex Memory folder to the Drive trash
 
+## Data disclosures
+
+What leaves the device, and only with Assistant Sync on, to the user's own Google Drive:
+
+- Browsing activity: page titles, addresses, times, time on page, scroll depth, topics, and searches, in the Cortex Memory spreadsheet.
+- Website content: the main text of pages the user read (20 seconds on screen or scrolled 30%, up to 4,000 characters per page), in one Google Doc per day in Cortex Memory/Pages.
+- Personal information shown on LinkedIn profiles the user opens: name, headline, company, location, About, Experience (title, company, dates), and Education. Never photos, contact info, or messages.
+- LinkedIn feed post text (author name, up to 1,500 characters, time seen) only when the user turns on "Save text of LinkedIn posts I scroll past". Off by default.
+
+Nothing goes to the developer or any server. Incognito windows, the block list, pages with a password field, and sensitive sites are never captured. Email addresses, phone numbers, long digit runs, and invisible characters are removed from all synced text.
+
 ## Permission justifications
 
 Use the review-form table in `docs/release-1.2.0/STORE_RELEASE.md` as the source of truth. Short form for listing drafts:
@@ -62,6 +73,6 @@ Use the review-form table in `docs/release-1.2.0/STORE_RELEASE.md` as the source
 - history: optional import after Start indexing on the welcome page, or Scan history in Settings. Not continuous background watching.
 - scripting, offscreen, alarms: run the on-device model and maintenance; Assist Sync work runs only while sync is enabled (handlers no-op when off).
 - identity: Google sign-in when the user presses Enable. Interactive auth only from that click; later Sync now and the alarm use a silent token. OAuth scope is drive.file only.
-- drive.file (OAuth scope): create and edit only the Cortex Memory folder and spreadsheet. Not access to every file in Drive.
+- drive.file (OAuth scope): create and edit only the Cortex Memory folder, its spreadsheet, and the daily Pages docs in Cortex Memory/Pages. Not access to every file in Drive.
 - notifications: optional notice when a consented history scan starts and finishes.
 - sidePanel, contextMenus, omnibox: panel on Chrome pages; Save to Cortex / collections; address-bar search with keyword `cx`.

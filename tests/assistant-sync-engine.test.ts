@@ -386,8 +386,8 @@ describe("backfill and enable", () => {
     expect(spreadsheets[0]?.parent).toBe("left-over");
     // Setup is the first batch: tabs, headers, About, and the edit warning together.
     const setup = sheets.batches[0]!.map((r) => Object.keys(r)[0]);
-    expect(setup.filter((k) => k === "addSheet")).toHaveLength(6);
-    expect(setup.filter((k) => k === "addProtectedRange")).toHaveLength(7);
+    expect(setup.filter((k) => k === "addSheet")).toHaveLength(5);
+    expect(setup.filter((k) => k === "addProtectedRange")).toHaveLength(6);
     expect(sheets.ids("Visits", ids.fileId!)).toEqual(["h1"]);
 
     // Enable again, as after a reinstall with no stored ids: same folder, same sheet.

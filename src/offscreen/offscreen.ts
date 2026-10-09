@@ -347,9 +347,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
         headline?: string;
         company?: string;
         profileUrl?: string;
+        location?: unknown;
+        about?: unknown;
+        experience?: unknown;
+        education?: unknown;
       } | null;
-      ownIds?: { fileId?: unknown; folderId?: unknown } | null;
+      ownIds?: { fileId?: unknown; folderId?: unknown; pagesFolderId?: unknown } | null;
     } | undefined;
+    const str = (value: unknown) => (typeof value === "string" ? value : undefined);
+    const list = (value: unknown) => (Array.isArray(value) ? (value as unknown[]) : []);
     const idOf = (value: unknown) => (typeof value === "string" && value ? value : null);
     const fields = visit?.linkedInFields;
     const linkedInFields =
@@ -363,6 +369,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
             headline: typeof fields.headline === "string" ? fields.headline : undefined,
             company: typeof fields.company === "string" ? fields.company : undefined,
             profileUrl: fields.profileUrl,
+            location: str(fields.location),
+            about: str(fields.about),
+            experience: list(fields.experience).map((row) => {
+              const r = (row ?? {}) as Record<string, unknown>;
+              return { title: str(r.title), company: str(r.company), dates: str(r.dates) };
+            }),
+            education: list(fields.education).filter((row): row is string => typeof row === "string"),
           }
         : null;
     void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
@@ -375,8 +388,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
           pageText: typeof visit?.pageText === "string" ? visit.pageText : null,
           open: visit?.open === true,
           linkedInFields,
-          ownIds: { fileId: idOf(visit?.ownIds?.fileId), folderId: idOf(visit?.ownIds?.folderId) },
+          ownIds: {
+            fileId: idOf(visit?.ownIds?.fileId),
+            folderId: idOf(visit?.ownIds?.folderId),
+            pagesFolderId: idOf(visit?.ownIds?.pagesFolderId),
+          },
         }, embedForTopics)
+      )
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false, error: "capture_failed" }));
+    return true;
+  }
+
+  if (msg?.type === "CORTEX_ASSISTANT_SYNC_POST") {
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false, error: "foreign_sender" });
+      return true;
+    }
+    const post = (msg.post ?? {}) as Record<string, unknown>;
+    const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
+    const ids = (post.ownIds ?? {}) as Record<string, unknown>;
+    const idOf = (value: unknown) => (typeof value === "string" && value ? value : null);
+    void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
+      .then((mod) =>
+        mod.captureFeedPostFromChrome({
+          url: text(post.url, 2000),
+          visitId: text(post.visitId, 200),
+          seenAt: typeof post.seenAt === "number" && Number.isFinite(post.seenAt) ? post.seenAt : Date.now(),
+          author: text(post.author, 400),
+          text: text(post.text, 6000),
+          urn: text(post.urn, 200),
+          ownIds: { fileId: idOf(ids.fileId), folderId: idOf(ids.folderId), pagesFolderId: idOf(ids.pagesFolderId) },
+        })
       )
       .then((result) => sendResponse(result))
       .catch(() => sendResponse({ ok: false, error: "capture_failed" }));

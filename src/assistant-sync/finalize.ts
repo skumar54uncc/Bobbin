@@ -1,6 +1,6 @@
 import { assistantSyncDb } from "./db";
-import { buildExcerpt } from "./excerpt";
 import { flagInstructionText } from "./instruction-flags";
+import { countsAsRead, readText } from "./page-text";
 import { MIN_DWELL_MS } from "./schedule";
 
 /** Measured attention on a page. Null when the tab never reported, which is kept blank, never guessed. */
@@ -19,9 +19,10 @@ function isLinkedInEntity(url: string): boolean {
 }
 
 /**
- * Ends one visit. Under 5 seconds of measured attention the visit and its excerpt
- * draft are dropped; searches and LinkedIn rows stay. Otherwise dwell is written,
- * and a read of 5 minutes or more gets its Content excerpt.
+ * Ends one visit. Under 5 seconds of measured attention the visit, its draft, and the posts
+ * seen in it are dropped; searches and LinkedIn rows stay. Otherwise dwell is written. A page
+ * read (20 seconds visible and focused, or scrolled 30%) keeps its text for the Pages doc; an
+ * opened LinkedIn profile keeps its labeled fields.
  */
 export async function finalizeVisit(id: string, dwell: Dwell, now: number): Promise<"final" | "dropped" | "none"> {
   const visit = await assistantSyncDb.visits.get(id);
@@ -31,6 +32,7 @@ export async function finalizeVisit(id: string, dwell: Dwell, now: number): Prom
   if (dwell.activeMs != null && dwell.activeMs < MIN_DWELL_MS) {
     await assistantSyncDb.visits.delete(id);
     await assistantSyncDb.content.delete(id);
+    await assistantSyncDb.posts.where("visitId").equals(id).delete();
     await assistantSyncDb.warnings.where("visitId").equals(id).delete();
     return "dropped";
   }
@@ -40,19 +42,18 @@ export async function finalizeVisit(id: string, dwell: Dwell, now: number): Prom
   await assistantSyncDb.visits.update(id, { finalizedAt: now, dwellMinutes, maxScrollPct });
   if (await assistantSyncDb.people.get(id)) await assistantSyncDb.people.update(id, { dwellMinutes, maxScrollPct });
   if (await assistantSyncDb.companies.get(id)) await assistantSyncDb.companies.update(id, { dwellMinutes });
-  // A feed is a session over many posts, so its text is not one page's content.
-  const excerpt = draft && visit.pageType !== "Feed" ? buildExcerpt(draft.text, dwellMinutes) : null;
-  if (excerpt && !isLinkedInEntity(visit.url)) {
-    await flagInstructionText(id, "excerpt", visit.url, excerpt, now);
-    await assistantSyncDb.content.put({
-      id,
-      visitedAt: visit.visitedAt,
-      title: visit.title,
-      url: visit.url,
-      topics: visit.topics,
-      excerpt,
-    });
+  const base = { id, visitedAt: visit.visitedAt, title: visit.title, url: visit.url, topics: visit.topics };
+  if (draft?.profile) {
+    await assistantSyncDb.content.put({ ...base, text: "", profile: draft.profile });
+    return "final";
   }
+  // A feed is a session over many posts; its posts get their own sections. Company pages keep no text.
+  if (!draft || visit.pageType === "Feed" || isLinkedInEntity(visit.url)) return "final";
+  if (!countsAsRead(dwell.activeMs, maxScrollPct)) return "final";
+  const text = readText(draft.text, maxScrollPct);
+  if (!text) return "final";
+  await flagInstructionText(id, "text", visit.url, text, now);
+  await assistantSyncDb.content.put({ ...base, text });
   return "final";
 }
 

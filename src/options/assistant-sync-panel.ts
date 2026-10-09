@@ -1,6 +1,10 @@
 /// <reference types="chrome"/>
 import type { SyncEngineState } from "../assistant-sync/db";
-import { ASSISTANT_SYNC_RETENTION_KEY, ASSISTANT_SYNC_SHEET_DETAIL_KEY } from "../assistant-sync/preference-keys";
+import {
+  ASSISTANT_SYNC_FEED_POSTS_KEY,
+  ASSISTANT_SYNC_RETENTION_KEY,
+  ASSISTANT_SYNC_SHEET_DETAIL_KEY,
+} from "../assistant-sync/preference-keys";
 import { formatSheetSize, normalizeSheetDetail, SHEET_DETAIL } from "../assistant-sync/sheet-detail";
 
 type EnableReply = { ok?: boolean; error?: string; status?: string; confirm?: "missing" | "trashed" } | undefined;
@@ -324,11 +328,19 @@ export function mountAssistantSyncPanel(): void {
     });
   }
 
-  void chrome.storage.local.get([ASSISTANT_SYNC_RETENTION_KEY, ASSISTANT_SYNC_SHEET_DETAIL_KEY]).then((stored) => {
-    const days = stored[ASSISTANT_SYNC_RETENTION_KEY];
-    if (retention && typeof days === "number") retention.value = String(clampDays(days));
-    const detail = normalizeSheetDetail(stored[ASSISTANT_SYNC_SHEET_DETAIL_KEY]);
-    for (const input of details) input.checked = input.value === detail;
+  const feedPosts = byId<HTMLInputElement>("cx-assistant-feed-posts");
+  feedPosts?.addEventListener("change", () => {
+    void chrome.storage.local.set({ [ASSISTANT_SYNC_FEED_POSTS_KEY]: feedPosts.checked });
   });
+
+  void chrome.storage.local
+    .get([ASSISTANT_SYNC_RETENTION_KEY, ASSISTANT_SYNC_SHEET_DETAIL_KEY, ASSISTANT_SYNC_FEED_POSTS_KEY])
+    .then((stored) => {
+      const days = stored[ASSISTANT_SYNC_RETENTION_KEY];
+      if (retention && typeof days === "number") retention.value = String(clampDays(days));
+      const detail = normalizeSheetDetail(stored[ASSISTANT_SYNC_SHEET_DETAIL_KEY]);
+      for (const input of details) input.checked = input.value === detail;
+      if (feedPosts) feedPosts.checked = stored[ASSISTANT_SYNC_FEED_POSTS_KEY] === true;
+    });
   void refresh();
 }

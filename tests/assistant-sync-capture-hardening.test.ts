@@ -13,7 +13,7 @@ import { flagInstructionText, instructionFlags } from "../src/assistant-sync/ins
 import { storeOtherDeviceVisits } from "../src/assistant-sync/other-device";
 import { clipTitle, MAX_TITLE_CHARS, redactForSync, stripInvisible, syncTitle } from "../src/assistant-sync/redact-sync";
 import { parseSearchQuery } from "../src/assistant-sync/search-capture";
-import { visitRows } from "../src/assistant-sync/sheet";
+import { VISIT_HEADERS, visitRows } from "../src/assistant-sync/sheet";
 import { cleanUrl, isRedirectUrl } from "../src/assistant-sync/url-cleanup";
 
 const NOW = Date.parse("2026-10-02T16:00:00.000Z");
@@ -179,7 +179,8 @@ describe("other device visits", () => {
     });
     expect(await assistantSyncDb.searches.count()).toBe(0);
     const [, row] = visitRows([(await assistantSyncDb.visits.get("other:1"))!], "UTC");
-    expect(row!.at(-1)).toBe("other device");
+    expect(row![VISIT_HEADERS.indexOf("device")]).toBe("other device");
+    expect(row!.at(-1)).toBe("");
   });
 
   it("applies the deny rules and the Cortex file skip", async () => {

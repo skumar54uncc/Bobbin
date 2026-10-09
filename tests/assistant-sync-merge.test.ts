@@ -12,7 +12,7 @@ import {
 import type { StoredMemoryIds } from "../src/assistant-sync/drive-api";
 import { canonicalizeUrl } from "../src/assistant-sync/canonical-url";
 import { mergeDailyRepeats } from "../src/assistant-sync/merge";
-import { VISIT_HEADERS } from "../src/assistant-sync/sheet";
+import { SCHEMA_VERSION, VISIT_HEADERS } from "../src/assistant-sync/sheet";
 import { csvBytes, formatSheetSize, MB, planTrim, trimNote } from "../src/assistant-sync/sheet-detail";
 import {
   answerLegacyCleanup,
@@ -73,7 +73,7 @@ describe("merge rules", () => {
           visit("a", NOW, { dwellMinutes: null, maxScrollPct: 20 }),
           visit("c", NOW + DAY_MS),
         ],
-        content: [{ id: "b", visitedAt: NOW + 30 * MIN, title: "t", url: "u", topics: [], excerpt: "late read" }],
+        content: [{ id: "b", visitedAt: NOW + 30 * MIN, title: "t", url: "u", topics: [], text: "late read" }],
         searches: [],
         people: [
           { id: "a", visitedAt: NOW, name: "Ada", headline: "", company: "", profileUrl: "p", howFound: "", dwellMinutes: 1, maxScrollPct: 10 },
@@ -88,7 +88,7 @@ describe("merge rules", () => {
       ["c", 1],
     ]);
     expect(merged.visits[0]).toMatchObject({ dwellMinutes: 3, maxScrollPct: 90, topics: ["vector databases", "search"], memberIds: ["a", "b"] });
-    expect(merged.content.map((r) => [r.id, r.excerpt])).toEqual([["a", "late read"]]);
+    expect(merged.content.map((r) => [r.id, r.text])).toEqual([["a", "late read"]]);
     expect(merged.people).toHaveLength(1);
     expect(merged.people[0]).toMatchObject({ id: "a", dwellMinutes: 3, maxScrollPct: 50 });
   });
@@ -175,11 +175,11 @@ describe("repeat visits in the sheet", () => {
     expect(sheets.tab("Visits")[2]?.[COUNT]).toBe("1");
     expect(sheets.tab("Visits")[2]?.[LAST]).toBe(sheets.tab("Visits")[2]?.[TIME]);
     expect(sheets.tab("Visits")[2]?.[DEVICE]).toBe("this device");
-    expect((await readSyncEngineState()).layout?.schema).toBe(5);
+    expect((await readSyncEngineState()).layout?.schema).toBe(SCHEMA_VERSION);
     // The edit warning went out in that same single write, once per tab.
     expect(Object.values(sheets.protections()).every((p) => p.length === 1 && p[0] === "Managed by Cortex")).toBe(true);
     const kinds = sheets.batches.at(-1)!.map((r) => Object.keys(r)[0]);
-    expect(kinds.filter((k) => k === "addProtectedRange")).toHaveLength(7);
+    expect(kinds.filter((k) => k === "addProtectedRange")).toHaveLength(6);
     expect(kinds).toContain("copyPaste");
 
     const next = await runFlush(deps(sheets, NOW + 40 * MIN));
@@ -214,7 +214,7 @@ describe("repeat visits in the sheet", () => {
       ["x", "this device"],
       ["o1", "other device"],
     ]);
-    expect((await readSyncEngineState()).layout?.schema).toBe(5);
+    expect((await readSyncEngineState()).layout?.schema).toBe(SCHEMA_VERSION);
     // Protections were already there; none are added again.
     const kinds = sheets.batches.at(-1)!.map((r) => Object.keys(r)[0]);
     expect(kinds).not.toContain("addProtectedRange");
@@ -267,34 +267,45 @@ describe("repeat visits in the sheet", () => {
 });
 
 describe("sheet detail", () => {
-  it("compact keeps 7 days of Content, 30 days of rows, Daily for retention, and 400 character excerpts", async () => {
+  it("compact keeps 14 days of Pages docs, 30 days of rows, and Daily for retention", async () => {
     const sheets = new FakeSheets();
     await enabled(sheets, { sheetDetail: "compact", retentionDays: 90 });
     const long = "word ".repeat(300).trim();
-    for (const days of [1, 10, 40]) {
+    for (const days of [1, 10, 20, 40]) {
       const at = NOW - days * DAY_MS;
       const id = `d${days}`;
       await assistantSyncDb.visits.put(visit(id, at, { url: `https://example.com/${id}` }));
-      await assistantSyncDb.content.put({ id, visitedAt: at, title: id, url: `https://example.com/${id}`, topics: [], excerpt: long });
+      await assistantSyncDb.content.put({ id, visitedAt: at, title: id, url: `https://example.com/${id}`, topics: [], text: long });
     }
     await runFlush(deps(sheets, NOW + 6 * MIN));
-    expect(sheets.ids("Visits")).toEqual(["d10", "d1"]);
-    expect(sheets.ids("Content")).toEqual(["d1"]);
-    expect(sheets.tab("Content")[1]?.[7]?.length).toBeLessThanOrEqual(400);
+    expect(sheets.ids("Visits")).toEqual(["d20", "d10", "d1"]);
     expect(await assistantSyncDb.visits.get("d40")).toBeUndefined();
+    expect((await assistantSyncDb.content.toArray()).map((row) => row.id).sort()).toEqual(["d1", "d10"]);
+    const pages = VISIT_HEADERS.indexOf("pages_doc");
+    expect(sheets.tab("Visits").slice(1).map((row) => row[pages])).toEqual([
+      "",
+      "Cortex Pages 2026-09-22 Tuesday#d10",
+      "Cortex Pages 2026-10-01 Thursday#d1",
+    ]);
+    const folder = (await readSyncEngineState()).pagesFolderId;
+    expect(sheets.docsIn(folder).map((doc) => doc.name).sort()).toEqual([
+      "Cortex Pages 2026-09-22 Tuesday",
+      "Cortex Pages 2026-10-01 Thursday",
+    ]);
 
     const cut = tabCutoffs(NOW, ZONE, 90, "compact");
     expect(cut.Daily < cut.Visits).toBe(true);
-    expect(cut.Content > cut.Visits).toBe(true);
+    expect(cut.Pages > cut.Visits).toBe(true);
     const state = await readSyncEngineState();
     expect(state.sheetBytes).toBeGreaterThan(0);
-    expect(sheets.tab("About")[4]?.[0]).toMatch(/^Sheet size: \d+ KB\. Rows: 2 visits, 1 content excerpts/);
+    expect(sheets.tab("About")[4]?.[0]).toMatch(/^Sheet size: \d+ KB\. Rows: 3 visits, 0 searches/);
+    expect(sheets.tab("About").some((row) => row[0]?.includes("Pages docs are kept for the last 14 days"))).toBe(true);
   });
 
-  it("standard keeps 800 character excerpts for 30 days", () => {
+  it("standard keeps Pages docs for the full retention", () => {
     const cut = tabCutoffs(NOW, ZONE, 90, "standard");
     expect(cut.Visits).toBe(cut.Daily);
-    expect(cut.Content > cut.Visits).toBe(true);
+    expect(cut.Pages).toBe(cut.Visits);
   });
 });
 
@@ -353,7 +364,7 @@ describe("enable and older files", () => {
 });
 
 describe("size budget", () => {
-  it("trims Content first, then Visits, never today, and other tabs only past the hard cap", () => {
+  it("trims Visits first, never today, and other tabs only past the hard cap", () => {
     const day = (n: number) => `2026-10-0${n}`;
     const sizes = (per: number) => new Map([1, 2, 3].map((n) => [day(n), per]));
     const target = planTrim({
@@ -361,11 +372,11 @@ describe("size budget", () => {
       targetBytes: 600,
       hardCapBytes: 5000,
       today: day(3),
-      bytesByDate: { Content: sizes(150), Visits: sizes(200), Searches: sizes(100) },
+      bytesByDate: { Visits: sizes(200), Searches: sizes(100) },
     });
-    // Content days 1 and 2 free 300, then Visits day 1 frees 200.
-    expect(target.cutoffs).toEqual({ Content: day(3), Visits: day(2) });
-    expect(target.bytes).toBe(500);
+    // Visits days 1 and 2 free 400.
+    expect(target.cutoffs).toEqual({ Visits: day(3) });
+    expect(target.bytes).toBe(600);
 
     const capped = planTrim({
       bytes: 9 * MB,
@@ -375,7 +386,7 @@ describe("size budget", () => {
     });
     expect(capped.cutoffs).toEqual({ Searches: day(2) });
     expect(trimNote(target.cutoffs, 600 * 1024)).toBe(
-      "Kept the sheet under 600 KB by removing Content before 2026-10-03 and Visits before 2026-10-02."
+      "Kept the sheet under 600 KB by removing Visits before 2026-10-03."
     );
   });
 

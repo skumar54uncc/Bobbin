@@ -16,6 +16,10 @@ export interface FlushLogEntry {
   /** Sheets reads and writes. A normal flush is 0 reads and 1 write. */
   reads: number | null;
   writes: number | null;
+  /** Drive uploads of Pages day docs, plus old day docs moved to the trash. */
+  doc_writes?: number;
+  /** Set when a Pages doc upload failed; the sheet write still counts. */
+  pages_error?: string;
   /** ISO time of the next planned attempt, when the engine asked for one. */
   retryAt?: string;
   error?: string;
@@ -40,6 +44,8 @@ export function flushLogEntry(
     appended?: number;
     reads?: number;
     writes?: number;
+    docWrites?: number;
+    pagesError?: string;
     retryAt?: number;
     error?: string;
     errorDetail?: ErrorDetail;
@@ -53,6 +59,8 @@ export function flushLogEntry(
     appended: reply.appended ?? 0,
     reads: reply.reads ?? null,
     writes: reply.writes ?? null,
+    ...(reply.docWrites ? { doc_writes: reply.docWrites } : {}),
+    ...(reply.pagesError ? { pages_error: reply.pagesError.slice(0, 400) } : {}),
     ...(reply.retryAt ? { retryAt: new Date(reply.retryAt).toISOString() } : {}),
     ...(reply.error ? { error: reply.error.slice(0, 400) } : {}),
     ...(reply.errorDetail ? { error_detail: { ...reply.errorDetail } } : {}),

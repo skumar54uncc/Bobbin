@@ -1,9 +1,10 @@
 import { canonicalizeUrl, domainFromUrl } from "./canonical-url";
-import { assistantSyncDb } from "./db";
+import { assistantSyncDb, type SyncProfileFields } from "./db";
 import { syncDenyReason, type OwnFileIds } from "./denylist";
-import { buildExcerpt } from "./excerpt";
 import { COMPANY_SECTIONS, HOW_FOUND, type CompanySection, type HowFound } from "./linkedin-selectors";
 import { linkedInSyncRow } from "./linkedin-sync";
+import { localVisitStamp } from "./local-time";
+import { clipText, countsAsRead, DRAFT_MAX_CHARS, readText, tidyText } from "./page-text";
 import { pageTypeForUrl } from "./page-type";
 import { redactForSync, syncTitle } from "./redact-sync";
 import { parseSearchQuery } from "./search-capture";
@@ -36,8 +37,11 @@ export interface FinalizedVisitInput {
     profileUrl: string;
     howFound?: string;
     sectionViewed?: string;
+    location?: string;
+    about?: string;
+    experience?: { title?: string; company?: string; dates?: string }[];
+    education?: string[];
   } | null;
-  excerptMinDwellMinutes?: number;
   /** Writes nothing unless the user has turned sync on. */
   syncEnabled: boolean;
   /** Stored Drive ids of the Cortex Memory sheet and folder. Those pages are never captured. */
@@ -49,13 +53,12 @@ export interface FinalizedVisitInput {
   embed?: (text: string) => Promise<number[] | null>;
   /**
    * The tab is still on this page. The row waits for `finalizeVisit`, which adds the
-   * measured dwell and decides on the excerpt. Page text is held locally until then.
+   * measured dwell and decides whether the page was read. Page text is held locally until then.
    */
   open?: boolean;
 }
 
-/** Page text kept for a later excerpt. Longer than the excerpt so trimming has room. */
-export const DRAFT_MAX_CHARS = 4000;
+export { DRAFT_MAX_CHARS };
 
 export interface CaptureResult {
   stored: boolean;
@@ -144,28 +147,26 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
   });
   await flagInstructionText(input.id, "title", canonical, title, input.visitedAt);
 
-  if (input.open) {
-    const text = redactForSync((input.pageText ?? "").replace(/\s+/g, " ").trim().slice(0, DRAFT_MAX_CHARS));
-    if (text) await assistantSyncDb.drafts.put({ id: input.id, text });
-  }
-
-  const excerpt =
-    input.open || pageTypeForUrl(canonical) === "Feed"
-      ? null
-      : buildExcerpt(redactForSync(input.pageText ?? ""), dwellMinutes, input.excerptMinDwellMinutes);
-  if (excerpt && !isLinkedInProfileOrCompany(canonical)) {
-    await flagInstructionText(input.id, "excerpt", canonical, excerpt, input.visitedAt);
-    await assistantSyncDb.content.put({
-      id: input.id,
-      visitedAt: input.visitedAt,
-      title,
-      url: canonical,
-      topics,
-      excerpt,
-    });
-  }
-
   const search = parseSearchQuery(input.url);
+  const profile = profileFields(input.linkedInFields ?? null);
+  // A results page is a list of links; the query is in Searches.
+  const keepsText = !search && pageTypeForUrl(canonical) !== "Feed" && !isLinkedInProfileOrCompany(canonical);
+  const pageText = keepsText ? redactForSync(tidyText(input.pageText ?? "").slice(0, DRAFT_MAX_CHARS)) : "";
+  if (profile?.about) await flagInstructionText(input.id, "text", canonical, profile.about, input.visitedAt);
+  if (input.open) {
+    if (pageText || profile) await assistantSyncDb.drafts.put({ id: input.id, text: pageText, ...(profile ? { profile } : {}) });
+  } else {
+    const content = { id: input.id, visitedAt: input.visitedAt, title, url: canonical, topics };
+    const activeMs = dwellMinutes == null ? null : dwellMinutes * 60_000;
+    const text = pageText && countsAsRead(activeMs, maxScrollPct) ? readText(pageText, maxScrollPct) : "";
+    if (profile) {
+      await assistantSyncDb.content.put({ ...content, text: "", profile });
+    } else if (text) {
+      await flagInstructionText(input.id, "text", canonical, text, input.visitedAt);
+      await assistantSyncDb.content.put({ ...content, text });
+    }
+  }
+
   if (search) {
     await assistantSyncDb.searches.put({
       id: input.id,
@@ -201,6 +202,80 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
     });
   }
 
+  return { stored: true };
+}
+
+const oneLine = (value: string | undefined, max: number) => redactForSync((value ?? "").replace(/\s+/g, " ").trim()).slice(0, max);
+
+/** Headline, location, About, Experience, and Education of an opened profile. Never photos, contact info, or messages. */
+export function profileFields(fields: FinalizedVisitInput["linkedInFields"]): SyncProfileFields | null {
+  if (!fields || fields.kind !== "person" || !fields.name.trim()) return null;
+  const experience = (fields.experience ?? [])
+    .map((row) => ({ title: oneLine(row.title, 160), company: oneLine(row.company, 120), dates: oneLine(row.dates, 80) }))
+    .filter((row) => row.title || row.company)
+    .slice(0, 10);
+  const education = (fields.education ?? []).map((row) => oneLine(row, 200)).filter(Boolean).slice(0, 5);
+  return {
+    headline: oneLine(fields.headline, 220),
+    location: oneLine(fields.location, 160),
+    about: redactForSync(tidyText(fields.about ?? "")).slice(0, 2000),
+    experience,
+    education,
+  };
+}
+
+/** Text of a post saved per section. */
+export const POST_MAX_CHARS = 1500;
+
+export interface FeedPostInput {
+  /** The feed page the post was seen on. */
+  url: string;
+  visitId: string;
+  seenAt: number;
+  author: string;
+  text: string;
+  /** LinkedIn's activity id from the post element, when it had one. */
+  urn?: string;
+  timeZone: string;
+  syncEnabled: boolean;
+  userDenylist: string[];
+  ownIds?: OwnFileIds | null;
+}
+
+function shortHash(text: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619);
+    b = Math.imul(b ^ c, 2246822507);
+  }
+  return ((a >>> 0).toString(36) + (b >>> 0).toString(36)).slice(0, 12);
+}
+
+/** `post:<hash>`: the same post seen again that day keeps one id, so it is saved once. */
+export function postId(post: { urn?: string; author: string; text: string }, date: string): string {
+  const key = post.urn?.trim() || `${post.author}\n${post.text.slice(0, 300)}`;
+  return `post:${shortHash(`${key}\n${date}`)}`;
+}
+
+const ACTIVITY_URN = /^urn:li:activity:\d+$/;
+
+/** One LinkedIn feed post that stayed on screen 2 seconds or more. The feed setting is checked by the caller. */
+export async function captureFeedPost(input: FeedPostInput): Promise<CaptureResult> {
+  if (!input.syncEnabled) return { stored: false, reason: "disabled" };
+  const denied = syncDenyReason(input.url, { userDomains: input.userDenylist, ownIds: input.ownIds });
+  if (denied) return { stored: false, reason: denied };
+  const author = oneLine(input.author, 120);
+  const text = clipText(redactForSync(tidyText(input.text)), POST_MAX_CHARS);
+  if (!text) return { stored: false, reason: "empty" };
+  const date = localVisitStamp(input.seenAt, input.timeZone).date;
+  const id = postId({ urn: input.urn, author, text }, date);
+  if (await assistantSyncDb.posts.get(id)) return { stored: false, reason: "seen" };
+  const urn = input.urn?.trim() ?? "";
+  const url = ACTIVITY_URN.test(urn) ? `https://www.linkedin.com/feed/update/${urn}/` : (canonicalizeUrl(input.url) ?? input.url);
+  await assistantSyncDb.posts.put({ id, visitId: input.visitId, visitedAt: input.seenAt, author, text, url });
+  await flagInstructionText(id, "post", url, text, input.seenAt);
   return { stored: true };
 }
 

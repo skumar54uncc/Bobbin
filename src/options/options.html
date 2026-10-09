@@ -435,7 +435,7 @@
             <div class="cx-group" id="cx-assistant-consent">
               <h3 class="cx-group-title">Before you turn this on</h3>
               <p class="cx-group-desc">
-                Assistant Sync copies your library into a folder named Cortex Memory in your own Google Drive. After you enable it, Cortex updates that sheet about every 5 minutes while you browse, and at least every 15 minutes. It syncs page titles, URLs, excerpts of pages you read for 5 minutes or more, searches, LinkedIn profiles, and topics. The Google permission is drive.file: Cortex can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can receive the relevant rows while it answers you. Sync stays off until you press Enable.
+                Assistant Sync copies your library into a folder named Cortex Memory in your own Google Drive. After you enable it, Cortex updates it about every 5 minutes while you browse, and at least every 15 minutes. The Cortex Memory sheet holds page titles, URLs, searches, LinkedIn profiles, and topics. The Pages folder holds one Google Doc per day with the text of pages you read (20 seconds on screen or scrolled 30 percent), up to 4,000 characters each, and the headline, location, About, Experience, and Education of LinkedIn profiles you open. Text of LinkedIn feed posts syncs only when you turn on Save text of LinkedIn posts I scroll past. The Google permission is drive.file: Cortex can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can read the relevant rows and page text while it answers you. Sync stays off until you press Enable.
               </p>
               <p class="cx-field-hint">
                 <a href="https://skumar54uncc.github.io/Cortex/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
@@ -498,7 +498,7 @@
                 <input type="number" id="cx-assistant-retention" class="cx-input cx-field-narrow" min="7" max="365" step="1" value="90" />
                 <p class="cx-field-hint">From 7 to 365 days. The default is 90.</p>
                 <p class="cx-field-hint" id="cx-assistant-retention-warn">
-                  Rows older than this are deleted from the sheet permanently. To keep a copy, use
+                  Rows older than this are deleted from the sheet permanently, and older Pages docs move to the Drive trash. To keep a copy, use
                   <a href="#cx-sec-backup">Export my data</a> first.
                 </p>
               </div>
@@ -511,7 +511,7 @@
                   <input type="radio" name="cx-assistant-detail" value="standard" checked />
                   <span class="cx-radio-card-inner">
                     <span class="cx-radio-card-title">Standard</span>
-                    <span class="cx-radio-card-desc">Rows for your full retention. Excerpts from the last 30 days. Under 3 MB.</span>
+                    <span class="cx-radio-card-desc">Rows and Pages docs for your full retention. Sheet under 3 MB.</span>
                     <svg class="cx-radio-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                       <path d="M20 6L9 17l-5-5"></path>
                     </svg>
@@ -521,45 +521,56 @@
                   <input type="radio" name="cx-assistant-detail" value="compact" />
                   <span class="cx-radio-card-inner">
                     <span class="cx-radio-card-title">Compact <span class="cx-badge">For Claude</span></span>
-                    <span class="cx-radio-card-desc">Rows from the last 30 days. Shorter excerpts from the last 7 days. Under 600 KB.</span>
+                    <span class="cx-radio-card-desc">Rows from the last 30 days. Pages docs from the last 14 days. Sheet under 600 KB.</span>
                     <svg class="cx-radio-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                       <path d="M20 6L9 17l-5-5"></path>
                     </svg>
                   </span>
                 </label>
               </div>
-              <p class="cx-field-hint">Repeat visits to a page on the same day share one row. When the sheet passes its size, Cortex removes the oldest excerpts first, then the oldest visits.</p>
+              <p class="cx-field-hint">Repeat visits to a page on the same day share one row. When the sheet passes its size, Cortex removes the oldest visits first. Each day's Pages doc stays under 500,000 characters.</p>
+            </div>
+            <div class="cx-group">
+              <h3 class="cx-group-title">LinkedIn feed</h3>
+              <div class="cx-feature-row">
+                <label for="cx-assistant-feed-posts" class="cx-feature-label">
+                  <span class="cx-field-label">Save text of LinkedIn posts I scroll past</span>
+                  <span class="cx-field-hint">When a post in your LinkedIn feed stays on screen for 2 seconds, Cortex saves the author's name and up to 1,500 characters of the post to that day's Pages doc in your Drive. Your assistant can then answer questions about posts you saw. Photos and messages are never saved. Off until you turn it on.</span>
+                </label>
+                <input type="checkbox" id="cx-assistant-feed-posts" class="cx-check-native cx-switch" />
+              </div>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">Assistant setup guides</h3>
               <div class="cx-guide-intro">
                 <p class="cx-group-desc">
-                  Every assistant reads the same spreadsheet. Connect it to Google Drive and open
-                  Cortex Memory in the folder Cortex Memory. Read the About tab first. About names
-                  the tabs. Content is what a page said, after a read of 5 minutes or more. Visits,
-                  Searches, People, Companies, and Daily cover the other questions.
+                  Every assistant reads the same folder. Connect it to Google Drive and open the sheet
+                  Cortex Memory in the folder Cortex Memory. Read the About tab first. What pages
+                  said is in the Google Docs in Cortex Memory/Pages, one per day, with a section per
+                  page labeled by its row ID. Visits, Searches, People, Companies, and Daily cover
+                  the other questions.
                 </p>
               </div>
               <ul class="cx-guide-list">
                 <li data-assistant-guide="muse">
                   <h4>Muse</h4>
-                  <p>Use Muse's Google Drive connection. Open Cortex Memory, read About, then check Content before it answers from its own knowledge.</p>
+                  <p>Use Muse's Google Drive connection. Open Cortex Memory, read About, then check the matching Pages doc before it answers from its own knowledge.</p>
                 </li>
                 <li data-assistant-guide="grok">
                   <h4>Grok</h4>
-                  <p>Use Grok's Google Drive connection. Open Cortex Memory. For something you read, use Content after About.</p>
+                  <p>Use Grok's Google Drive connection. Open Cortex Memory. For something you read, use the Pages doc named in the row after About.</p>
                 </li>
                 <li data-assistant-guide="chatgpt">
                   <h4>ChatGPT</h4>
-                  <p>Use ChatGPT's connected Google Drive source. Open Cortex Memory, read About, and check Content before its own knowledge.</p>
+                  <p>Use ChatGPT's connected Google Drive source. Open Cortex Memory, read About, and check the matching Pages doc before its own knowledge.</p>
                 </li>
                 <li data-assistant-guide="claude">
                   <h4>Claude</h4>
-                  <p>Use Claude's Google Drive connector. Open Cortex Memory, read About, and check Content before it relies on its own knowledge.</p>
+                  <p>Use Claude's Google Drive connector. Open Cortex Memory, read About, and check the matching Pages doc before it relies on its own knowledge.</p>
                 </li>
                 <li data-assistant-guide="generic">
                   <h4>Another assistant</h4>
-                  <p>If it can open Google Drive, point it at Cortex Memory, then About and Content.</p>
+                  <p>If it can open Google Drive, point it at Cortex Memory, then About and the Pages docs.</p>
                 </li>
               </ul>
             </div>

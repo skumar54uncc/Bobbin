@@ -11,18 +11,16 @@ export const MB = 1024 * KB;
 export const HARD_CAP_BYTES = 8 * MB;
 
 export interface SheetDetailRules {
-  /** Excerpt length written to the Content tab. */
-  excerptChars: number;
-  /** Content rows older than this many days leave the sheet. */
-  contentDays: number;
+  /** Pages docs older than this many days are moved to the Drive trash. Null: retention decides. */
+  pagesDays: number | null;
   /** Visits, Searches, People, and Companies older than this leave the sheet. Null: retention decides. */
   rowDays: number | null;
   targetBytes: number;
 }
 
 export const SHEET_DETAIL: Record<SheetDetail, SheetDetailRules> = {
-  standard: { excerptChars: 800, contentDays: 30, rowDays: null, targetBytes: 3 * MB },
-  compact: { excerptChars: 400, contentDays: 7, rowDays: 30, targetBytes: 600 * KB },
+  standard: { pagesDays: null, rowDays: null, targetBytes: 3 * MB },
+  compact: { pagesDays: 14, rowDays: 30, targetBytes: 600 * KB },
 };
 
 export const DEFAULT_SHEET_DETAIL: SheetDetail = "standard";
@@ -54,11 +52,10 @@ export function csvBytes(rows: string[][]): number {
   return rows.reduce((n, row) => n + csvLineBytes(row), 0);
 }
 
-export type TrimTab = "Content" | "Visits" | "Searches" | "People" | "Companies";
+export type TrimTab = "Visits" | "Searches" | "People" | "Companies";
 
-/** Content goes first, then Visits. The other tabs go only to stay under the hard cap. */
+/** Visits go first. The other tabs go only to stay under the hard cap. */
 const TRIM_ORDER: { tab: TrimTab; until: "target" | "cap" }[] = [
-  { tab: "Content", until: "target" },
   { tab: "Visits", until: "target" },
   { tab: "Searches", until: "cap" },
   { tab: "People", until: "cap" },

@@ -25,7 +25,8 @@ describe("agent prompts", () => {
     ].join("\n");
     expect(blob).toMatch(/Cortex Memory/);
     expect(blob).toMatch(/live/i);
-    expect(blob).toMatch(/Content/);
+    expect(blob).toMatch(/Pages doc/);
+    expect(blob).not.toMatch(/Content tab|for 5 minutes/);
     expect(blob).toMatch(/About/);
     // Cortex writes one Drive file. Copy never points at archives or backups it no longer makes.
     expect(blob.toLowerCase()).not.toMatch(/json backup|archive/);

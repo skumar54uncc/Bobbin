@@ -19,9 +19,20 @@ const MEMORY_SHEET_NAME = "Cortex Memory";
 const MEMORY_FOLDER_NAME = "Cortex Memory";
 export const SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
 export const FOLDER_MIME = "application/vnd.google-apps.folder";
+export const DOCUMENT_MIME = "application/vnd.google-apps.document";
 
 /** Which Google call failed, for the flush log. */
-export type GoogleCall = "search" | "folder create" | "sheet create" | "batchUpdate" | "read" | "file check" | "trash" | "restore";
+export type GoogleCall =
+  | "search"
+  | "folder create"
+  | "sheet create"
+  | "batchUpdate"
+  | "read"
+  | "file check"
+  | "trash"
+  | "restore"
+  | "doc create"
+  | "doc update";
 
 /** What Google said about a failed call. Shown under Last error and kept in the flush log as error_detail. */
 export interface GoogleErrorDetail {
@@ -49,7 +60,17 @@ export function googleErrorDetail(error: unknown): GoogleErrorDetail | null {
  * the only Sheets write is `batchUpdate`. Files, the spreadsheet included, are created through Drive.
  */
 export interface DriveApi {
-  createFolder(name: string): Promise<string>;
+  createFolder(name: string, parentId?: string): Promise<string>;
+  /**
+   * One Drive multipart upload: a new file in `parentId` with the HTML as its content,
+   * converted to a Google Doc.
+   */
+  createDoc(name: string, parentId: string, html: string): Promise<string>;
+  /**
+   * One Drive media upload replacing the whole content of the Doc with the HTML.
+   * Null when the file is gone. `trashed` is Drive's own flag after the upload.
+   */
+  updateDoc(id: string, html: string): Promise<{ trashed: boolean } | null>;
   /** Drive files.create with the spreadsheet mimeType. The new file has one default tab. */
   createSpreadsheet(name: string, parentId: string): Promise<string>;
   getFile(id: string): Promise<DriveFileInfo | null>;
@@ -320,12 +341,46 @@ export class FetchDriveApi implements DriveApi {
     });
   }
 
-  async createFolder(name: string): Promise<string> {
+  async createFolder(name: string, parentId?: string): Promise<string> {
     const res = await this.send("https://www.googleapis.com/drive/v3/files?fields=id", {
       method: "POST",
-      body: JSON.stringify({ name, mimeType: FOLDER_MIME }),
+      body: JSON.stringify({ name, mimeType: FOLDER_MIME, ...(parentId ? { parents: [parentId] } : {}) }),
     });
     return (await parsed(res, IdResponse, "folder create")).id;
+  }
+
+  /** files.create, uploadType=multipart: JSON metadata with the Docs mimeType, then the HTML. */
+  async createDoc(name: string, parentId: string, html: string): Promise<string> {
+    const boundary = `cortex-${Math.random().toString(36).slice(2)}`;
+    const body = [
+      `--${boundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify({ name, mimeType: DOCUMENT_MIME, parents: [parentId] }),
+      `--${boundary}`,
+      "Content-Type: text/html; charset=UTF-8",
+      "",
+      html,
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+    const res = await this.send("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+      method: "POST",
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+      body,
+    });
+    return (await parsed(res, IdResponse, "doc create")).id;
+  }
+
+  /** files.update, uploadType=media: the HTML replaces the Doc's content. */
+  async updateDoc(id: string, html: string): Promise<{ trashed: boolean } | null> {
+    const res = await this.send(
+      `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,trashed`,
+      { method: "PATCH", headers: { "Content-Type": "text/html; charset=UTF-8" }, body: html }
+    );
+    if (res.status === 404) return null;
+    const file = await parsed(res, FileResponse, "doc update");
+    return { trashed: file.trashed };
   }
 
   /** Drive files.create. Sheets spreadsheets.create returned 403 PERMISSION_DENIED with the drive.file scope in live testing. */

@@ -25,6 +25,7 @@ import { readSyncEngineState, writeSyncEngineState } from "./db";
 import { applyAssistantSyncPreferences } from "./preferences";
 import { ASSISTANT_SYNC_FILE_ID, ASSISTANT_SYNC_FOLDER_ID } from "./preference-keys";
 import { loadTopicVectors } from "./topics";
+import type { FinalizedVisitInput } from "./capture";
 
 export { ASSISTANT_SYNC_FILE_ID, ASSISTANT_SYNC_FOLDER_ID };
 
@@ -115,6 +116,11 @@ export interface AssistantSyncWorkResult {
   /** The failed Google call, for the flush log. */
   errorDetail?: GoogleErrorDetail;
   otherDeviceStored?: boolean;
+  /** Drive writes for the Pages docs this pass. */
+  docWrites?: number;
+  pagesError?: string;
+  /** The Pages folder, so the service worker never captures it. */
+  pagesFolderId?: string;
 }
 
 export interface AssistantSyncLaunch {
@@ -158,7 +164,14 @@ function workResult(flush: FlushResult, created = false): AssistantSyncWorkResul
     ...(flush.more ? { more: true } : {}),
     reads: flush.reads,
     writes: flush.writes,
+    ...(flush.docWrites ? { docWrites: flush.docWrites } : {}),
+    ...(flush.pagesError ? { pagesError: flush.pagesError } : {}),
   };
+}
+
+async function withPagesFolder(result: AssistantSyncWorkResult): Promise<AssistantSyncWorkResult> {
+  const { pagesFolderId } = await readSyncEngineState();
+  return pagesFolderId ? { ...result, pagesFolderId } : result;
 }
 
 /** Token comes from the service worker. This function performs the Google fetches. */
@@ -201,7 +214,7 @@ export async function runAssistantSyncFromChrome(
         return { ok: false, status: "confirm", confirm: result.confirm, ids: store.current() };
       }
       if (result.flush.status === "ready") await legacy(result.ids);
-      return { ...workResult(result.flush, result.created), ids: store.current() };
+      return withPagesFolder({ ...workResult(result.flush, result.created), ids: store.current() });
     }
     // Stored before the flush so they go out in this pass. Duplicates are skipped by id.
     await storeOtherDeviceVisits(launch.otherDeviceVisits ?? [], launch.ids);
@@ -214,7 +227,7 @@ export async function runAssistantSyncFromChrome(
       loadLibraryPeople,
     });
     if (flush.status === "ready") await legacy(launch.ids);
-    return { ...workResult(flush), otherDeviceStored: true, ids: store.current() };
+    return withPagesFolder({ ...workResult(flush), otherDeviceStored: true, ids: store.current() });
   } catch (error) {
     const message = plainSyncError(error);
     try {
@@ -239,14 +252,8 @@ export async function captureVisitFromChrome(visit: {
   visitedAt: number;
   pageText?: string | null;
   open?: boolean;
-  linkedInFields?: {
-    kind: "person" | "company";
-    name: string;
-    headline?: string;
-    company?: string;
-    profileUrl: string;
-  } | null;
-  ownIds?: StoredMemoryIds | null;
+  linkedInFields?: FinalizedVisitInput["linkedInFields"];
+  ownIds?: (StoredMemoryIds & { pagesFolderId?: string | null }) | null;
 }, embed?: (text: string) => Promise<number[] | null>): Promise<{ ok: true; stored: boolean }> {
   const state = await readSyncEngineState();
   if (!state.syncEnabled) return { ok: true, stored: false };
@@ -269,6 +276,28 @@ export async function captureVisitFromChrome(visit: {
     open: visit.open === true,
     ownIds: visit.ownIds ?? null,
     embed,
+  });
+  return { ok: true, stored: result.stored };
+}
+
+/** A LinkedIn feed post that stayed on screen 2 seconds. The service worker has checked the feed setting. */
+export async function captureFeedPostFromChrome(post: {
+  url: string;
+  visitId: string;
+  seenAt: number;
+  author: string;
+  text: string;
+  urn?: string;
+  ownIds?: (StoredMemoryIds & { pagesFolderId?: string | null }) | null;
+}): Promise<{ ok: true; stored: boolean }> {
+  const state = await readSyncEngineState();
+  if (!state.syncEnabled) return { ok: true, stored: false };
+  const { captureFeedPost } = await import(/* webpackChunkName: "assistant-sync-capture" */ "./capture");
+  const result = await captureFeedPost({
+    ...post,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    syncEnabled: true,
+    userDenylist: state.userDenylist,
   });
   return { ok: true, stored: result.stored };
 }

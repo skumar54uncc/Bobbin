@@ -102,8 +102,13 @@ export function mergeDailyRepeats(memory: MemoryInput, timeZone: string, rowIds:
 
   return {
     visits,
-    // The first excerpt of the day stays. A later read does not rewrite a row the sheet has.
-    content: regroup(memory.content, own),
+    // The day doc is rewritten whole, so a row keeps its fullest text: a profile, else the longest read.
+    content: regroup(memory.content, (list, id) =>
+      list.reduce((best, row) => {
+        if (!!row.profile !== !!best.profile) return row.profile ? row : best;
+        return row.text.length > best.text.length ? row : best;
+      }, own(list, id))
+    ),
     searches: regroup(memory.searches, own),
     people: regroup(memory.people, (list, id) => ({
       ...own(list, id),

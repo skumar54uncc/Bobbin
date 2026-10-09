@@ -28,7 +28,8 @@ export const BUNDLE_BUDGETS = {
   // 48 KB to 56 KB in v2 Phase 2: repeat visit merging, sheet size budget, Drive restore and cleanup.
   // 56 KB to 64 KB after the live test: Drive-created sheet setup and Google error details. Keeps 8 KB free.
   // 64 KB to 72 KB in v2 Phase 3: URL cleanup, instruction flags, other device visits, device column.
-  "assistant-sync.js": 72 * KB,
+  // 72 KB to 77 KB in v2 Phase 3B: Pages day docs (sections, size cap, Drive upload), feed posts. Keeps 8 KB free.
+  "assistant-sync.js": 77 * KB,
   "assistant-sync-topics.js": 48 * KB,
   "assistant-sync-capture.js": 16 * KB,
   // Options Assistant Sync panel. Stays far under a Dexie or Drive client import.

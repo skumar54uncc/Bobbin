@@ -29,6 +29,8 @@ import {
   AssistantSyncMessageSchema,
   DwellAllowedMessageSchema,
   DwellMessageSchema,
+  FeedPostMessageSchema,
+  type FeedPostMessage,
   parseMessage,
   SyncWorkReplySchema,
   type DwellMessage,
@@ -64,9 +66,11 @@ import {
 import { storageLocalGet, storageLocalSet } from "../shared/storage-local";
 import {
   ASSISTANT_SYNC_BACKUP_FILE_ID,
+  ASSISTANT_SYNC_FEED_POSTS_KEY,
   ASSISTANT_SYNC_FILE_ID,
   ASSISTANT_SYNC_FOLDER_ID,
   ASSISTANT_SYNC_ON_KEY,
+  ASSISTANT_SYNC_PAGES_FOLDER_ID,
   ASSISTANT_SYNC_RETENTION_KEY,
   ASSISTANT_SYNC_SHEET_DETAIL_KEY,
 } from "../assistant-sync/preference-keys";
@@ -124,7 +128,7 @@ import { deletePerson, listPeople, upsertPerson } from "../lib/people";
 import { cacheProfilePhoto, getProfilePhoto, profilesWithPhotos } from "../lib/profile-photos";
 import { applyDwellReport, readingTimeFor, type DwellLedger } from "../lib/reading-time";
 import { FLUSH_LOG_KEY, appendFlushLog, flushLogEntry } from "../assistant-sync/flush-log";
-import { canonicalizeUrl } from "../assistant-sync/canonical-url";
+import { canonicalizeUrl, samePage } from "../assistant-sync/canonical-url";
 import { resolveEnteredUrl, toSuggestions } from "../lib/omnibox";
 import { saveHighlight } from "../lib/highlights";
 import { sanitizeExtraChunks, sanitizeImageInputs, type ImageInput } from "../lib/capture/extra-chunks";
@@ -371,10 +375,12 @@ async function readAssistantSyncLaunch(): Promise<{
   retentionDays?: number;
   sheetDetail?: string;
   backupId: string | null;
+  pagesFolderId: string | null;
 }> {
   const stored = await storageLocalGet([
     ASSISTANT_SYNC_FOLDER_ID,
     ASSISTANT_SYNC_FILE_ID,
+    ASSISTANT_SYNC_PAGES_FOLDER_ID,
     ASSISTANT_SYNC_RETENTION_KEY,
     ASSISTANT_SYNC_SHEET_DETAIL_KEY,
     ASSISTANT_SYNC_BACKUP_FILE_ID,
@@ -387,6 +393,7 @@ async function readAssistantSyncLaunch(): Promise<{
     retentionDays: typeof retention === "number" ? retention : undefined,
     sheetDetail: typeof detail === "string" ? detail : undefined,
     backupId: storedId(stored[ASSISTANT_SYNC_BACKUP_FILE_ID]),
+    pagesFolderId: storedId(stored[ASSISTANT_SYNC_PAGES_FOLDER_ID]),
   };
 }
 
@@ -497,6 +504,9 @@ async function sendSyncWork(action: SyncWorkAction, token: string, answer: SyncW
   });
   const reply = parseMessage(SyncWorkReplySchema, raw) ?? { ok: false, error: "Sync did not start." };
   if (reply.ids) await writeAssistantSyncIds(reply.ids);
+  if (reply.pagesFolderId && reply.pagesFolderId !== launch.pagesFolderId) {
+    await storageLocalSet({ [ASSISTANT_SYNC_PAGES_FOLDER_ID]: reply.pagesFolderId });
+  }
   if (other && reply.otherDeviceStored) await storageLocalSet({ [OTHER_DEVICE_CURSOR_KEY]: other.until });
   if (action !== "disable" && action !== "cleanup" && !reply.confirm) void recordFlush(action, reply);
   return reply;
@@ -713,7 +723,7 @@ async function finalizeStaleVisits(): Promise<void> {
 function onDwellReport(tabId: number, report: { url: string; activeMs: number; maxScrollPct: number; final: boolean }): void {
   void withOpenVisits((visits) => {
     const visit = visits[tabId];
-    if (!visit || visit.url !== report.url) return null;
+    if (!visit || !samePage(visit.url, report.url)) return null;
     visit.activeMs = Math.max(visit.activeMs ?? 0, report.activeMs);
     visit.maxScrollPct = Math.max(visit.maxScrollPct ?? 0, report.maxScrollPct);
     visit.seenAt = Date.now();
@@ -737,19 +747,13 @@ async function captureAssistantSyncVisit(visit: {
   visitedAt: number;
   tabId?: number;
   pageText?: string;
-  linkedInFields?: {
-    kind: "person" | "company";
-    name: string;
-    headline?: string;
-    company?: string;
-    profileUrl: string;
-  } | null;
+  linkedInFields?: Record<string, unknown> | null;
 }): Promise<void> {
   const state = await readSyncEngineState();
   if (!state.syncEnabled) return;
   const { tabId, ...rest } = visit;
   const launch = await readAssistantSyncLaunch();
-  const ownIds = { fileId: launch.fileId, folderId: launch.folderId };
+  const ownIds = { fileId: launch.fileId, folderId: launch.folderId, pagesFolderId: launch.pagesFolderId };
   let row: Record<string, unknown> = { ...rest, ownIds, open: false };
   let previous: OpenVisit | undefined;
   if (tabId != null) {
@@ -779,6 +783,40 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     forgetLocalDwell(tabId);
   }, FINAL_REPORT_GRACE_MS);
 });
+
+/** Page text sent with a visit. The read part is picked from it when the visit ends. */
+const ASSISTANT_SYNC_DRAFT_CHARS = 24_000;
+
+/**
+ * A feed post that stayed on screen 2 seconds. Only with "Save text of LinkedIn posts I scroll past"
+ * on, sync on, and the page passing the same gate as indexing (pause, block list, sensitive sites).
+ */
+async function captureFeedPost(post: FeedPostMessage, sender: chrome.runtime.MessageSender): Promise<void> {
+  const tabId = sender.tab?.id;
+  if (tabId == null) return;
+  const stored = await storageLocalGet([ASSISTANT_SYNC_FEED_POSTS_KEY, ASSISTANT_SYNC_ON_KEY]);
+  if (stored[ASSISTANT_SYNC_FEED_POSTS_KEY] !== true || stored[ASSISTANT_SYNC_ON_KEY] !== true) return;
+  if (!(await dwellAllowed(post.url, sender))) return;
+  const launch = await readAssistantSyncLaunch();
+  const visitId = await withOpenVisits((visits) => {
+    const visit = visits[tabId];
+    return visit && samePage(visit.url, post.url) ? visit.id : "";
+  });
+  await ensureOffscreen();
+  await sendToOffscreen({
+    type: "CORTEX_ASSISTANT_SYNC_POST",
+    post: {
+      url: post.url,
+      visitId,
+      seenAt: post.seenAt,
+      author: post.author,
+      text: post.text,
+      urn: post.urn,
+      ownIds: { fileId: launch.fileId, folderId: launch.folderId, pagesFolderId: launch.pagesFolderId },
+    },
+  });
+  await planAssistantFlush("activity");
+}
 
 /** The page's own final dwell report usually lands within this window after the URL changes. */
 const FINAL_REPORT_GRACE_MS = 1_500;
@@ -855,6 +893,7 @@ setDriveFolderTrashHandler(async () => {
       [ASSISTANT_SYNC_FOLDER_ID]: null,
       [ASSISTANT_SYNC_FILE_ID]: null,
       [ASSISTANT_SYNC_BACKUP_FILE_ID]: null,
+      [ASSISTANT_SYNC_PAGES_FOLDER_ID]: null,
     });
   }
 });
@@ -1141,6 +1180,7 @@ async function commitIndexPayload(
     visitedAt: p.visitedAt,
     textLength: p.text.length,
   });
+  const detail = p.person ? sanitizePersonDetail(p.person) : null;
   const linkedInFields =
     p.person && (p.person.kind === "person" || p.person.kind === "company") && p.person.name.trim()
       ? {
@@ -1149,6 +1189,15 @@ async function commitIndexPayload(
           headline: p.person.headline,
           company: p.person.company,
           profileUrl: p.person.profileUrl,
+          // Labeled profile fields for the Pages doc. Never the photo, contact info, or messages.
+          ...(p.person.kind === "person"
+            ? {
+                location: detail?.location,
+                about: detail?.about,
+                experience: detail?.experience ?? [],
+                education: detail?.education ?? [],
+              }
+            : {}),
         }
       : null;
   void captureAssistantSyncVisit({
@@ -1157,7 +1206,7 @@ async function commitIndexPayload(
     title: p.title,
     visitedAt: p.visitedAt,
     tabId: opts.tabId ?? undefined,
-    pageText: p.text.slice(0, 4000),
+    pageText: p.text.slice(0, ASSISTANT_SYNC_DRAFT_CHARS),
     linkedInFields,
   }).catch(() => undefined);
 
@@ -3131,6 +3180,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     if (sender.id !== chrome.runtime.id || sender.tab?.id == null || !ask) return false;
     void dwellAllowed(ask.url, sender).then((ok) => sendResponse({ ok }));
     return true;
+  }
+
+  if (type === "CORTEX_FEED_POST") {
+    const post = parseMessage(FeedPostMessageSchema, msg);
+    if (sender.id !== chrome.runtime.id || sender.tab?.id == null || !post) return false;
+    void captureFeedPost(post, sender).catch(() => undefined);
+    return false;
   }
 
   if (type === "CORTEX_DWELL") {

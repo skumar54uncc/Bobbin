@@ -31,7 +31,7 @@ export interface SyncWarningRecord {
   /** `visitId:field`. */
   key: string;
   visitId: string;
-  field: "title" | "excerpt";
+  field: "title" | "text" | "post";
   url: string;
   /** The matched text with some context, at most 160 characters. */
   snippet: string;
@@ -44,6 +44,7 @@ export interface SyncWarningRecord {
 export interface SyncDraftRecord {
   id: string;
   text: string;
+  profile?: SyncProfileFields;
 }
 
 /** Where each tab's rows sit in the sheet, so a flush needs no reads. */
@@ -85,13 +86,51 @@ export interface InflightFlush {
   startedAt: number;
 }
 
+/** Labeled fields of an opened LinkedIn profile. Never photos, contact info, or messages. */
+export interface SyncProfileFields {
+  headline: string;
+  location: string;
+  about: string;
+  experience: { title: string; company: string; dates: string }[];
+  education: string[];
+}
+
+/** What a page said, for its section in the day's Pages doc. Redacted before it is stored. */
 export interface SyncContentRecord {
   id: string;
   visitedAt: number;
   title: string;
   url: string;
   topics: string[];
-  excerpt: string;
+  /** Main text, up to PAGE_TEXT_MAX_CHARS. Empty for a profile, which has `profile` instead. */
+  text: string;
+  profile?: SyncProfileFields;
+}
+
+/** A LinkedIn feed post that stayed on screen for 2 seconds or more. Saved only with the feed setting on. */
+export interface SyncPostRecord {
+  /** `post:<hash>`, one per post per day. */
+  id: string;
+  /** The feed visit it was seen in, or "" when the tab had none. */
+  visitId: string;
+  /** When it was first seen that day. */
+  visitedAt: number;
+  author: string;
+  text: string;
+  url: string;
+}
+
+/** One day's Pages doc in Drive. `sig` hashes the HTML last uploaded, so an unchanged day is skipped. */
+export interface SyncPagesDocRecord {
+  date: string;
+  fileId: string;
+  sig: string;
+  /** Characters of text in the doc, after trimming. */
+  chars: number;
+  /** UTF-8 bytes of the uploaded HTML. */
+  bytes: number;
+  sections: number;
+  uploadedAt: number;
 }
 
 export interface SyncSearchRecord {
@@ -179,6 +218,10 @@ export interface SyncEngineState {
   /** Old Drive JSON backups and monthly archives: not checked yet, none, waiting for the user, or the user's answer. */
   legacyCleanup: "unchecked" | "none" | "ask" | "trashed" | "kept";
   legacyFiles: { id: string; name: string }[];
+  /** Drive id of the Pages folder inside Cortex Memory. "" until it is created. */
+  pagesFolderId: string;
+  /** What the last Pages doc upload said, when it failed. */
+  pagesError: string;
 }
 
 export function clampRetentionDays(days: number): number {
@@ -212,6 +255,8 @@ export function defaultSyncEngineState(): SyncEngineState {
     trimmedAt: 0,
     legacyCleanup: "unchecked",
     legacyFiles: [],
+    pagesFolderId: "",
+    pagesError: "",
   };
 }
 
@@ -228,6 +273,8 @@ class AssistantSyncDB extends Dexie {
   drafts!: EntityTable<SyncDraftRecord, "id">;
   inflight!: EntityTable<InflightFlush, "id">;
   warnings!: EntityTable<SyncWarningRecord, "key">;
+  posts!: EntityTable<SyncPostRecord, "id">;
+  pagesDocs!: EntityTable<SyncPagesDocRecord, "date">;
 
   constructor() {
     super("cortex-assistant-sync");
@@ -288,6 +335,37 @@ class AssistantSyncDB extends Dexie {
       inflight: "id",
       warnings: "key, visitId, at",
     });
+    this.version(6)
+      .stores({
+        visits: "id, visitedAt, domain, finalizedAt",
+        content: "id, visitedAt",
+        searches: "id, visitedAt",
+        people: "id, visitedAt",
+        companies: "id, visitedAt",
+        synced: "key",
+        pending: "key, tab, enqueuedAt",
+        state: "id",
+        drafts: "id",
+        inflight: "id",
+        warnings: "key, visitId, at",
+        posts: "id, visitId, visitedAt",
+        pagesDocs: "date",
+      })
+      .upgrade(async (tx) => {
+        // Content tab excerpts become the page text of their Pages doc section.
+        await tx.table("content").toCollection().modify((row: SyncContentRecord & { excerpt?: string }) => {
+          if (row.text == null) row.text = row.excerpt ?? "";
+          delete row.excerpt;
+        });
+        const warnings = tx.table("warnings");
+        const old = (await warnings.toArray()).filter((row: { field: string }) => row.field === "excerpt");
+        await warnings.bulkDelete(old.map((row: { key: string }) => row.key));
+        await warnings.bulkPut(
+          old.map((row: SyncWarningRecord) => ({ ...row, key: `${row.visitId}:text`, field: "text" }))
+        );
+        // The Content tab is gone, so its sync keys are too.
+        await tx.table("synced").where("key").startsWith("Content:").delete();
+      });
   }
 }
 
@@ -308,9 +386,13 @@ export async function clearAssistantSyncDatabase(): Promise<void> {
       assistantSyncDb.drafts,
       assistantSyncDb.inflight,
       assistantSyncDb.warnings,
+      assistantSyncDb.posts,
+      assistantSyncDb.pagesDocs,
     ],
     async () => {
       await assistantSyncDb.warnings.clear();
+      await assistantSyncDb.posts.clear();
+      await assistantSyncDb.pagesDocs.clear();
       await assistantSyncDb.drafts.clear();
       await assistantSyncDb.inflight.clear();
       await assistantSyncDb.visits.clear();

@@ -10,9 +10,9 @@ goes, and how you control it.
 ## The short version
 
 - Cortex stores your browsing memory on your device.
-- If you turn on Assistant Sync, Cortex also writes one spreadsheet to
-  your own Google Drive. Nobody else gets a copy, including the
-  developer.
+- If you turn on Assistant Sync, Cortex also writes one spreadsheet and
+  one Google Doc per day of page text to your own Google Drive. Nobody
+  else gets a copy, including the developer.
 - Cortex never sells, rents, or shares your data, and never uses it for
   advertising or to train AI models.
 - You can pause, export, or delete everything at any time.
@@ -26,11 +26,22 @@ When capture is on, Cortex records:
   scrolled.
 - Searches you make on supported search engines and sites, with the
   search text.
-- Short excerpts of pages you read for 5 minutes or longer (up to 800
-  characters, or 400 with Compact sheet detail). You can turn excerpts off.
+- The text of pages you read: a page counts as read when it is on screen
+  and focused for 20 seconds or more, or you scroll through 30% or more
+  of it. Cortex keeps up to 4,000 characters of the page's main text,
+  preferring the part you scrolled through. With Assistant Sync on, this
+  text syncs to your Google Drive in a daily Pages doc.
+- For LinkedIn profiles you open: the headline, location, About,
+  Experience (title, company, and dates), and Education shown on the
+  profile. With Assistant Sync on, these sync to that day's Pages doc.
+- LinkedIn feed posts, only if you turn on "Save text of LinkedIn posts
+  I scroll past" (off by default): for each post that stays on screen
+  for 2 seconds or more, the author's name, up to 1,500 characters of
+  the post's text, and the time you saw it. With Assistant Sync on,
+  these sync to that day's Pages doc.
 - LinkedIn profiles and company pages you open: name, headline,
-  company, and the profile photo shown on the page, stored only on your
-  device and never synced. Cortex copies the photo only while you are
+  company, and the profile photo shown on the page. The photo is stored
+  only on your device and never synced. Cortex copies the photo only while you are
   on that page, so viewing your library makes no requests to LinkedIn.
   Turn photos off in Settings with Show profile photos. Cortex never
   collects contact details or messages, and never visits pages on its
@@ -49,12 +60,15 @@ site you add). Your block list starts with Google account, storage,
 billing, and photo pages (myaccount.google.com, accounts.google.com,
 one.google.com, photos.google.com, payments.google.com, pay.google.com);
 you can remove any of them in Settings. Assistant Sync never records
-its own Cortex Memory sheet or folder. Cortex removes email addresses,
-phone numbers, numbers of 13 or more digits, and invisible characters
-from captured text, and cuts titles to 200 characters. Addresses lose
+its own Cortex Memory sheet, folders, or Pages docs. The block list,
+Incognito rule, and the cleanup below apply to all captured text,
+including page text, profile fields, and feed posts. Cortex removes
+email addresses, phone numbers, numbers of 13 or more digits, and
+invisible characters from captured text, and cuts titles to 200
+characters. Addresses lose
 tracking parameters, AMP pages are recorded as the article, and link
 redirects (such as t.co and lnkd.in) are recorded as the page they lead
-to. Titles and excerpts that read like instructions to an AI are listed
+to. Titles and page text that read like instructions to an AI are listed
 on your device for review; Cortex does not change or send that list.
 Cortex asks Chrome to keep its storage when your disk runs low.
 
@@ -64,33 +78,38 @@ Cortex asks Chrome to keep its storage when your disk runs low.
   stays there until you delete it or uninstall Cortex.
 - **In your Google Drive (only if you turn on Assistant Sync):** Cortex
   creates one folder named "Cortex Memory" containing one spreadsheet
-  named "Cortex Memory", and nothing else. Cortex uses the Google
-  permission that only allows access to files Cortex itself created
-  (drive.file). Cortex cannot see any other file in your Drive. Cortex
-  writes new rows to this spreadsheet and reads it only to check that it
-  still exists and to remove rows older than your retention setting.
-  Rows in the spreadsheet are kept for your retention setting (7 to 365
-  days, default 90) while Assistant Sync is on. If you turn Assistant
-  Sync off, the spreadsheet stays in your Drive until you delete it;
-  Cortex offers a button to delete it for you.
+  named "Cortex Memory" and a folder named "Pages" with one Google Doc
+  per day, named like "Cortex Pages 2026-10-08 Thursday", holding the
+  page text, LinkedIn profile fields, and (only with the feed setting
+  on) LinkedIn post text described above. Nothing else. Cortex uses the
+  Google permission that only allows access to files Cortex itself
+  created (drive.file). Cortex cannot see any other file in your Drive.
+  Cortex writes new rows to the spreadsheet, rewrites each day's doc
+  when that day changes, and reads them only to check that they still
+  exist and to remove data older than your retention setting. Rows and
+  day docs are kept for your retention setting (7 to 365 days, default
+  90) while Assistant Sync is on; with Compact sheet detail, day docs
+  are kept for 14 days. Older day docs are moved to your Drive trash.
+  If you turn Assistant Sync off, the files stay in your Drive until you
+  delete them; Cortex offers a button to delete them for you.
 - **Your Google account:** Cortex uses Google sign in only to get
-  permission to write the spreadsheet. Cortex does not store or collect
-  your Google account email address, contacts, or any other Google
-  data. [CURSOR: confirm this matches the code; if the code reads the
-  account email, describe exactly how it is used instead.]
+  permission to write the spreadsheet and Pages docs. Cortex does not
+  store or collect your Google account email address, contacts, or any
+  other Google data.
 
 The developer has no server and no access to your data in either place.
 
 ## AI assistants
 
 Assistant Sync exists so that AI assistants you choose can read your
-Cortex Memory spreadsheet through their own Google Drive integration.
+Cortex Memory spreadsheet and Pages docs through their own Google Drive
+integration.
 Cortex never sends your data to any of them. You decide which assistant
 to connect, and you grant it access through that company's own Google
 Drive connection.
 
 When you connect an assistant, its provider can access the spreadsheet
-under that provider's own privacy policy and terms, outside Cortex's
+and Pages docs under that provider's own privacy policy and terms, outside Cortex's
 control. Providers Cortex gives setup instructions for:
 
 - Anthropic (Claude)
@@ -104,9 +123,9 @@ control. Providers Cortex gives setup instructions for:
 Only connect assistants you trust, review their policies, and
 disconnect Google Drive in the assistant if you stop using it.
 
-Content in the spreadsheet comes from websites you visited. Cortex
-labels it as website text and instructs assistants never to follow
-instructions found inside it, but Cortex cannot guarantee how a third
+Titles in the spreadsheet and text in the Pages docs come from websites
+you visited. Cortex labels page text as website text and instructs
+assistants never to follow instructions found inside it, but Cortex cannot guarantee how a third
 party assistant behaves.
 
 ## Optional built in AI
@@ -127,7 +146,7 @@ any other app will adhere to the Google API Services User Data Policy
 including the Limited Use requirements.
 
 Cortex uses Google sign in and the drive.file permission only to create
-and update your Cortex Memory spreadsheet. Cortex does not use Google
+and update your Cortex Memory spreadsheet and Pages docs. Cortex does not use Google
 data for advertising, does not sell it, does not transfer it to anyone,
 and does not allow humans to read it, except with your explicit consent
 for support, for security reasons, or where required by law.
@@ -146,15 +165,16 @@ browsing history or personal information into feedback.
 
 - Pause capture for 1 hour, for today, or until you resume.
 - Block any site.
-- Turn excerpts or LinkedIn capture off.
+- Turn LinkedIn capture off, and choose whether LinkedIn feed post text
+  is saved (off by default).
 - Set how long data is kept (7 to 365 days, default 90).
 - Export your data as a file.
 - Delete your last hour, last day, or everything.
-- Turn off Assistant Sync and delete the Drive spreadsheet from inside
+- Turn off Assistant Sync and delete the Drive folder from inside
   Cortex. You can also revoke Cortex's Google access at
   https://myaccount.google.com/permissions.
 - Uninstalling Cortex deletes all local data. Your Drive spreadsheet
-  stays in your Drive until you delete it.
+  and Pages docs stay in your Drive until you delete them.
 
 ## Children
 

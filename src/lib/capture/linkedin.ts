@@ -10,6 +10,8 @@
 export interface LinkedInRole {
   title: string;
   company: string;
+  /** The row's date line as shown, for example "Jan 2023 - Present · 1 yr 10 mos". */
+  dates?: string;
 }
 
 export interface LinkedInEntity {
@@ -27,6 +29,8 @@ export interface LinkedInEntity {
   /** Current role title, from the first experience row. */
   roleTitle?: string;
   pastRoles?: LinkedInRole[];
+  /** Every experience row in page order, current role first, with dates. */
+  experience?: LinkedInRole[];
   education?: string[];
   /** "1st", "2nd" or "3rd" as LinkedIn labels the distance. */
   connectionDegree?: string;
@@ -60,6 +64,7 @@ const MAX_EDUCATION = 160;
 const MAX_INDUSTRY = 120;
 const MAX_SIZE = 80;
 const MAX_PAST_ROLES = 5;
+const MAX_EXPERIENCE = 10;
 const MAX_EDUCATION_ITEMS = 3;
 /** Guards against a page claiming an absurd network size. */
 const MAX_CONNECTIONS = 1_000_000;
@@ -586,11 +591,13 @@ function rolesFrom(main: Element): LinkedInRole[] {
   if (!section) return [];
   const roles: LinkedInRole[] = [];
   for (const item of leafItems(section)) {
-    const lines = entryLines(item).filter((l) => !isDateLine(l));
+    const all = entryLines(item);
+    const lines = all.filter((l) => !isDateLine(l));
     const title = lines[0] ?? "";
     if (!title || /^(about|experience|education|activity|skills|featured)$/i.test(title)) continue;
     const linked = clean(item.querySelector('a[href*="/company/"]')?.textContent, MAX_COMPANY);
-    roles.push({ title, company: companyOfLine(lines[1] ?? "") || linked });
+    const dates = all.find(isDateLine);
+    roles.push({ title, company: companyOfLine(lines[1] ?? "") || linked, ...(dates ? { dates } : {}) });
   }
   return roles;
 }
@@ -1022,7 +1029,8 @@ export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | 
   const location = locationFrom(card);
   const { degree, count } = connectionsFrom(card);
   const education = educationFrom(main);
-  const pastRoles = roles.slice(1, 1 + MAX_PAST_ROLES);
+  const pastRoles = roles.slice(1, 1 + MAX_PAST_ROLES).map(({ title, company }) => ({ title, company }));
+  const experience = roles.slice(0, MAX_EXPERIENCE);
 
   const photoUrl = profilePhotoFrom(main, "person", name, profileUrl);
   const entity: LinkedInEntity = {
@@ -1036,6 +1044,7 @@ export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | 
     ...(about ? { about } : {}),
     ...(current?.title ? { roleTitle: current.title } : {}),
     ...(pastRoles.length ? { pastRoles } : {}),
+    ...(experience.length ? { experience } : {}),
     ...(education.length ? { education } : {}),
     ...(degree ? { connectionDegree: degree } : {}),
     ...(count !== undefined ? { connectionCount: count } : {}),
@@ -1088,6 +1097,19 @@ export function sanitizePersonDetail(raw: unknown): Partial<LinkedInEntity> {
       if (title || company) roles.push({ title: title ?? "", company: company ?? "" });
     }
     if (roles.length) out.pastRoles = roles;
+  }
+
+  if (Array.isArray(o.experience)) {
+    const roles: LinkedInRole[] = [];
+    for (const r of o.experience) {
+      if (roles.length >= MAX_EXPERIENCE) break;
+      const row = r as Record<string, unknown> | null;
+      const title = text(row?.title, 160);
+      const company = text(row?.company, 120);
+      const dates = text(row?.dates, 80);
+      if (title || company) roles.push({ title: title ?? "", company: company ?? "", ...(dates ? { dates } : {}) });
+    }
+    if (roles.length) out.experience = roles;
   }
 
   if (Array.isArray(o.education)) {

@@ -81,7 +81,7 @@ export function seedMemory(opts: SeedOptions = {}): MemoryRows {
           title,
           url: `https://example.com/notes/${id}`,
           topics: title.includes("Pinecone") ? ["vector databases"] : [],
-          excerpt: `${title}. Synthetic excerpt for the seed sheet.`,
+          text: `${title}. Synthetic page text for the seed sheet.`,
         });
       }
     }
@@ -105,7 +105,7 @@ export function seedMemory(opts: SeedOptions = {}): MemoryRows {
     title: "What the Pinecone article said about metadata filters",
     url: "https://example.com/articles/pinecone-filters",
     topics: ["vector databases"],
-    excerpt: "Metadata filters run before the nearest neighbor search.",
+    text: "Metadata filters run before the nearest neighbor search.",
   });
   searches.push({
     id: "needle-search",

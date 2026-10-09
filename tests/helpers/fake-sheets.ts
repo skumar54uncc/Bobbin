@@ -19,7 +19,7 @@ export type BatchOutcome = { status: number; lost?: boolean; googleStatus?: stri
  * In-memory Drive and Sheets. batchUpdate applies addSheet, deleteDimension,
  * appendCells, and updateCells in order and all-or-nothing, as Google does.
  */
-type FakeFile = { name: string; trashed: boolean; parent?: string; sheet?: boolean };
+type FakeFile = { name: string; trashed: boolean; parent?: string; sheet?: boolean; doc?: boolean };
 
 export class FakeSheets implements DriveApi {
   files = new Map<string, FakeFile>();
@@ -30,6 +30,11 @@ export class FakeSheets implements DriveApi {
   batches: object[][] = [];
   outcomes: BatchOutcome[] = [];
   creates = 0;
+  /** HTML content of each Doc, by file id. */
+  docs = new Map<string, string>();
+  docWrites = 0;
+  /** Scripted errors for the next doc uploads, as HTTP statuses. */
+  docOutcomes: number[] = [];
   /** sheetId of the one tab a Drive-created spreadsheet starts with. */
   defaultSheetId = 0;
 
@@ -61,11 +66,48 @@ export class FakeSheets implements DriveApi {
       .map((row) => row[0] ?? "");
   }
 
-  async createFolder(name: string): Promise<string> {
+  async createFolder(name: string, parentId?: string): Promise<string> {
     this.creates += 1;
     const id = `folder-${this.files.size + 1}`;
-    this.files.set(id, { name, trashed: false });
+    this.files.set(id, { name, trashed: false, ...(parentId ? { parent: parentId } : {}) });
     return id;
+  }
+
+  private docFailure(): void {
+    const status = this.docOutcomes.shift();
+    if (status != null) throw new Error(`google_${status}`);
+  }
+
+  /** A file inside a trashed folder reads as trashed, as Drive reports it. */
+  private trashedNow(id: string): boolean {
+    const file = this.files.get(id);
+    if (!file) return false;
+    return file.trashed || (file.parent ? this.trashedNow(file.parent) : false);
+  }
+
+  async createDoc(name: string, parentId: string, html: string): Promise<string> {
+    this.docWrites += 1;
+    this.docFailure();
+    if (!this.files.has(parentId)) throw new Error("google_404");
+    const id = `doc-${this.files.size + 1}`;
+    this.files.set(id, { name, trashed: false, parent: parentId, doc: true });
+    this.docs.set(id, html);
+    return id;
+  }
+
+  async updateDoc(id: string, html: string): Promise<{ trashed: boolean } | null> {
+    this.docWrites += 1;
+    this.docFailure();
+    if (!this.files.has(id)) return null;
+    this.docs.set(id, html);
+    return { trashed: this.trashedNow(id) };
+  }
+
+  /** Docs in a folder, by name. */
+  docsIn(folderId: string): { id: string; name: string; trashed: boolean }[] {
+    return [...this.files]
+      .filter(([, file]) => file.doc && file.parent === folderId)
+      .map(([id, file]) => ({ id, name: file.name, trashed: file.trashed }));
   }
 
   /** Like Drive files.create with the spreadsheet mimeType: one untitled default tab, no Cortex tabs yet. */
@@ -98,13 +140,17 @@ export class FakeSheets implements DriveApi {
     const folder = query.includes(FOLDER_MIME);
     return [...this.files]
       .filter(([, file]) => !file.trashed)
-      .filter(([, file]) => (parent ? file.parent === parent : !!file.sheet !== folder && file.name === name))
+      .filter(([, file]) =>
+        parent
+          ? file.parent === parent && (name == null || file.name === name) && (!folder || (!file.sheet && !file.doc))
+          : !!file.sheet !== folder && file.name === name
+      )
       .map(([id, file]) => ({ id, name: file.name, trashed: file.trashed, parents: file.parent ? [file.parent] : [] }));
   }
 
   async getFile(id: string): Promise<DriveFileInfo | null> {
     const file = this.files.get(id);
-    return file ? { id, name: file.name, trashed: file.trashed } : null;
+    return file ? { id, name: file.name, trashed: this.trashedNow(id) } : null;
   }
 
   async trashFile(id: string): Promise<void> {
@@ -177,6 +223,10 @@ export class FakeSheets implements DriveApi {
           while (row.length < destination.startColumnIndex) row.push("");
           row[destination.startColumnIndex] = row[source.startColumnIndex] ?? "";
         }
+      } else if (request.deleteSheet) {
+        const entry = [...draft].find(([, tab]) => tab.sheetId === request.deleteSheet.sheetId);
+        if (!entry) throw new Error("google_400");
+        draft.delete(entry[0]);
       } else if (request.addProtectedRange) {
         const { range, description, warningOnly } = request.addProtectedRange.protectedRange;
         if (warningOnly !== true) throw new Error("google_400");

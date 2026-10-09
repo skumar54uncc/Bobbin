@@ -48,21 +48,85 @@ describe("visit finalization", () => {
     expect(await assistantSyncDb.drafts.get("short")).toBeUndefined();
   });
 
-  it("writes measured dwell and the excerpt after a read of 5 minutes or more", async () => {
+  it("saves page text after 20 seconds on screen and focused", async () => {
     await openVisit("long");
-    expect(await finalizeVisit("long", { activeMs: 6 * 60_000, maxScrollPct: 72.4 }, NOW + 7 * 60_000)).toBe("final");
+    expect(await finalizeVisit("long", { activeMs: 20_000, maxScrollPct: 5 }, NOW + 60_000)).toBe("final");
     const row = await assistantSyncDb.visits.get("long");
-    expect(row).toMatchObject({ dwellMinutes: 6, maxScrollPct: 72, finalizedAt: NOW + 7 * 60_000 });
+    expect(row).toMatchObject({ dwellMinutes: 0.3, maxScrollPct: 5, finalizedAt: NOW + 60_000 });
     const content = await assistantSyncDb.content.get("long");
-    expect(content?.excerpt).toContain("pgvector");
+    expect(content?.text).toContain("pgvector");
+    expect(content?.text.length).toBeLessThanOrEqual(4000);
     expect(await assistantSyncDb.drafts.get("long")).toBeUndefined();
   });
 
-  it("writes no excerpt for a short read", async () => {
+  it("saves page text after a 30% scroll, however brief", async () => {
+    await openVisit("skim");
+    await finalizeVisit("skim", { activeMs: 6_000, maxScrollPct: 30 }, NOW + 10_000);
+    expect((await assistantSyncDb.content.get("skim"))?.text).toContain("pgvector");
+  });
+
+  it("saves no text just under both thresholds", async () => {
     await openVisit("brief");
-    await finalizeVisit("brief", { activeMs: 90_000, maxScrollPct: 20 }, NOW + 2 * 60_000);
-    expect((await assistantSyncDb.visits.get("brief"))?.dwellMinutes).toBe(1.5);
+    await finalizeVisit("brief", { activeMs: 19_999, maxScrollPct: 29 }, NOW + 30_000);
+    expect((await assistantSyncDb.visits.get("brief"))?.dwellMinutes).toBe(0.3);
     expect(await assistantSyncDb.content.get("brief")).toBeUndefined();
+  });
+
+  it("saves no text when the tab never reported", async () => {
+    await openVisit("quiet");
+    await finalizeVisit("quiet", { activeMs: null, maxScrollPct: null }, NOW + 30_000);
+    expect(await assistantSyncDb.content.get("quiet")).toBeUndefined();
+  });
+
+  it("keeps no page text for a feed or a search results page", async () => {
+    await openVisit("feed", "https://www.linkedin.com/feed/");
+    await finalizeVisit("feed", { activeMs: 120_000, maxScrollPct: 90 }, NOW + 130_000);
+    expect(await assistantSyncDb.content.get("feed")).toBeUndefined();
+    await openVisit("serp", "https://www.google.com/search?q=pgvector");
+    await finalizeVisit("serp", { activeMs: 120_000, maxScrollPct: 90 }, NOW + 130_000);
+    expect(await assistantSyncDb.content.get("serp")).toBeUndefined();
+  });
+
+  it("saves an opened profile's labeled fields however short the visit", async () => {
+    const result = await captureFinalizedVisit({
+      id: "prof",
+      url: "https://www.linkedin.com/in/mira-okafor/",
+      title: "Mira Okafor | LinkedIn",
+      visitedAt: NOW,
+      dwellMinutes: null,
+      maxScrollPct: null,
+      pageText: "photo caption, message button, mira@example.com",
+      pageEmbedding: null,
+      hasPasswordInput: false,
+      userDenylist: [],
+      referrer: null,
+      linkedInDocument: null,
+      linkedInFields: {
+        kind: "person",
+        name: "Mira Okafor",
+        headline: "Staff engineer at Tidora",
+        company: "Tidora",
+        profileUrl: "https://www.linkedin.com/in/mira-okafor/",
+        location: "Oakland, California",
+        about: "I build search. Reach me at mira@example.com.",
+        experience: [{ title: "Staff engineer", company: "Tidora", dates: "Jan 2023 - Present" }],
+        education: ["UC Berkeley, BS Computer Science"],
+      },
+      syncEnabled: true,
+      open: true,
+    });
+    expect(result.stored).toBe(true);
+    await finalizeVisit("prof", { activeMs: 8_000, maxScrollPct: 10 }, NOW + 10_000);
+    const content = await assistantSyncDb.content.get("prof");
+    expect(content?.text).toBe("");
+    expect(content?.profile).toEqual({
+      headline: "Staff engineer at Tidora",
+      location: "Oakland, California",
+      about: "I build search. Reach me at [redacted].",
+      experience: [{ title: "Staff engineer", company: "Tidora", dates: "Jan 2023 - Present" }],
+      education: ["UC Berkeley, BS Computer Science"],
+    });
+    expect((await assistantSyncDb.people.get("prof"))?.dwellMinutes).toBe(0.1);
   });
 
   it("keeps dwell blank when the tab never reported", async () => {

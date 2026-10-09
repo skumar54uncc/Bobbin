@@ -16,6 +16,17 @@ export const DwellAllowedMessageSchema = v.object({
   url: v.pipe(v.string(), v.maxLength(8192)),
 });
 
+/** A tab saw a LinkedIn feed post for 2 seconds. Sent only while "Save text of LinkedIn posts I scroll past" is on. */
+export const FeedPostMessageSchema = v.object({
+  type: v.literal("CORTEX_FEED_POST"),
+  url: v.pipe(v.string(), v.maxLength(8192)),
+  author: v.pipe(v.string(), v.maxLength(400)),
+  text: v.pipe(v.string(), v.maxLength(6000)),
+  urn: v.optional(v.pipe(v.string(), v.maxLength(200))),
+  seenAt: v.number(),
+});
+export type FeedPostMessage = v.InferOutput<typeof FeedPostMessageSchema>;
+
 export const AssistantSyncMessageSchema = v.object({
   type: v.literal("CORTEX_ASSISTANT_SYNC"),
   action: v.picklist(["status", "enable", "now", "disable", "cleanup"]),
@@ -42,6 +53,9 @@ export const SyncWorkReplySchema = v.object({
   otherDeviceStored: v.optional(v.boolean()),
   reads: v.optional(v.number()),
   writes: v.optional(v.number()),
+  docWrites: v.optional(v.number()),
+  pagesError: v.optional(v.pipe(v.string(), v.maxLength(500))),
+  pagesFolderId: v.optional(v.pipe(v.string(), v.maxLength(200))),
   /** Enable stopped to ask: the stored sheet is in the trash, or was deleted. */
   confirm: v.optional(v.picklist(["missing", "trashed"])),
   /** Which Google call failed and what Google said. */

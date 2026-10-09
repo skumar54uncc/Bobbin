@@ -23,6 +23,12 @@ describe("flush log", () => {
     expect(flushLogEntry("alarm", { ok: true }, NOW)).not.toHaveProperty("error_detail");
   });
 
+  it("records Pages doc uploads and a Pages doc error next to the sheet counts", () => {
+    const entry = flushLogEntry("now", { ok: true, writes: 1, docWrites: 2, pagesError: "Could not update a Pages doc." }, NOW);
+    expect(entry).toMatchObject({ writes: 1, doc_writes: 2, pages_error: "Could not update a Pages doc." });
+    expect(flushLogEntry("alarm", { ok: true, docWrites: 0 }, NOW)).not.toHaveProperty("doc_writes");
+  });
+
   it("keeps only the newest entries", () => {
     let log: unknown = "not a list";
     for (let i = 0; i < FLUSH_LOG_MAX + 5; i += 1) {

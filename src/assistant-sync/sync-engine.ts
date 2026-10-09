@@ -11,6 +11,7 @@ import {
   type SyncedRecord,
   type SyncEngineState,
   type SyncPersonRecord,
+  type SyncPostRecord,
   type SyncSearchRecord,
   type SyncVisitRecord,
 } from "./db";
@@ -45,6 +46,8 @@ import {
 } from "./flush-plan";
 import { localVisitStamp } from "./local-time";
 import { mergeDailyRepeats } from "./merge";
+import { buildDayDocs, pagesDocLink, type DayDoc } from "./pages-doc";
+import { syncPagesDocs } from "./pages-sync";
 import { pageTypeForUrl } from "./page-type";
 import { redactForSync, syncTitle } from "./redact-sync";
 import {
@@ -58,7 +61,9 @@ import {
   cellWarning,
   DATE_COLUMN,
   dataTabs,
+  PEOPLE_HEADERS,
   protectTabRequest,
+  REMOVED_CONTENT_TAB,
   SCHEMA_VERSION,
   SHEET_TABS,
   sizedAbout,
@@ -90,8 +95,8 @@ export function forbiddenMessage(error: unknown): string {
 }
 
 type DataTab = Exclude<SheetTabName, "About">;
-const DATA_TABS: DataTab[] = ["Visits", "Content", "Searches", "People", "Companies", "Daily"];
-const ROW_TABS: Exclude<DataTab, "Daily">[] = ["Visits", "Content", "Searches", "People", "Companies"];
+const DATA_TABS: DataTab[] = ["Visits", "Searches", "People", "Companies", "Daily"];
+const ROW_TABS: Exclude<DataTab, "Daily">[] = ["Visits", "Searches", "People", "Companies"];
 
 export interface HistoryVisit {
   id: string;
@@ -137,6 +142,11 @@ export interface FlushResult {
   writes: number;
   /** More rows are waiting than fit in one request. */
   more?: boolean;
+  /** Drive writes for the Pages docs this pass: uploads, folder creation, restores, trashing. */
+  docWrites?: number;
+  /** Days whose Pages doc was uploaded. */
+  docsUploaded?: string[];
+  pagesError?: string;
   /** Earliest epoch ms for the next attempt. */
   retryAt?: number;
   error?: string;
@@ -173,17 +183,19 @@ interface Memory {
   searches: SyncSearchRecord[];
   people: SyncPersonRecord[];
   companies: SyncCompanyRecord[];
+  posts: SyncPostRecord[];
 }
 
 async function loadMemory(): Promise<Memory> {
-  const [visits, content, searches, people, companies] = await Promise.all([
+  const [visits, content, searches, people, companies, posts] = await Promise.all([
     assistantSyncDb.visits.toArray(),
     assistantSyncDb.content.toArray(),
     assistantSyncDb.searches.toArray(),
     assistantSyncDb.people.toArray(),
     assistantSyncDb.companies.toArray(),
+    assistantSyncDb.posts.toArray(),
   ]);
-  return { visits, content, searches, people, companies };
+  return { visits, content, searches, people, companies, posts };
 }
 
 /** Only rows of visits that have ended. An open page is still collecting dwell. */
@@ -196,6 +208,8 @@ function finalOnly(memory: Memory): Memory {
     searches: keep(memory.searches),
     people: keep(memory.people),
     companies: keep(memory.companies),
+    // A post is whole once seen, so it is written while its feed visit is still open.
+    posts: memory.posts,
   };
 }
 
@@ -229,12 +243,13 @@ function signature(cells: string[]): string {
   return (a >>> 0).toString(36) + (b >>> 0).toString(36);
 }
 
-export type TabCutoffDates = Record<DataTab, string>;
+/** `Pages`: page text, posts, and day docs dated before this leave this device and Drive. */
+export type TabCutoffDates = Record<DataTab | "Pages", string>;
 
 /**
  * Per tab, rows dated before this date leave the sheet and local memory.
- * Retention bounds every tab. Sheet detail tightens Content, and in compact
- * mode the row tabs. Daily follows retention only.
+ * Retention bounds every tab. In compact mode sheet detail tightens the row
+ * tabs and the Pages docs (14 days). Daily follows retention only.
  */
 export function tabCutoffs(now: number, timeZone: string, retentionDays: number, detail: SheetDetail): TabCutoffDates {
   const at = (days: number) => dateOf(now - days * DAY_MS, timeZone);
@@ -244,7 +259,7 @@ export function tabCutoffs(now: number, timeZone: string, retentionDays: number,
   const rows = rules.rowDays == null ? retention : later(retention, at(rules.rowDays));
   return {
     Visits: rows,
-    Content: later(rows, at(rules.contentDays)),
+    Pages: rules.pagesDays == null ? rows : later(rows, at(rules.pagesDays)),
     Searches: rows,
     People: rows,
     Companies: rows,
@@ -294,7 +309,14 @@ async function readLayout(
     });
   });
   const header = sheetIds.Visits != null ? (columns[columns.length - 1]?.[0] ?? []) : [];
-  const schema = !headers.Visits || header.includes("device") ? SCHEMA_VERSION : header.includes("last_time") ? 4 : 3;
+  const schema =
+    !headers.Visits || header.includes("pages_doc")
+      ? SCHEMA_VERSION
+      : header.includes("device")
+        ? 5
+        : header.includes("last_time")
+          ? 4
+          : 3;
   return {
     layout: {
       fileId,
@@ -317,7 +339,8 @@ async function purgeLocal(cutoffs: TabCutoffDates, timeZone: string): Promise<vo
   const old = <T extends { id: string; visitedAt: number }>(rows: T[], before: string) =>
     rows.filter((row) => dateOf(row.visitedAt, timeZone) < before).map((row) => row.id);
   const visits = old(memory.visits, cutoffs.Visits);
-  const content = old(memory.content, cutoffs.Content);
+  const content = old(memory.content, cutoffs.Pages);
+  const posts = old(memory.posts, cutoffs.Pages);
   const searches = old(memory.searches, cutoffs.Searches);
   const people = old(memory.people, cutoffs.People);
   const companies = old(memory.companies, cutoffs.Companies);
@@ -326,14 +349,14 @@ async function purgeLocal(cutoffs: TabCutoffDates, timeZone: string): Promise<vo
     .filter((date) => date < cutoffs.Daily);
   await assistantSyncDb.visits.bulkDelete(visits);
   await assistantSyncDb.content.bulkDelete(content);
+  await assistantSyncDb.posts.bulkDelete(posts);
   await assistantSyncDb.searches.bulkDelete(searches);
   await assistantSyncDb.people.bulkDelete(people);
   await assistantSyncDb.companies.bulkDelete(companies);
   await assistantSyncDb.drafts.bulkDelete(visits);
-  await assistantSyncDb.warnings.where("visitId").anyOf([...visits, ...content]).delete();
+  await assistantSyncDb.warnings.where("visitId").anyOf([...visits, ...content, ...posts]).delete();
   await dropKeys([
     ...visits.map((id) => syncedKey("Visits", id)),
-    ...content.map((id) => syncedKey("Content", id)),
     ...searches.map((id) => syncedKey("Searches", id)),
     ...people.map((id) => syncedKey("People", id)),
     ...companies.map((id) => syncedKey("Companies", id)),
@@ -345,9 +368,9 @@ function rowBytes(cells: string[]): number {
   return cells.reduce((n, cell) => n + cell.length + 48, 16);
 }
 
-/** Tabs whose rows are rewritten in place when a merge changes them. Content and Searches keep their first row. */
+/** Tabs whose rows are rewritten in place when a merge or a Pages doc link changes them. Searches keep their first row. */
 const UPDATABLE: ReadonlySet<DataTab> = new Set(["Visits", "People", "Companies"]);
-const TRIM_TABS: TrimTab[] = ["Content", "Visits", "Searches", "People", "Companies"];
+const TRIM_TABS: TrimTab[] = ["Visits", "Searches", "People", "Companies"];
 
 interface Plan {
   requests: object[];
@@ -361,6 +384,9 @@ interface Plan {
   trim: string;
   /** A row could not be located. The next flush reads the sheet first. */
   stale: boolean;
+  /** Day docs from the same memory the rows came from. */
+  days: Map<string, DayDoc>;
+  pagesCutoff: string;
 }
 
 type Tabs = ReturnType<typeof dataTabs>;
@@ -413,11 +439,17 @@ async function planFlush(
     [...synced.values()].filter((r) => r.key.startsWith("Visits:") && !r.of).map((r) => r.key.slice("Visits:".length))
   );
   const build = async () => {
-    const merged = mergeDailyRepeats(finalOnly(await loadMemory()), tz, rowIds);
-    return { merged, tabs: dataTabs(merged, { timeZone: tz, detail }) };
+    const memory = finalOnly(await loadMemory());
+    const merged = mergeDailyRepeats(memory, tz, rowIds);
+    const days = buildDayDocs(merged, memory.posts, tz);
+    const links = new Map<string, string>();
+    for (const day of days.values()) for (const section of day.sections) links.set(section.id, pagesDocLink(day.name, section.id));
+    const pagesDoc = (rowId: string) => links.get(rowId) ?? "";
+    return { merged, days, tabs: dataTabs(merged, { timeZone: tz, detail, pagesDoc }) };
   };
-  let { merged, tabs } = await build();
-  const sizeOf = (t: Tabs) => sizedAbout(t, { timeZone: tz, checkedAt: syncedAtLabel(deps.now, tz), detail });
+  let { merged, tabs, days } = await build();
+  const pagesDays = rules.pagesDays ?? clampRetentionDays(state.retentionDays);
+  const sizeOf = (t: Tabs) => sizedAbout(t, { timeZone: tz, checkedAt: syncedAtLabel(deps.now, tz), detail, pagesDays });
   const trim = planTrim({
     bytes: sizeOf(tabs).bytes,
     targetBytes: rules.targetBytes,
@@ -427,11 +459,11 @@ async function planFlush(
   for (const [tab, date] of Object.entries(trim.cutoffs) as [TrimTab, string][]) {
     if (date > cutoffs[tab]) cutoffs[tab] = date;
   }
-  // An excerpt never outlives its visit row.
-  if (cutoffs.Visits > cutoffs.Content) cutoffs.Content = cutoffs.Visits;
+  // Page text never outlives its visit row.
+  if (cutoffs.Visits > cutoffs.Pages) cutoffs.Pages = cutoffs.Visits;
   if (Object.keys(trim.cutoffs).length) {
     await purgeLocal(cutoffs, tz);
-    ({ merged, tabs } = await build());
+    ({ merged, tabs, days } = await build());
   }
 
   for (const tab of DATA_TABS) {
@@ -491,9 +523,21 @@ async function planFlush(
 
   // Old Visits headers end at topics. Add visit_count (1 for every row already there) and
   // last_time (a copy of time, since each old row is one visit), device ("this device": only this
-  // device was captured before), and the edit warning on every tab.
+  // device was captured before), pages_doc (blank until a row is rewritten with its link), and the
+  // edit warning on every tab. People gains pages_doc. The Content tab goes: its role moved to the Pages docs.
   const visitsId = layout.sheetIds.Visits!;
   const schema = layout.schema ?? (layout.headers.Visits ? 3 : SCHEMA_VERSION);
+  const contentTab = layout.sheetIds[REMOVED_CONTENT_TAB];
+  if (contentTab != null) {
+    deletes.push({ deleteSheet: { sheetId: contentTab } });
+    delete layout.sheetIds[REMOVED_CONTENT_TAB];
+    delete layout.runs[REMOVED_CONTENT_TAB];
+    delete layout.headers[REMOVED_CONTENT_TAB];
+    layout.protectedIds = (layout.protectedIds ?? []).filter((id) => id !== contentTab);
+  }
+  if (layout.headers.People && schema < SCHEMA_VERSION) {
+    updates.push(updateCellsRequest(layout.sheetIds.People!, 0, [[...PEOPLE_HEADERS]]));
+  }
   if (layout.headers.Visits && schema < SCHEMA_VERSION) {
     updates.push(updateCellsRequest(visitsId, 0, [[...VISIT_HEADERS]]));
     const rows = rowCount(layout.runs.Visits);
@@ -588,6 +632,8 @@ async function planFlush(
     bytes,
     trim: trimNote(trim.cutoffs, rules.targetBytes),
     stale,
+    days,
+    pagesCutoff: cutoffs.Pages,
   };
 }
 
@@ -662,12 +708,14 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
     }
 
     const plan = await planFlush(layout!, state, deps, synced);
+    const docs = () => pagesPass(deps, plan.days, plan.pagesCutoff);
     if (!plan.requests.length) {
       state.lastError = "";
       state.sheetBytes = plan.bytes;
       if (plan.stale) state.verifyNext = true;
       await writeSyncEngineState(state);
-      return result({ status: "ready", appended: 0 });
+      const pages = await docs();
+      return result({ status: "ready", appended: 0, ...pages, ...(pages.more ? { more: true, retryAt: deps.now + MIN_FLUSH_GAP_MS } : {}) });
     }
 
     await assistantSyncDb.inflight.put({ id: "inflight", fileId, keys: plan.records.map((r) => r.key), startedAt: deps.now });
@@ -693,15 +741,38 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
     });
     await writeSyncEngineState(state);
     const warning = cellWarning(cellEstimate(plan.layout));
+    const pages = await docs();
+    const more = plan.more || pages.more;
     return result({
       status: "ready",
       appended: plan.appended,
-      ...(plan.more ? { more: true, retryAt: deps.now + MIN_FLUSH_GAP_MS } : {}),
+      ...pages,
+      ...(more ? { more: true, retryAt: deps.now + MIN_FLUSH_GAP_MS } : {}),
       ...(warning ? { warning } : {}),
     });
   } catch (error) {
     return result(await recordFailure(state, deps, error, sent, priorFlushAt));
   }
+}
+
+/**
+ * The Pages docs, after the sheet. A failed upload never holds back the sheet: it is reported
+ * as pagesError and the day is sent again on the next pass.
+ */
+async function pagesPass(
+  deps: FlushDeps,
+  days: Map<string, DayDoc>,
+  cutoff: string
+): Promise<{ docWrites: number; docsUploaded: string[]; more: boolean; pagesError?: string; errorDetail?: GoogleErrorDetail }> {
+  if (!deps.ids.folderId) return { docWrites: 0, docsUploaded: [], more: false };
+  const out = await syncPagesDocs({ api: deps.api, memoryFolderId: deps.ids.folderId, days, cutoff, now: deps.now });
+  return {
+    docWrites: out.writes,
+    docsUploaded: out.uploaded,
+    more: out.more && !out.error,
+    ...(out.error ? { pagesError: out.error } : {}),
+    ...(out.errorDetail ? { errorDetail: out.errorDetail } : {}),
+  };
 }
 
 /**

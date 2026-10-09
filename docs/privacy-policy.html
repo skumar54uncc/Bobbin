@@ -144,7 +144,7 @@
           <td>Recency ranking, digests</td>
         </tr>
         <tr>
-          <td>Assistant Sync copy (titles, URLs, long-read excerpts, searches, LinkedIn profiles, topics)</td>
+          <td>Assistant Sync copy (titles, URLs, searches, LinkedIn profiles, topics, and the text of pages you read in daily Pages docs)</td>
           <td>A folder named Cortex Memory in your Google Drive, only if you enable it</td>
           <td>So an assistant you connect can answer from that file</td>
         </tr>
@@ -183,13 +183,20 @@
     <p>
       Assistant Sync is off until you press Enable in settings. When it is on, Cortex copies a memory of
       your browsing into <strong>your own Google Drive</strong>, in one folder named Cortex Memory. That
-      copy can include page titles, URLs, excerpts of pages you read for 5 minutes or more, searches,
-      LinkedIn profiles you opened, and topic labels. Drive writes run only while sync is enabled.
+      copy has a spreadsheet with page titles, URLs, searches, LinkedIn profiles you opened, and topic
+      labels, and a Pages folder with one Google Doc per day. The day docs hold the text of pages you read
+      (on screen and focused for 20 seconds, or scrolled 30%, up to 4,000 characters per page) and the
+      headline, location, About, Experience, and Education of LinkedIn profiles you opened. Text of
+      LinkedIn feed posts (author, up to 1,500 characters, time seen) is saved only if you turn on
+      <em>Save text of LinkedIn posts I scroll past</em>, which is off by default. Photos, contact info,
+      and messages are never synced. Drive writes run only while sync is enabled.
     </p>
     <p>
       The Google permission is <code>drive.file</code>. It lets Cortex create and edit only the files it
-      creates, not the rest of your Drive. The spreadsheet in that folder is yours. If you connect another
-      assistant to your Drive, that assistant can read the rows that are relevant to a question you ask it.
+      creates, not the rest of your Drive. The spreadsheet and docs in that folder are yours. If you connect
+      another assistant to your Drive, that assistant can read the rows and page text that are relevant to a
+      question you ask it. Page text is labeled as website content that assistants must never treat as
+      instructions.
       Cortex does not send those rows to a Cortex server.
     </p>
     <p>
