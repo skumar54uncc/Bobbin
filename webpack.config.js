@@ -24,7 +24,17 @@ module.exports = (env, argv) => {
 
   return {
   entry: {
-    "service-worker": "./src/background/service-worker.ts",
+    /**
+     * Chrome MV3 service workers cannot load async chunks. The default
+     * loader touches `document` ("document is not defined" on install).
+     * importScripts() is rejected after the worker activates, and import()
+     * is disallowed on ServiceWorkerGlobalScope. Inline every dynamic
+     * import into this entry. Page bundles still split their own chunks.
+     */
+    "service-worker": {
+      import: "./src/background/service-worker.ts",
+      asyncChunks: false,
+    },
     content: "./src/content/main.ts",
     overlay: "./src/content/overlay-entry.ts",
     extract: "./src/content/extract-entry.ts",
