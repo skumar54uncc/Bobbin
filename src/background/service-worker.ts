@@ -15,13 +15,12 @@ import {
   ASSISTANT_SYNC_ALARM_PERIOD_MIN,
   ASSISTANT_SYNC_SOON_ALARM,
   countUnsyncedVisits,
-  listSyncPageTexts,
-  listSyncSearches,
   listSyncWarnings,
   readSyncEngineState,
   setDriveFolderTrashHandler,
   writeSyncEngineState,
 } from "../assistant-sync/db";
+import { listMemoryPageTexts, listMemorySearches } from "../assistant-sync/local-memory-read";
 import {
   plannedFlushAt,
   syncStatusLine,
@@ -824,6 +823,22 @@ async function captureAssistantSyncVisit(visit: {
   else if (tabId == null) await planAssistantFlush("activity");
 }
 
+/** Ask any assistant's local record: searches and page text, with sync on or off. Never synced. */
+async function captureLocalMemoryVisit(visit: { id: string; url: string; title: string; visitedAt: number; pageText?: string }): Promise<void> {
+  const state = await readSyncEngineState();
+  const launch = await readAssistantSyncLaunch();
+  await ensureOffscreen();
+  await sendToOffscreen({
+    type: "CORTEX_LOCAL_MEMORY_CAPTURE",
+    visit: {
+      ...visit,
+      userDenylist: state.userDenylist,
+      retentionDays: state.retentionDays,
+      ownIds: { fileId: launch.fileId, folderId: launch.folderId, pagesFolderId: launch.pagesFolderId },
+    },
+  });
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   setTimeout(() => {
     endTabVisit(tabId);
@@ -1262,6 +1277,13 @@ async function commitIndexPayload(
     pageText: p.text.slice(0, ASSISTANT_SYNC_DRAFT_CHARS),
     linkedInFields,
   }).catch(() => undefined);
+  void captureLocalMemoryVisit({
+    id: `doc:${docId}:${p.visitedAt}`,
+    url: p.url,
+    title: p.title,
+    visitedAt: p.visitedAt,
+    pageText: p.text.slice(0, ASSISTANT_SYNC_DRAFT_CHARS),
+  }).catch(() => undefined);
 
   onIndexCommitted();
   return { id: docId, chunks: chunkIds.length };
@@ -1507,8 +1529,8 @@ const packetDeps: PacketDeps = {
     return res.ok ? res.hits : [];
   },
   listPeople: (from, to) => listPeople({ since: from, until: to, limit: 200 }),
-  listSearches: listSyncSearches,
-  pageTexts: listSyncPageTexts,
+  listSearches: listMemorySearches,
+  pageTexts: listMemoryPageTexts,
 };
 
 async function shouldSkipIndexing(

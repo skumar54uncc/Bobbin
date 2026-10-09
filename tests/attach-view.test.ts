@@ -89,11 +89,11 @@ describe("Ask any assistant", () => {
     );
   });
 
-  it("says when there is nothing, and that searches need Assistant Sync", async () => {
+  it("says when there are no searches for that time", async () => {
     const { host } = mount({ request: vi.fn(async () => []) });
     chip(host, "What did I search for yesterday").click();
     await settle();
-    expect(host.querySelector(".cx-attach-status")?.textContent).toBe("No searches saved for that time. Cortex saves searches while Assistant Sync is on.");
+    expect(host.querySelector(".cx-attach-status")?.textContent).toBe("No searches saved for that time. Searches are kept while capture is on.");
     expect(host.querySelector(".cx-attach-preview")!.hasAttribute("hidden")).toBe(true);
   });
 });

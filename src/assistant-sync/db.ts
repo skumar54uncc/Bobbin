@@ -457,17 +457,6 @@ export async function listSyncWarnings(limit = 200): Promise<SyncWarningRecord[]
   return assistantSyncDb.warnings.orderBy("at").reverse().limit(limit).toArray();
 }
 
-/** Searches between two times, for Attach to chat. */
-export async function listSyncSearches(from: number, to: number): Promise<SyncSearchRecord[]> {
-  return assistantSyncDb.searches.where("visitedAt").between(from, to, true, true).toArray();
-}
-
-/** Pages doc text captured between two times, for Attach to chat's Include page text. */
-export async function listSyncPageTexts(from: number, to: number): Promise<{ url: string; visitedAt: number; text: string }[]> {
-  const rows = await assistantSyncDb.content.where("visitedAt").between(from, to, true, true).limit(2000).toArray();
-  return rows.map((r) => ({ url: r.url, visitedAt: r.visitedAt, text: r.text }));
-}
-
 /** The service worker points this at the offscreen Drive client. Tests replace it. */
 export type DriveFolderTrash = () => Promise<void>;
 

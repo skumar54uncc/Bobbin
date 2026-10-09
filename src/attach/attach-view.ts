@@ -125,7 +125,7 @@ export function renderAttachView(container: HTMLElement, deps: AttachDeps): void
       status.textContent = got.length
         ? ""
         : current.source === "searches"
-          ? "No searches saved for that time. Cortex saves searches while Assistant Sync is on."
+          ? "No searches saved for that time. Searches are kept while capture is on."
           : "Nothing found for that. Try other words or a template.";
     }
     paint();

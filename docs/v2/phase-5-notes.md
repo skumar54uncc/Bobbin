@@ -32,3 +32,13 @@ and the Insert e2e cover it.
 - `e2e/guided-setup.spec.ts`: Insert into a SYNTHETIC chat page's textarea and contenteditable,
   zero submits, and the no-box reply.
 - Screenshot (SYNTHETIC PREVIEW): `dev/v2-phase5/attach.png`.
+
+## Works with Assistant Sync off
+
+Searches and page text are kept in a local record whenever capture is on, with sync on or off
+(`src/assistant-sync/local-memory.ts`, its own IndexedDB database `cortex-local-memory`). Same denylist,
+redaction and instruction flagging as sync. The sync engine never opens that database, so turning
+sync on later uploads none of what was browsed while it was off. Forget and Delete all cover
+them. The privacy policy's on-device table gained one row naming them.
+Its code is the lazy `assistant-sync-local.js` chunk (cap 27 KB), so `assistant-sync.js` keeps 8 KB free.
+Tests: `tests/local-memory.test.ts`, `e2e/attach-sync-off.spec.ts`.

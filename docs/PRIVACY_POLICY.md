@@ -16,6 +16,7 @@ The [HTML version](privacy-policy.html) (for GitHub Pages) includes the Cortex i
 |------|----------------|---------|
 | Extracted page text (chunked) | Your device (IndexedDB) | Search, Ask, Digest |
 | Visit timestamps / URLs / titles | Your device | Recency ranking, digests |
+| Search queries from search engines you use, and page text (up to 4,000 characters per page, redacted) | Your device (IndexedDB), whether or not Assistant Sync is on; never uploaded by sync | Ask any assistant, which puts a short packet into a chat only when you click Insert or Copy |
 | Settings (blocklist, pause, chat mode, optional API key) | `chrome.storage.local` on your device | Extension behavior |
 | Assistant Sync copy (titles, URLs, searches, LinkedIn profiles, topics, and the text of pages you read in daily Pages docs) | Folder `Cortex Memory` in your Google Drive, only if you enable it | So an assistant you connect can answer from that file |
 

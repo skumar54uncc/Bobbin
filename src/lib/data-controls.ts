@@ -17,6 +17,7 @@
  * - The legacy `pages` table (pre-v3 full text) is covered too.
  */
 import { wipeAssistantSyncOnLocalDelete } from "../assistant-sync/db";
+import { clearLocalMemory, forgetLocalMemorySince, forgetLocalMemorySite } from "../assistant-sync/local-memory-read";
 import { db, type ConversationMessageRecord } from "../db/schema";
 import { pruneOrphanPhotos } from "./profile-photos";
 
@@ -191,6 +192,8 @@ export async function forgetSite(hostname: string): Promise<DeleteCounts> {
     }
     if (anyDeleted(out)) await db.digestCache.clear();
   });
+  // Ask any assistant's local searches and page text.
+  out.visits += await forgetLocalMemorySite(site, hostMatches);
   return out;
 }
 
@@ -222,6 +225,7 @@ export async function forgetSince(since: number): Promise<DeleteCounts> {
     }
     if (anyDeleted(out)) await db.digestCache.clear();
   });
+  out.visits += await forgetLocalMemorySince(since);
   return out;
 }
 
@@ -235,5 +239,6 @@ export async function forgetAll(): Promise<void> {
   await db.transaction("rw", ALL_TABLES(), async () => {
     for (const t of ALL_TABLES()) await t.clear();
   });
+  await clearLocalMemory();
   await wipeAssistantSyncOnLocalDelete();
 }

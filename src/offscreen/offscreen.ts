@@ -331,6 +331,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     return true;
   }
 
+  if (msg?.type === "CORTEX_LOCAL_MEMORY_CAPTURE") {
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false, error: "foreign_sender" });
+      return true;
+    }
+    const v = (msg.visit ?? {}) as Record<string, unknown>;
+    const ids = (v.ownIds ?? {}) as Record<string, unknown>;
+    const idOf = (value: unknown) => (typeof value === "string" && value ? value : null);
+    void import(/* webpackChunkName: "assistant-sync-local" */ "../assistant-sync/local-memory")
+      .then((mod) =>
+        mod.captureLocalMemory({
+          id: String(v.id ?? ""),
+          url: String(v.url ?? ""),
+          title: String(v.title ?? ""),
+          visitedAt: Number(v.visitedAt ?? 0),
+          pageText: typeof v.pageText === "string" ? v.pageText : null,
+          userDenylist: Array.isArray(v.userDenylist) ? v.userDenylist.filter((d): d is string => typeof d === "string") : [],
+          retentionDays: typeof v.retentionDays === "number" ? v.retentionDays : undefined,
+          ownIds: { fileId: idOf(ids.fileId), folderId: idOf(ids.folderId), pagesFolderId: idOf(ids.pagesFolderId) },
+        })
+      )
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch(() => sendResponse({ ok: false, error: "capture_failed" }));
+    return true;
+  }
+
   if (msg?.type === "CORTEX_ASSISTANT_SYNC_CAPTURE") {
     if (!isServiceWorkerSender(sender)) {
       sendResponse({ ok: false, error: "foreign_sender" });

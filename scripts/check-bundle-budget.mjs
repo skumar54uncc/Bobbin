@@ -36,6 +36,9 @@ export const BUNDLE_BUDGETS = {
   "assistant-sync.js": 83 * KB,
   "assistant-sync-topics.js": 48 * KB,
   "assistant-sync-capture.js": 16 * KB,
+  // v2 Phase 5: Ask any assistant's local record (searches and page text, sync on or off), lazy in offscreen.
+  // Its own chunk so assistant-sync.js keeps its 8 KB free. 18.6 KB at creation; keeps 8 KB free.
+  "assistant-sync-local.js": 27 * KB,
   // Options Assistant Sync panel. Stays far under a Dexie or Drive client import.
   "assistant-sync-options.js": 16 * KB,
   // pdfjs-dist (Phase 5.9): lazy chunk and worker, loaded only when a PDF is read.
