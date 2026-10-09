@@ -326,6 +326,13 @@ h1.cx-brand {
   line-height: 1.45;
 }
 
+.cx-popup-footer-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--cx-text-muted);
+  line-height: 1.45;
+}
+
 .cx-why-free {
   display: inline-block;
   margin-left: 0.35em;

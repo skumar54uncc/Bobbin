@@ -105,9 +105,11 @@ function paint(state: SyncEngineState, statusLine?: string): void {
   if (enable) {
     // Reconnect Google Drive runs the same Enable flow.
     enable.hidden = state.syncEnabled && !state.authNeeded;
-    enable.textContent = state.authNeeded ? "Reconnect Google Drive" : "Enable";
+    enable.textContent = state.authNeeded ? "Reconnect Google Drive" : "I agree";
     enable.disabled = false;
   }
+  const notNowBtn = byId<HTMLButtonElement>("cx-assistant-not-now");
+  if (notNowBtn) notNowBtn.hidden = state.syncEnabled && !state.authNeeded;
   if (disable) {
     disable.hidden = !state.syncEnabled;
     disable.disabled = false;
@@ -237,6 +239,11 @@ export function mountAssistantSyncPanel(): void {
   window.clearInterval(countdown);
   countdown = 0;
   restUntil = 0;
+
+  const notNow = byId<HTMLButtonElement>("cx-assistant-not-now");
+  notNow?.addEventListener("click", () => {
+    showFeedback("Sync stays off.", false);
+  });
 
   enable.addEventListener("click", () => {
     enable.disabled = true;

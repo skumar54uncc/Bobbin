@@ -328,13 +328,13 @@ describe("setup side panel", () => {
     expect(buttonIn(card()!, "I did this")).toBeTruthy();
   });
 
-  it("puts Turn on Assistant Sync first, with Enable signing in from the click", async () => {
+  it("puts Turn on Assistant Sync first, with I agree signing in from the click", async () => {
     const fake = install("claude", { syncOn: false });
     await boot();
     const sync = document.querySelector(".cx-guide-sync")!;
     expect(sync.textContent).toMatch(/^First, turn on Assistant Sync\./);
     expect(fake.calls.some((c) => c.name === "identity.getAuthToken")).toBe(false);
-    buttonIn(sync, "Enable")!.click();
+    buttonIn(sync, "I agree")!.click();
     await settle();
     const names = fake.calls
       .filter((c) => c.name === "identity.getAuthToken" || c.name === "runtime.sendMessage")

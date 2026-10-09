@@ -65,18 +65,19 @@ describe("Connect your AI view", () => {
     expect(deps.start).toHaveBeenCalledWith("grok");
   });
 
-  it("offers Enable in the status card when sync is off, before any assistant is picked", async () => {
+  it("offers I agree in the status card when sync is off, before any assistant is picked", async () => {
     const { host, deps } = mount({}, false);
     await settle();
     const status = host.querySelector<HTMLElement>(".cx-connect-status")!;
     expect(status.querySelector(".cx-connect-status-title")?.textContent).toBe("Assistant Sync is off");
     const enable = status.querySelector<HTMLButtonElement>(".cx-connect-enable")!;
-    expect(enable.textContent).toBe("Enable");
+    expect(enable.textContent).toBe("I agree");
+    expect(status.querySelector(".cx-connect-not-now")?.textContent).toBe("Not now");
     enable.click();
     await settle();
     expect(deps.enable).toHaveBeenCalledTimes(1);
     expect(status.querySelector(".cx-connect-feedback")?.textContent).toBe("Sync is on.");
-    // Picking an assistant shows only its steps: Enable is not repeated.
+    // Picking an assistant shows only its steps: I agree is not repeated.
     card(host, "claude").click();
     expect(host.querySelectorAll(".cx-connect-enable")).toHaveLength(1);
   });
@@ -90,7 +91,7 @@ describe("Connect your AI view", () => {
     expect(deps.openSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("hides the Enable button once sync is on", async () => {
+  it("hides the I agree button once sync is on", async () => {
     const { host } = mount({}, true);
     await settle();
     expect(host.querySelector<HTMLElement>(".cx-connect-status-action")!.hidden).toBe(true);

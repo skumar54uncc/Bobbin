@@ -1,6 +1,6 @@
 # Bobbin Terms of Use
 
-Last updated: October 8, 2026
+Last updated: October 9, 2026
 
 These terms apply to the Bobbin Chrome extension ("Bobbin"). By
 installing or using Bobbin, you agree to them.
@@ -66,7 +66,7 @@ Updated terms will be posted at this address with a new date.
 ## 9. Privacy
 
 The Bobbin Privacy Policy explains what data Bobbin handles and how you
-control it: https://skumar54uncc.github.io/Bobbin/privacy-policy.html.
+control it: https://skumar54uncc.github.io/Bobbin/privacy.
 
 ## 10. Governing law
 

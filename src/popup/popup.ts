@@ -1,4 +1,4 @@
-import { headerTagline } from "../shared/about-copy";
+import { feedbackFormUrl, headerTagline } from "../shared/about-copy";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import type { StatsSnapshot } from "../lib/stats-snapshot-types";
 import {
@@ -222,6 +222,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     window.close();
   });
+
+  const feedback = document.querySelector<HTMLAnchorElement>("#cx-popup-feedback");
+  if (feedback) feedback.href = feedbackFormUrl(chrome.runtime.getManifest().version, navigator.userAgent);
 
   document.querySelector("#cx-why-free")?.addEventListener("click", (ev) => {
     ev.preventDefault();

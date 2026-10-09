@@ -35,11 +35,15 @@ export const ABOUT_FREE_P2 =
 
 /** GitHub Pages from main, /docs. Phase 7 adds /privacy and /terms as folders. */
 export const HOMEPAGE_URL = "https://skumar54uncc.github.io/Bobbin/";
-export const PRIVACY_POLICY_URL = "https://skumar54uncc.github.io/Bobbin/privacy-policy.html";
+export const PRIVACY_POLICY_URL = "https://skumar54uncc.github.io/Bobbin/privacy";
 export const DATA_DELETION_URL = "https://skumar54uncc.github.io/Bobbin/data-deletion.html";
-export const TERMS_URL = "https://github.com/skumar54uncc/Bobbin/blob/main/TERMS.md";
+export const TERMS_URL = "https://skumar54uncc.github.io/Bobbin/terms";
+export const CONTACT_EMAIL = "shailesh.entrant@gmail.com";
+export const GITHUB_ISSUES_URL = "https://github.com/skumar54uncc/Bobbin/issues";
 export const FEEDBACK_FORM_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLSeC5bLybg056jJQzpohfgSX8r1OWlgtT7LSlSeHgvbT3CqQCQ/viewform";
+export const FEEDBACK_HINT = "Please don't paste personal browsing history into feedback.";
+export const FEEDBACK_GITHUB_LABEL = "Report a bug on GitHub";
 
 export function browserLine(userAgent: string): string {
   const chrome = /(?:Chrome|Chromium|Edg)\/([\d.]+)/.exec(userAgent);

@@ -88,7 +88,7 @@ test.describe("guided setup", () => {
     await expect.poll(() => page.frames().some((f) => f.url().includes("connect-frame.html"))).toBe(true);
     const frame = page.frames().find((f) => f.url().includes("connect-frame.html"))!;
     // Enable signs in from this frame: the extension page keeps chrome.identity inside a web page.
-    await expect(frame.locator(".cx-connect-status .cx-connect-enable")).toHaveText("Enable");
+    await expect(frame.locator(".cx-connect-status .cx-connect-enable")).toHaveText("I agree");
     expect(await frame.evaluate(() => typeof chrome.identity?.getAuthToken)).toBe("function");
     const start = async (id: string) => {
       await frame.click(`.cx-connect-card[data-assistant="${id}"]`);

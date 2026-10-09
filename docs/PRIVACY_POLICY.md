@@ -1,6 +1,6 @@
 # Bobbin  - Privacy policy
 
-**Last updated:** October 2026  
+**Last updated:** October 9, 2026  
 
 The [HTML version](privacy-policy.html) (for GitHub Pages) includes the Bobbin icon and the same content.
 
@@ -9,6 +9,8 @@ The [HTML version](privacy-policy.html) (for GitHub Pages) includes the Bobbin i
 **Summary:** Bobbin is a **local-first** Chrome extension. It builds a searchable index of **readable page text** from sites you visit, only after you agree in the product UI. **Indexing and search run on your device** using IndexedDB and optional on-device ML. **Optional Assistant Sync** copies that memory into a folder you own in Google Drive after you press Enable. **Optional cloud chat** (Gemini) sends only what you choose when you enable it in settings: typically your question plus retrieved snippets, not your entire browsing history to a Bobbin server (there is none).
 
 **Google APIs Limited Use:** Bobbin's use of information received from Google APIs adheres to the [Chrome Web Store User Data Policy](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq), including the Limited Use requirements.
+
+**Google API Services Limited Use:** Bobbin's use and transfer to any other app of information received from Google APIs will adhere to the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements.
 
 ## Data collected by Bobbin
 
@@ -24,7 +26,7 @@ The [HTML version](privacy-policy.html) (for GitHub Pages) includes the Bobbin i
 
 ## When indexing starts
 
-Bobbin does **not** begin indexing or history import on install by itself. On first run, the welcome page asks you to **Start indexing** (affirmative consent). Until you agree, or until you press **Allow indexing** / **Scan history** in Settings, no new browsing activity is stored.
+Bobbin does **not** begin indexing or history import on install by itself. On first run, the welcome page asks you to press **I agree**. Until you agree, or until you press **I agree** / **Scan history** in Settings, no new browsing activity is stored.
 
 After you agree, Bobbin may:
 
@@ -55,13 +57,15 @@ If you turn on **cloud chat** and add a **Google Gemini API key**, prompts are s
 
 ## Contact
 
+**Email:** [shailesh.entrant@gmail.com](mailto:shailesh.entrant@gmail.com)
+
 **GitHub Issues:** [github.com/skumar54uncc/Bobbin/issues](https://github.com/skumar54uncc/Bobbin/issues)
 
 ## Public URLs for the Chrome Web Store
 
 After you enable **GitHub Pages** (Settings → Pages → **Deploy from branch** `main`, folder **`/docs`**), use:
 
-**`https://skumar54uncc.github.io/Bobbin/privacy-policy.html`**
+**`https://skumar54uncc.github.io/Bobbin/privacy`**
 
 as the **Privacy policy** URL in the listing. Data deletion:
 

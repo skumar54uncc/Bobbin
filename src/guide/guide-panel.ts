@@ -206,9 +206,13 @@ function progress(a: AssistantConfig, current: GuideStep | null, done: readonly 
 function syncBlock(): HTMLElement {
   const sync = el("section", "cx-guide-sync");
   sync.append(el("p", "cx-guide-text", "First, turn on Assistant Sync. Bobbin copies your memory to the Bobbin Memory folder in your Google Drive."));
-  const enable = button("cx-btn cx-btn-primary cx-connect-enable", "Enable");
+  const enable = button("cx-btn cx-btn-primary cx-connect-enable", "I agree");
+  const notNow = button("cx-btn cx-btn-secondary", "Not now");
   const feedback = el("p", "cx-guide-feedback");
   feedback.setAttribute("role", "status");
+  notNow.addEventListener("click", () => {
+    feedback.textContent = "Sync stays off.";
+  });
   enable.addEventListener("click", () => {
     enable.disabled = true;
     feedback.textContent = "";
@@ -226,7 +230,7 @@ function syncBlock(): HTMLElement {
         void refreshSync();
       });
   });
-  sync.append(enable, feedback);
+  sync.append(enable, notNow, feedback);
   return sync;
 }
 

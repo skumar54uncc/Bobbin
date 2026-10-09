@@ -39,6 +39,8 @@ describe("Phase 6 free and independent copy", () => {
     const html = readFileSync(join(root, "src/popup/popup.html"), "utf8");
     expect(html).toContain(FOOTER_FREE);
     expect(html).toContain(WHY_FREE_LABEL);
+    expect(html).toContain("Send feedback");
+    expect(html).toContain("Please don't paste personal browsing history into feedback.");
     expect(html).toContain('href="options.html#cx-sec-about"');
     expect(html).toContain(`id="cx-tagline"`);
     expect(html).not.toContain("every 2 minutes");
@@ -53,10 +55,14 @@ describe("Phase 6 free and independent copy", () => {
     expect(html).toContain("about every 5 minutes");
     expect(html).toContain("Page text goes into Google Docs");
     expect(html).not.toContain("every 2 minutes");
-    expect(html).toContain(PRIVACY_POLICY_URL);
+    expect(html).toContain("legal/privacy.html");
+    expect(html).toContain("legal/terms.html");
     expect(html).toContain(DATA_DELETION_URL);
-    expect(html).toContain(TERMS_URL);
     expect(html).toContain(FEEDBACK_FORM_URL);
+    expect(html).toContain("Please don't paste personal browsing history into feedback.");
+    expect(html).toContain("Report a bug on GitHub");
+    expect(PRIVACY_POLICY_URL).toBe("https://skumar54uncc.github.io/Bobbin/privacy");
+    expect(TERMS_URL).toBe("https://skumar54uncc.github.io/Bobbin/terms");
     expect(html).toContain(">Privacy Policy<");
     expect(html).toContain(">Terms of Use<");
     expect(html).toContain(">Send feedback<");

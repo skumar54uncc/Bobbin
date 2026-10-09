@@ -81,7 +81,7 @@ async function grantConsentAndStart(): Promise<void> {
 
 async function continueWithoutIndexing(): Promise<void> {
   setStatus(
-    "Indexing stays off until you press Start indexing here, or Scan history / Allow indexing in Settings."
+    "Indexing stays off until you press I agree here, or Scan history / I agree in Settings."
   );
   const doneWrap = document.getElementById("cx-onb-done-wrap");
   if (doneWrap) doneWrap.hidden = false;

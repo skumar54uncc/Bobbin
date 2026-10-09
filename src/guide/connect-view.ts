@@ -47,9 +47,13 @@ function button(className: string, text: string): HTMLButtonElement {
   return b;
 }
 
-function logoUrl(id: string): string {
+function extUrl(path: string): string {
   const get = (globalThis as { chrome?: { runtime?: { getURL?: (p: string) => string } } }).chrome?.runtime?.getURL;
-  return get ? get(`assistant-logos/${id}.svg`) : `assistant-logos/${id}.svg`;
+  return get ? get(path) : path;
+}
+
+function logoUrl(id: string): string {
+  return extUrl(`assistant-logos/${id}.svg`);
 }
 
 export function renderConnectView(container: HTMLElement, deps: ConnectDeps): ConnectView {
@@ -71,11 +75,24 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
   const statusTitle = el("p", "cx-connect-status-title", "Checking Assistant Sync");
   const statusLine = el("p", "cx-connect-status-line");
   const statusAction = el("div", "cx-connect-status-action");
-  const statusButton = button("cx-btn cx-btn-primary cx-connect-enable", deps.enable ? "Enable" : "Go to Assistant Sync");
+  const statusButton = button("cx-btn cx-btn-primary cx-connect-enable", deps.enable ? "I agree" : "Go to Assistant Sync");
+  const notNow = button("cx-btn cx-btn-secondary cx-connect-not-now", "Not now");
   const feedback = el("p", "cx-connect-status-line cx-connect-feedback");
   feedback.setAttribute("role", "status");
-  statusAction.append(statusButton);
-  statusText.append(statusTitle, statusLine, statusAction, feedback);
+  statusAction.append(statusButton, notNow);
+  const policy = el("p", "cx-connect-status-line");
+  const priv = document.createElement("a");
+  priv.href = extUrl("legal/privacy.html");
+  priv.textContent = "Privacy policy";
+  priv.target = "_blank";
+  priv.rel = "noopener noreferrer";
+  const terms = document.createElement("a");
+  terms.href = extUrl("legal/terms.html");
+  terms.textContent = "Terms of Use";
+  terms.target = "_blank";
+  terms.rel = "noopener noreferrer";
+  policy.append(priv, " · ", terms);
+  statusText.append(statusTitle, statusLine, policy, statusAction, feedback);
   status.append(statusDot, statusText);
 
   const gridLabel = el("h3", "cx-connect-h", "Your assistant");
@@ -97,6 +114,11 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
   const paintTrouble = () => {
     troubleList.replaceChildren(...troubleshootingFor(active).map((t) => el("li", undefined, t)));
   };
+
+  notNow.addEventListener("click", () => {
+    feedback.textContent = "Sync stays off.";
+  });
+  notNow.hidden = !deps.enable;
 
   statusButton.addEventListener("click", () => {
     const enable = deps.enable;

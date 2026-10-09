@@ -3,9 +3,9 @@
 Hosted pages, after GitHub Pages deploys the `docs` folder:
 
 - Homepage: https://skumar54uncc.github.io/Bobbin/
-- Privacy policy: https://skumar54uncc.github.io/Bobbin/privacy-policy.html
+- Privacy policy: https://skumar54uncc.github.io/Bobbin/privacy
 - Data deletion: https://skumar54uncc.github.io/Bobbin/data-deletion.html
-- Terms of Use: https://github.com/skumar54uncc/Bobbin/blob/main/TERMS.md (Phase 7 publishes `/terms`)
+- Terms of Use: https://skumar54uncc.github.io/Bobbin/terms
 
 Canonical release-pack answers (permissions form, privacy practices tab, detailed listing) live in `docs/release-1.2.0/STORE_RELEASE.md`. Keep this draft aligned with that file; do not invent a second privacy story.
 
