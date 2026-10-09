@@ -41,7 +41,7 @@ describe("pass4 security gates", () => {
       source.indexOf('type === "CORTEX_ASSISTANT_SYNC"'),
       source.indexOf('type === "CORTEX_OPEN_OPTIONS"')
     );
-    expect(syncGate).toContain('action === "enable" && !isOptionsPageSender(sender)');
+    expect(syncGate).toContain('(action === "enable" || action === "pages") && !isOptionsPageSender(sender)');
   });
 
   it("user settings normalize without spreading raw objects", () => {

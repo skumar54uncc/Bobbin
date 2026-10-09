@@ -42,22 +42,32 @@ smaller.
 
 | Seed | Mode | Rows | CSV size | Target |
 | --- | --- | --- | --- | --- |
-| 30 days | Standard | 3,541 visits, 30 daily | 520,695 bytes (508 KB) | 3 MB |
-| 30 days | Compact | 3,541 visits, 30 daily | 520,695 bytes (508 KB) | 600 KB |
-| 90 days | Standard | 10,381 visits, 90 daily | 1,519,705 bytes (1.4 MB) | 3 MB |
-| 90 days | Compact | 3,541 visits, 90 daily | 526,496 bytes (514 KB) | 600 KB |
+| 30 days | Standard | 3,541 visits, 30 daily | 521,028 bytes (509 KB) | 3 MB |
+| 30 days | Compact | 3,541 visits, 30 daily | 521,028 bytes (509 KB) | 600 KB |
+| 90 days | Standard | 10,381 visits, 90 daily | 1,520,038 bytes (1.4 MB) | 3 MB |
+| 90 days | Compact | 3,541 visits, 90 daily | 526,829 bytes (514 KB) | 600 KB |
 
 No case needed a trim. Visits rows are most of the size: about 147 bytes
 each in this seed, including the `pages_doc` link.
 
 ## Pages day doc sizes
 
-Characters are what the 500,000 character cap counts (headings, metadata
-lines, labels, and text). HTML bytes are the UTF-8 size of the upload.
+Characters are what the day doc cap counts (headings, metadata lines,
+labels, and text): 500,000 with Standard sheet detail, 150,000 with
+Compact. HTML bytes are the UTF-8 size of the upload; the inline styles
+(9pt text, 11pt headings, 14pt title, single spacing) add bytes to the
+upload but no characters to the doc.
 
-| Day | Sections | Characters | HTML bytes |
-| --- | --- | --- | --- |
-| Largest seeded day, seed text (one sentence per page) | 10 | 3,077 | 3,928 |
-| Same day, every page filled to 4,000 characters | 10 | 42,452 | 43,303 |
-| 200 pages at 4,000 characters, before the cap | 200 | 841,579 | 855,919 |
-| Same 200 pages after the cap (every body shortened, every heading kept) | 200 | 498,179 | 512,519 |
+| Day | Sections | Characters | HTML bytes | Characters per section | HTML bytes per section |
+| --- | --- | --- | --- | --- | --- |
+| Largest seeded day, seed text (one sentence per page) | 10 | 3,157 | 6,585 | 315.7 | 658.5 |
+| Same day, every page filled to 4,000 characters | 10 | 42,532 | 45,960 | 4,253.2 | 4,596.0 |
+| 200 pages at 4,000 characters, before the cap | 200 | 843,179 | 906,836 | 4,215.9 | 4,534.2 |
+| Same 200 pages after the Standard cap (every body shortened, every heading kept) | 200 | 499,779 | 563,436 | 2,498.9 | 2,817.2 |
+| Same 200 pages after the Compact cap | 200 | 149,779 | 213,436 | 748.9 | 1,067.2 |
+
+Before the compact layout (heading "[id] HH:MM · title · domain", no
+styles), the seeded day was 3,077 characters and 3,928 HTML bytes for 10
+sections (307.7 characters per section), and 42,452 characters (4,245.2
+per section) with every page full. The domain now sits on the metadata
+line as "Domain: ...", which adds 8 characters per section.

@@ -31,9 +31,10 @@ When capture is on, Cortex records:
   of it. Cortex keeps up to 4,000 characters of the page's main text,
   preferring the part you scrolled through. With Assistant Sync on, this
   text syncs to your Google Drive in a daily Pages doc.
-- For LinkedIn profiles you open: the headline, location, About,
-  Experience (title, company, and dates), and Education shown on the
-  profile. With Assistant Sync on, these sync to that day's Pages doc.
+- For LinkedIn profiles you open: the name, headline, location,
+  current role, About, Experience (title, company, dates, location, and
+  the first 300 characters of each description), Education (school,
+  degree, field, and years), and up to 10 skills shown on the profile. With Assistant Sync on, these sync to that day's Pages doc.
 - LinkedIn feed posts, only if you turn on "Save text of LinkedIn posts
   I scroll past" (off by default): for each post that stays on screen
   for 2 seconds or more, the author's name, up to 1,500 characters of
@@ -90,6 +91,13 @@ Cortex asks Chrome to keep its storage when your disk runs low.
   day docs are kept for your retention setting (7 to 365 days, default
   90) while Assistant Sync is on; with Compact sheet detail, day docs
   are kept for 14 days. Older day docs are moved to your Drive trash.
+  A day doc holds up to 500,000 characters (150,000 with Compact), so
+  the longest page texts of a busy day may be shortened.
+  If you move a day doc or the Pages folder to the trash yourself,
+  Cortex treats that day (or every day, for the folder) as deleted by
+  you: it does not restore the file, does not upload that day's page
+  text again, and tells you once in Settings, where Undo brings it back.
+  Challenge, captcha, sign in, and sign up pages are never recorded.
   If you turn Assistant Sync off, the files stay in your Drive until you
   delete them; Cortex offers a button to delete them for you.
 - **Your Google account:** Cortex uses Google sign in only to get

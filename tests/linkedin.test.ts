@@ -271,10 +271,12 @@ describe("parseLinkedInPage profile detail", () => {
     expect(p.connectionCount).toBe(842);
   });
 
-  it("captures the about text, trimmed and capped at 600 characters", () => {
-    expect(p.about).toContain("Co-founder turned operator.");
+  it("captures the whole about text from the page, on one line", () => {
+    expect(p.about).toMatch(/^Co-founder turned operator\./);
     expect(p.about).toContain("PolyWise");
-    expect(p.about!.length).toBeLessThanOrEqual(600);
+    expect(p.about).toMatch(/moving from software into energy work\.$/);
+    expect(p.aboutTruncated).toBeUndefined();
+    expect(p.about!.length).toBeLessThanOrEqual(3000);
     expect(p.about).not.toContain("\n");
     expect(p.about).not.toMatch(/\s{2}/);
   });
@@ -291,12 +293,14 @@ describe("parseLinkedInPage profile detail", () => {
     expect(p.pastRoles!.some((r) => r.title === "Head of Field Programs")).toBe(false);
   });
 
-  it("captures up to three education entries as school plus degree", () => {
+  it("captures up to five education entries as school plus degree", () => {
     expect(p.education).toEqual([
       "NTNU, Master of Science, Electrical Engineering",
       "University of Bergen, Bachelor of Science, Physics",
       "Chalmers University of Technology, Exchange, Marine Engineering",
+      "Bergen Katedralskole, Upper secondary, Science",
     ]);
+    expect(p.schools?.[0]).toEqual({ school: "NTNU", degree: "Master of Science", field: "Electrical Engineering", years: "2012 to 2014" });
   });
 
   it("summarises the profile in one or two plain sentences", () => {

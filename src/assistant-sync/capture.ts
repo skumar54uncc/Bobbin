@@ -39,8 +39,13 @@ export interface FinalizedVisitInput {
     sectionViewed?: string;
     location?: string;
     about?: string;
-    experience?: { title?: string; company?: string; dates?: string }[];
+    aboutTruncated?: boolean;
+    experience?: { title?: string; company?: string; dates?: string; location?: string; description?: string }[];
     education?: string[];
+    schools?: { school?: string; degree?: string; field?: string; years?: string }[];
+    skills?: string[];
+    publicView?: boolean;
+    detailsPage?: "experience" | "education" | "skills";
   } | null;
   /** Writes nothing unless the user has turned sync on. */
   syncEnabled: boolean;
@@ -93,6 +98,15 @@ async function embedForTopics(input: FinalizedVisitInput, title: string): Promis
   return input.embed(text).catch(() => null);
 }
 
+/** Pages with less text than this are too thin to tag: a topic would come from the title alone. */
+export const TOPIC_MIN_TEXT_CHARS = 200;
+
+/** Search results are lists of links, so they get no topics; neither does a page with almost no text. */
+export function topicsAllowed(pageText: string | null, isSearch: boolean): boolean {
+  if (isSearch) return false;
+  return (pageText ?? "").replace(/\s+/g, " ").trim().length >= TOPIC_MIN_TEXT_CHARS;
+}
+
 function isLinkedInProfileOrCompany(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -118,6 +132,7 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
     userDomains: input.userDenylist,
     hasPasswordInput: input.hasPasswordInput,
     title: input.title,
+    pageText: input.pageText,
     ownIds: input.ownIds,
   });
   if (denied) return { stored: false, reason: denied };
@@ -126,10 +141,12 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
   if (input.open && previous?.finalizedAt != null) return { stored: false, reason: "final" };
 
   const title = syncTitle(input.title);
-  const embedding = input.pageEmbedding?.length ? input.pageEmbedding : await embedForTopics(input, title);
+  const search = parseSearchQuery(input.url);
+  const taggable = topicsAllowed(input.pageText, Boolean(search));
+  const embedding = !taggable ? null : input.pageEmbedding?.length ? input.pageEmbedding : await embedForTopics(input, title);
   const tagged = embedding?.length ? tagTopics(embedding, TOPIC_SIMILARITY_THRESHOLD, await loadTopicVectors()) : [];
   // A re-read of the same visit without page text keeps the topics found earlier.
-  const topics = tagged.length ? tagged : (previous?.topics ?? []);
+  const topics = !taggable && search ? [] : tagged.length ? tagged : (previous?.topics ?? []);
   const dwellMinutes = blankToNull(input.dwellMinutes);
   const maxScrollPct = clampScroll(input.maxScrollPct);
 
@@ -147,7 +164,6 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
   });
   await flagInstructionText(input.id, "title", canonical, title, input.visitedAt);
 
-  const search = parseSearchQuery(input.url);
   const profile = profileFields(input.linkedInFields ?? null);
   // A results page is a list of links; the query is in Searches.
   const keepsText = !search && pageTypeForUrl(canonical) !== "Feed" && !isLinkedInProfileOrCompany(canonical);
@@ -207,22 +223,54 @@ export async function captureFinalizedVisit(input: FinalizedVisitInput): Promise
 
 const oneLine = (value: string | undefined, max: number) => redactForSync((value ?? "").replace(/\s+/g, " ").trim()).slice(0, max);
 
-/** Headline, location, About, Experience, and Education of an opened profile. Never photos, contact info, or messages. */
+/**
+ * Name, headline, location, current role, About, Experience, Education, and Skills of an opened
+ * profile, as labeled fields. Never photos, contact info, or messages.
+ */
 export function profileFields(fields: FinalizedVisitInput["linkedInFields"]): SyncProfileFields | null {
   if (!fields || fields.kind !== "person" || !fields.name.trim()) return null;
   const experience = (fields.experience ?? [])
-    .map((row) => ({ title: oneLine(row.title, 160), company: oneLine(row.company, 120), dates: oneLine(row.dates, 80) }))
+    .map((row) => {
+      const location = oneLine(row.location, 120);
+      const description = oneLine(row.description, PROFILE_DESCRIPTION_CHARS + 3);
+      return {
+        title: oneLine(row.title, 160),
+        company: oneLine(row.company, 120),
+        dates: oneLine(row.dates, 80),
+        ...(location ? { location } : {}),
+        ...(description ? { description } : {}),
+      };
+    })
     .filter((row) => row.title || row.company)
     .slice(0, 10);
   const education = (fields.education ?? []).map((row) => oneLine(row, 200)).filter(Boolean).slice(0, 5);
+  const schools = (fields.schools ?? [])
+    .map((row) => ({ school: oneLine(row.school, 160), degree: oneLine(row.degree, 160), field: oneLine(row.field, 160), years: oneLine(row.years, 40) }))
+    .filter((row) => row.school)
+    .slice(0, 5);
+  const skills = (fields.skills ?? []).map((row) => oneLine(row, 80)).filter(Boolean).slice(0, 10);
+  const current = experience.find((row) => /\bpresent\b/i.test(row.dates));
+  const currentRole = current ? [current.title, current.company].filter(Boolean).join(" at ") : "";
+  const about = redactForSync(tidyText(fields.about ?? "")).slice(0, PROFILE_ABOUT_CHARS);
   return {
+    name: oneLine(fields.name, 120),
     headline: oneLine(fields.headline, 220),
     location: oneLine(fields.location, 160),
-    about: redactForSync(tidyText(fields.about ?? "")).slice(0, 2000),
+    ...(currentRole ? { currentRole } : {}),
+    about,
+    ...(about && fields.aboutTruncated ? { aboutTruncated: true } : {}),
     experience,
     education,
+    ...(schools.length ? { schools } : {}),
+    ...(skills.length ? { skills } : {}),
+    ...(fields.publicView ? { publicView: true } : {}),
+    ...(fields.profileUrl ? { profileUrl: canonicalizeUrl(fields.profileUrl) ?? fields.profileUrl } : {}),
+    ...(fields.detailsPage ? { detailsPage: fields.detailsPage } : {}),
   };
 }
+
+export const PROFILE_ABOUT_CHARS = 3000;
+export const PROFILE_DESCRIPTION_CHARS = 300;
 
 /** Text of a post saved per section. */
 export const POST_MAX_CHARS = 1500;

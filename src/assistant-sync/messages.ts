@@ -29,12 +29,14 @@ export type FeedPostMessage = v.InferOutput<typeof FeedPostMessageSchema>;
 
 export const AssistantSyncMessageSchema = v.object({
   type: v.literal("CORTEX_ASSISTANT_SYNC"),
-  action: v.picklist(["status", "enable", "now", "disable", "cleanup"]),
+  action: v.picklist(["status", "enable", "now", "disable", "cleanup", "pages"]),
   token: v.optional(v.pipe(v.string(), v.maxLength(4096))),
   /** Enable again after Cortex asked: restore the trashed sheet, or create one in place of a deleted sheet. */
   choice: v.optional(v.picklist(["restore", "create"])),
   /** The answer to the old backups and archives prompt. */
   cleanup: v.optional(v.picklist(["trash", "keep"])),
+  /** The answer to the notice about Pages docs the user removed from Drive. */
+  pages: v.optional(v.picklist(["undo", "dismiss"])),
 });
 export type AssistantSyncMessage = v.InferOutput<typeof AssistantSyncMessageSchema>;
 

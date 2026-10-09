@@ -120,11 +120,14 @@ describe("visit finalization", () => {
     const content = await assistantSyncDb.content.get("prof");
     expect(content?.text).toBe("");
     expect(content?.profile).toEqual({
+      name: "Mira Okafor",
       headline: "Staff engineer at Tidora",
       location: "Oakland, California",
+      currentRole: "Staff engineer at Tidora",
       about: "I build search. Reach me at [redacted].",
       experience: [{ title: "Staff engineer", company: "Tidora", dates: "Jan 2023 - Present" }],
       education: ["UC Berkeley, BS Computer Science"],
+      profileUrl: "https://www.linkedin.com/in/mira-okafor/",
     });
     expect((await assistantSyncDb.people.get("prof"))?.dwellMinutes).toBe(0.1);
   });

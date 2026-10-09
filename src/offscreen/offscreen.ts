@@ -302,7 +302,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       msg.action === "now" ||
       msg.action === "alarm" ||
       msg.action === "disable" ||
-      msg.action === "cleanup"
+      msg.action === "cleanup" ||
+      msg.action === "pages"
         ? msg.action
         : "alarm";
     const token = typeof msg.token === "string" ? msg.token : "";
@@ -315,6 +316,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       backupId: typeof msg.backupId === "string" ? msg.backupId : null,
       choice: msg.choice === "restore" || msg.choice === "create" ? (msg.choice as "restore" | "create") : undefined,
       cleanup: msg.cleanup === "trash" || msg.cleanup === "keep" ? (msg.cleanup as "trash" | "keep") : undefined,
+      pages: msg.pages === "undo" || msg.pages === "dismiss" ? (msg.pages as "undo" | "dismiss") : undefined,
       otherDeviceVisits: otherDeviceVisits(msg.otherDeviceVisits),
     };
     void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
@@ -349,8 +351,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
         profileUrl?: string;
         location?: unknown;
         about?: unknown;
+        aboutTruncated?: unknown;
         experience?: unknown;
         education?: unknown;
+        schools?: unknown;
+        skills?: unknown;
+        publicView?: unknown;
+        detailsPage?: unknown;
       } | null;
       ownIds?: { fileId?: unknown; folderId?: unknown; pagesFolderId?: unknown } | null;
     } | undefined;
@@ -373,9 +380,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
             about: str(fields.about),
             experience: list(fields.experience).map((row) => {
               const r = (row ?? {}) as Record<string, unknown>;
-              return { title: str(r.title), company: str(r.company), dates: str(r.dates) };
+              return { title: str(r.title), company: str(r.company), dates: str(r.dates), location: str(r.location), description: str(r.description) };
             }),
             education: list(fields.education).filter((row): row is string => typeof row === "string"),
+            schools: list(fields.schools).map((row) => {
+              const r = (row ?? {}) as Record<string, unknown>;
+              return { school: str(r.school), degree: str(r.degree), field: str(r.field), years: str(r.years) };
+            }),
+            skills: list(fields.skills).filter((row): row is string => typeof row === "string"),
+            aboutTruncated: fields.aboutTruncated === true,
+            publicView: fields.publicView === true,
+            detailsPage:
+              fields.detailsPage === "experience" || fields.detailsPage === "education" || fields.detailsPage === "skills"
+                ? (fields.detailsPage as "experience" | "education" | "skills")
+                : undefined,
           }
         : null;
     void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")

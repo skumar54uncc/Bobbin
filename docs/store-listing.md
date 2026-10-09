@@ -59,7 +59,7 @@ What leaves the device, and only with Assistant Sync on, to the user's own Googl
 
 - Browsing activity: page titles, addresses, times, time on page, scroll depth, topics, and searches, in the Cortex Memory spreadsheet.
 - Website content: the main text of pages the user read (20 seconds on screen or scrolled 30%, up to 4,000 characters per page), in one Google Doc per day in Cortex Memory/Pages.
-- Personal information shown on LinkedIn profiles the user opens: name, headline, company, location, About, Experience (title, company, dates), and Education. Never photos, contact info, or messages.
+- Personal information shown on LinkedIn profiles the user opens: name, headline, company, location, current role, About, Experience (title, company, dates, location, first 300 characters of the description), Education (school, degree, field, years), and up to 10 skills. Never photos, contact info, or messages.
 - LinkedIn feed post text (author name, up to 1,500 characters, time seen) only when the user turns on "Save text of LinkedIn posts I scroll past". Off by default.
 
 Nothing goes to the developer or any server. Incognito windows, the block list, pages with a password field, and sensitive sites are never captured. Email addresses, phone numbers, long digit runs, and invisible characters are removed from all synced text.

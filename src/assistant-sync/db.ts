@@ -88,11 +88,24 @@ export interface InflightFlush {
 
 /** Labeled fields of an opened LinkedIn profile. Never photos, contact info, or messages. */
 export interface SyncProfileFields {
+  name?: string;
   headline: string;
   location: string;
+  /** "Head of Field Programs, Tidora": the experience row marked Present. */
+  currentRole?: string;
   about: string;
-  experience: { title: string; company: string; dates: string }[];
+  /** The page held only a shortened About. */
+  aboutTruncated?: boolean;
+  experience: { title: string; company: string; dates: string; location?: string; description?: string }[];
+  /** One line per school, as older rows stored it. */
   education: string[];
+  schools?: { school: string; degree: string; field: string; years: string }[];
+  skills?: string[];
+  /** The logged-out public profile. */
+  publicView?: boolean;
+  /** The profile these fields belong to, so a /details/ page joins the profile's section. */
+  profileUrl?: string;
+  detailsPage?: "experience" | "education" | "skills";
 }
 
 /** What a page said, for its section in the day's Pages doc. Redacted before it is stored. */
@@ -131,6 +144,18 @@ export interface SyncPagesDocRecord {
   bytes: number;
   sections: number;
   uploadedAt: number;
+  /**
+   * The user moved this day doc to the trash or deleted it. That day's page text is not
+   * uploaded again unless the user presses Undo in Settings.
+   */
+  userDeleted?: boolean;
+}
+
+/** Shown once in Settings after the user trashed a day doc or the Pages folder. */
+export interface PagesDeletedNotice {
+  kind: "day" | "folder";
+  /** Days whose docs the user removed. Empty for the folder. */
+  dates: string[];
 }
 
 export interface SyncSearchRecord {
@@ -222,6 +247,9 @@ export interface SyncEngineState {
   pagesFolderId: string;
   /** What the last Pages doc upload said, when it failed. */
   pagesError: string;
+  /** The user trashed or deleted the Pages folder: no day doc is uploaded until Undo. */
+  pagesFolderTrashed: boolean;
+  pagesNotice: PagesDeletedNotice | null;
 }
 
 export function clampRetentionDays(days: number): number {
@@ -257,6 +285,8 @@ export function defaultSyncEngineState(): SyncEngineState {
     legacyFiles: [],
     pagesFolderId: "",
     pagesError: "",
+    pagesFolderTrashed: false,
+    pagesNotice: null,
   };
 }
 

@@ -101,6 +101,7 @@ function paint(state: SyncEngineState, statusLine?: string): void {
     size.textContent = state.sheetBytes > 0 ? `${formatSheetSize(state.sheetBytes)} of ${formatSheetSize(target)}` : "Not measured yet";
   }
   paintLegacy(state);
+  paintPagesRemoved(state);
   if (enable) {
     // Reconnect Google Drive runs the same Enable flow.
     enable.hidden = state.syncEnabled && !state.authNeeded;
@@ -128,6 +129,26 @@ function paintLegacy(state: SyncEngineState): void {
       return item;
     })
   );
+}
+
+/** Said once, after the user trashed a day doc or the Pages folder in Drive. */
+export function pagesRemovedText(notice: SyncEngineState["pagesNotice"]): string {
+  if (!notice) return "";
+  if (notice.kind === "folder") {
+    return "You moved the Pages folder out of Cortex Memory. Cortex leaves it that way and stops saving page text to Drive. Visits rows stay in the sheet.";
+  }
+  const days = notice.dates.join(", ");
+  const one = notice.dates.length === 1;
+  return `You removed the Pages ${one ? "doc" : "docs"} for ${days}. Cortex leaves ${one ? "that day" : "those days"} out of Drive and keeps the rest in sync.`;
+}
+
+function paintPagesRemoved(state: SyncEngineState): void {
+  const group = byId<HTMLElement>("cx-assistant-pages-removed");
+  const desc = byId<HTMLElement>("cx-assistant-pages-removed-desc");
+  if (!group || !desc) return;
+  const text = pagesRemovedText(state.pagesNotice ?? null);
+  group.hidden = !text;
+  desc.textContent = text;
 }
 
 async function refresh(): Promise<void> {
@@ -320,6 +341,23 @@ export function mountAssistantSyncPanel(): void {
   };
   byId<HTMLButtonElement>("cx-assistant-legacy-trash")?.addEventListener("click", () => answerLegacy("trash"));
   byId<HTMLButtonElement>("cx-assistant-legacy-keep")?.addEventListener("click", () => answerLegacy("keep"));
+
+  const answerPages = (pages: "undo" | "dismiss") => {
+    const buttons = [byId<HTMLButtonElement>("cx-assistant-pages-undo"), byId<HTMLButtonElement>("cx-assistant-pages-ok")];
+    for (const b of buttons) if (b) b.disabled = true;
+    void chrome.runtime
+      .sendMessage({ type: "CORTEX_ASSISTANT_SYNC", action: "pages", pages })
+      .then((res: { ok?: boolean; error?: string } | undefined) => {
+        if (!res?.ok) showFeedback(res?.error || "Drive did not change. Try again.", true);
+        else if (pages === "undo") showFeedback("Restored. Those days upload with the next sync.", false);
+        return refresh();
+      })
+      .finally(() => {
+        for (const b of buttons) if (b) b.disabled = false;
+      });
+  };
+  byId<HTMLButtonElement>("cx-assistant-pages-undo")?.addEventListener("click", () => answerPages("undo"));
+  byId<HTMLButtonElement>("cx-assistant-pages-ok")?.addEventListener("click", () => answerPages("dismiss"));
 
   const details = [...document.querySelectorAll<HTMLInputElement>('input[name="cx-assistant-detail"]')];
   for (const input of details) {

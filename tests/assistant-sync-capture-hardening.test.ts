@@ -224,7 +224,8 @@ describe("service worker visit ending", () => {
     // write the page twice. The check now reads the tab's address at that moment.
     const handler = /chrome\.tabs\.onUpdated\.addListener\(\(tabId, changeInfo\) => \{([\s\S]*?)\n\}\);/.exec(sw)?.[1] ?? "";
     expect(handler).toMatch(/setTimeout\(\(\) => \{[\s\S]*chrome\.tabs\s*\.get\(tabId\)/);
-    expect(handler).toMatch(/if \(!visit \|\| \(now && page\(visit\.url\) === page\(now\)\)\) return null;/);
+    // The tab may sit on the address before a redirect (tabUrl), which is the same page too.
+    expect(handler).toMatch(/if \(!visit \|\| \(now && \(page\(visit\.url\) === page\(now\) \|\| \(visit\.tabUrl && page\(visit\.tabUrl\) === page\(now\)\)\)\)\) return null;/);
     expect(handler).not.toMatch(/changeInfo\.url\.split\("#"\)\[0\];/);
   });
 });

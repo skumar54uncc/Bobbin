@@ -435,7 +435,7 @@
             <div class="cx-group" id="cx-assistant-consent">
               <h3 class="cx-group-title">Before you turn this on</h3>
               <p class="cx-group-desc">
-                Assistant Sync copies your library into a folder named Cortex Memory in your own Google Drive. After you enable it, Cortex updates it about every 5 minutes while you browse, and at least every 15 minutes. The Cortex Memory sheet holds page titles, URLs, searches, LinkedIn profiles, and topics. The Pages folder holds one Google Doc per day with the text of pages you read (20 seconds on screen or scrolled 30 percent), up to 4,000 characters each, and the headline, location, About, Experience, and Education of LinkedIn profiles you open. Text of LinkedIn feed posts syncs only when you turn on Save text of LinkedIn posts I scroll past. The Google permission is drive.file: Cortex can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can read the relevant rows and page text while it answers you. Sync stays off until you press Enable.
+                Assistant Sync copies your library into a folder named Cortex Memory in your own Google Drive. After you enable it, Cortex updates it about every 5 minutes while you browse, and at least every 15 minutes. The Cortex Memory sheet holds page titles, URLs, searches, LinkedIn profiles, and topics. The Pages folder holds one Google Doc per day with the text of pages you read (20 seconds on screen or scrolled 30 percent), up to 4,000 characters each, and the name, headline, location, current role, About, Experience, Education, and skills of LinkedIn profiles you open. Text of LinkedIn feed posts syncs only when you turn on Save text of LinkedIn posts I scroll past. The Google permission is drive.file: Cortex can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can read the relevant rows and page text while it answers you. Sync stays off until you press Enable.
               </p>
               <p class="cx-field-hint">
                 <a href="https://skumar54uncc.github.io/Cortex/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
@@ -468,6 +468,15 @@
                 <button type="button" id="cx-assistant-legacy-keep" class="cx-btn cx-btn-secondary">Keep them</button>
               </div>
               <p class="cx-field-hint">Drive keeps trashed files for 30 days, so you can restore them there.</p>
+            </div>
+            <div class="cx-group" id="cx-assistant-pages-removed" hidden>
+              <h3 class="cx-group-title">Pages docs you removed</h3>
+              <p id="cx-assistant-pages-removed-desc" class="cx-group-desc"></p>
+              <div class="cx-actions-row">
+                <button type="button" id="cx-assistant-pages-undo" class="cx-btn cx-btn-secondary">Undo</button>
+                <button type="button" id="cx-assistant-pages-ok" class="cx-btn cx-btn-secondary">OK</button>
+              </div>
+              <p class="cx-field-hint">Undo brings them back from your Drive trash and uploads those days again.</p>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">Status</h3>
@@ -528,7 +537,7 @@
                   </span>
                 </label>
               </div>
-              <p class="cx-field-hint">Repeat visits to a page on the same day share one row. When the sheet passes its size, Cortex removes the oldest visits first. Each day's Pages doc stays under 500,000 characters.</p>
+              <p class="cx-field-hint">Repeat visits to a page on the same day share one row. When the sheet passes its size, Cortex removes the oldest visits first. Each day's Pages doc stays under 500,000 characters with Standard and 150,000 with Compact.</p>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">LinkedIn feed</h3>

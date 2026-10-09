@@ -22,6 +22,7 @@ import {
   type HistoryVisit,
 } from "./sync-engine";
 import { readSyncEngineState, writeSyncEngineState } from "./db";
+import { dismissPagesNotice, undoPagesRemoval } from "./pages-sync";
 import { applyAssistantSyncPreferences } from "./preferences";
 import { ASSISTANT_SYNC_FILE_ID, ASSISTANT_SYNC_FOLDER_ID } from "./preference-keys";
 import { loadTopicVectors } from "./topics";
@@ -131,6 +132,7 @@ export interface AssistantSyncLaunch {
   backupId?: string | null;
   choice?: MemoryChoice;
   cleanup?: "trash" | "keep";
+  pages?: "undo" | "dismiss";
   /** Visits Chrome synced from the user's other devices, read by the service worker. */
   otherDeviceVisits?: OtherDeviceVisit[];
 }
@@ -176,7 +178,7 @@ async function withPagesFolder(result: AssistantSyncWorkResult): Promise<Assista
 
 /** Token comes from the service worker. This function performs the Google fetches. */
 export async function runAssistantSyncFromChrome(
-  action: "alarm" | "now" | "enable" | "disable" | "cleanup",
+  action: "alarm" | "now" | "enable" | "disable" | "cleanup" | "pages",
   token: string,
   launch: AssistantSyncLaunch
 ): Promise<AssistantSyncWorkResult> {
@@ -189,6 +191,11 @@ export async function runAssistantSyncFromChrome(
     if (action === "cleanup") {
       const answer = launch.cleanup ?? "keep";
       await answerLegacyCleanup(answer === "trash" ? new FetchDriveApi(token) : null, answer);
+      return { ok: true, status: "ready", ids: store.current() };
+    }
+    if (action === "pages") {
+      if (launch.pages === "undo") await undoPagesRemoval(new FetchDriveApi(token));
+      else await dismissPagesNotice();
       return { ok: true, status: "ready", ids: store.current() };
     }
     const api = new FetchDriveApi(token);

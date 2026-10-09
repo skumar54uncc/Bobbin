@@ -75,6 +75,7 @@ import {
   ASSISTANT_SYNC_SHEET_DETAIL_KEY,
 } from "../assistant-sync/preference-keys";
 import {
+  dwellReportPageOk,
   indexPayloadUrlMatchesTab,
   isOptionsPageSender,
   isPrivilegedExtensionSender,
@@ -129,6 +130,7 @@ import { cacheProfilePhoto, getProfilePhoto, profilesWithPhotos } from "../lib/p
 import { applyDwellReport, readingTimeFor, type DwellLedger } from "../lib/reading-time";
 import { FLUSH_LOG_KEY, appendFlushLog, flushLogEntry } from "../assistant-sync/flush-log";
 import { canonicalizeUrl, samePage } from "../assistant-sync/canonical-url";
+import { isChallengePage } from "../assistant-sync/challenge";
 import { resolveEnteredUrl, toSuggestions } from "../lib/omnibox";
 import { saveHighlight } from "../lib/highlights";
 import { sanitizeExtraChunks, sanitizeImageInputs, type ImageInput } from "../lib/capture/extra-chunks";
@@ -397,9 +399,9 @@ async function readAssistantSyncLaunch(): Promise<{
   };
 }
 
-type SyncWorkAction = "alarm" | "now" | "enable" | "disable" | "cleanup";
-/** The user's answer to a question Settings asked: restore or create the sheet, or the old files cleanup. */
-type SyncWorkAnswer = { choice?: "restore" | "create"; cleanup?: "trash" | "keep" };
+type SyncWorkAction = "alarm" | "now" | "enable" | "disable" | "cleanup" | "pages";
+/** The user's answer to a question Settings asked: restore or create the sheet, the old files cleanup, or removed Pages docs. */
+type SyncWorkAnswer = { choice?: "restore" | "create"; cleanup?: "trash" | "keep"; pages?: "undo" | "dismiss" };
 
 async function writeAssistantSyncIds(ids: { folderId?: string | null; fileId?: string | null } | undefined): Promise<void> {
   if (!ids) return;
@@ -508,7 +510,7 @@ async function sendSyncWork(action: SyncWorkAction, token: string, answer: SyncW
     await storageLocalSet({ [ASSISTANT_SYNC_PAGES_FOLDER_ID]: reply.pagesFolderId });
   }
   if (other && reply.otherDeviceStored) await storageLocalSet({ [OTHER_DEVICE_CURSOR_KEY]: other.until });
-  if (action !== "disable" && action !== "cleanup" && !reply.confirm) void recordFlush(action, reply);
+  if (action !== "disable" && action !== "cleanup" && action !== "pages" && !reply.confirm) void recordFlush(action, reply);
   return reply;
 }
 
@@ -543,8 +545,29 @@ function mirrorSyncOn(on: boolean): void {
 /** Tabs measure attention only where capture would run: never incognito, paused, blocked, or sensitive. */
 async function dwellAllowed(url: string, sender: chrome.runtime.MessageSender): Promise<boolean> {
   if (!indexPayloadUrlMatchesTab(url, sender)) return false;
+  return passesIndexGate(url, sender);
+}
+
+async function passesIndexGate(url: string, sender: chrome.runtime.MessageSender): Promise<boolean> {
   const gate = await shouldSkipIndexing(url, sender).catch(() => ({ skip: true as const }));
   return !gate.skip;
+}
+
+/** The page each tab was last cleared to measure, so its final report still counts after the address moves on. */
+const DWELL_PAGES_KEY = "cortex_dwell_pages";
+
+async function rememberDwellPage(tabId: number, url: string): Promise<void> {
+  const stored = await chrome.storage.session.get(DWELL_PAGES_KEY);
+  const pages = (stored[DWELL_PAGES_KEY] ?? {}) as Record<string, string>;
+  pages[tabId] = url;
+  await chrome.storage.session.set({ [DWELL_PAGES_KEY]: pages });
+}
+
+async function dwellReportAllowed(tabId: number, report: DwellMessage, sender: chrome.runtime.MessageSender): Promise<boolean> {
+  const stored = await chrome.storage.session.get(DWELL_PAGES_KEY);
+  const measured = ((stored[DWELL_PAGES_KEY] ?? {}) as Record<string, string>)[tabId];
+  if (!dwellReportPageOk(report, sender.tab?.url, measured)) return false;
+  return passesIndexGate(report.url, sender);
 }
 
 const LOCAL_DWELL_KEY = "cortex_local_dwell";
@@ -558,7 +581,7 @@ let localDwellChain: Promise<unknown> = Promise.resolve();
 function handleDwellReport(tabId: number, report: DwellMessage, sender: chrome.runtime.MessageSender): void {
   localDwellChain = localDwellChain
     .then(async () => {
-      if (!(await dwellAllowed(report.url, sender))) return;
+      if (!(await dwellReportAllowed(tabId, report, sender))) return;
       onDwellReport(tabId, report);
       const stored = await chrome.storage.session.get(LOCAL_DWELL_KEY);
       const ledger = (stored[LOCAL_DWELL_KEY] ?? {}) as DwellLedger;
@@ -573,6 +596,9 @@ function forgetLocalDwell(tabId: number): void {
     .then(async () => {
       const stored = await chrome.storage.session.get(LOCAL_DWELL_KEY);
       const map = (stored[LOCAL_DWELL_KEY] ?? {}) as DwellLedger;
+      const pages = ((await chrome.storage.session.get(DWELL_PAGES_KEY))[DWELL_PAGES_KEY] ?? {}) as Record<string, string>;
+      delete pages[tabId];
+      await chrome.storage.session.set({ [DWELL_PAGES_KEY]: pages });
       if (!(tabId in map)) return;
       delete map[tabId];
       await chrome.storage.session.set({ [LOCAL_DWELL_KEY]: map });
@@ -598,9 +624,10 @@ async function forwardAssistantSync(
       return reply.ok === false ? reply : { ok: true, status: "disabled" };
     }
     if (action === "cleanup" && answer.cleanup !== "trash") return sendSyncWork("cleanup", "", answer);
+    if (action === "pages" && answer.pages !== "undo") return sendSyncWork("pages", "", answer);
     let token = action === "enable" ? tokenFromPage : await silentDriveToken().catch(() => "");
     if (!token) {
-      if (action !== "enable" && action !== "cleanup") await markAuthNeeded();
+      if (action !== "enable" && action !== "cleanup" && action !== "pages") await markAuthNeeded();
       return { ok: false, status: "auth", error: "Sign in to Google is needed before Cortex can sync." };
     }
     if (action === "enable") mirrorSyncOn(true);
@@ -661,6 +688,8 @@ const OPEN_VISIT_STALE_MS = 60 * 60_000;
 interface OpenVisit {
   id: string;
   url: string;
+  /** The tab's address when the visit opened. A LinkedIn payload can name the profile by another URL. */
+  tabUrl?: string;
   activeMs: number | null;
   maxScrollPct: number | null;
   seenAt: number;
@@ -723,7 +752,7 @@ async function finalizeStaleVisits(): Promise<void> {
 function onDwellReport(tabId: number, report: { url: string; activeMs: number; maxScrollPct: number; final: boolean }): void {
   void withOpenVisits((visits) => {
     const visit = visits[tabId];
-    if (!visit || !samePage(visit.url, report.url)) return null;
+    if (!visit || !(samePage(visit.url, report.url) || (visit.tabUrl && samePage(visit.tabUrl, report.url)))) return null;
     visit.activeMs = Math.max(visit.activeMs ?? 0, report.activeMs);
     visit.maxScrollPct = Math.max(visit.maxScrollPct ?? 0, report.maxScrollPct);
     visit.seenAt = Date.now();
@@ -746,12 +775,13 @@ async function captureAssistantSyncVisit(visit: {
   title: string;
   visitedAt: number;
   tabId?: number;
+  tabUrl?: string;
   pageText?: string;
   linkedInFields?: Record<string, unknown> | null;
 }): Promise<void> {
   const state = await readSyncEngineState();
   if (!state.syncEnabled) return;
-  const { tabId, ...rest } = visit;
+  const { tabId, tabUrl, ...rest } = visit;
   const launch = await readAssistantSyncLaunch();
   const ownIds = { fileId: launch.fileId, folderId: launch.folderId, pagesFolderId: launch.pagesFolderId };
   let row: Record<string, unknown> = { ...rest, ownIds, open: false };
@@ -766,7 +796,14 @@ async function captureAssistantSyncVisit(visit: {
         return current.id;
       }
       previous = current;
-      visits[tabId] = { id: visit.id, url: visit.url, activeMs: null, maxScrollPct: null, seenAt: Date.now() };
+      visits[tabId] = {
+        id: visit.id,
+        url: visit.url,
+        ...(tabUrl && tabUrl !== visit.url ? { tabUrl } : {}),
+        activeMs: null,
+        maxScrollPct: null,
+        seenAt: Date.now(),
+      };
       return visit.id;
     });
     row = { ...rest, ownIds, id, open: true };
@@ -833,7 +870,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
         const page = (url: string) => canonicalizeUrl(url) ?? url.split("#")[0] ?? url;
         return withOpenVisits((visits) => {
           const visit = visits[tabId];
-          if (!visit || (now && page(visit.url) === page(now))) return null;
+          if (!visit || (now && (page(visit.url) === page(now) || (visit.tabUrl && page(visit.tabUrl) === page(now))))) return null;
           delete visits[tabId];
           return visit;
         });
@@ -1122,7 +1159,7 @@ async function maybeResurface(tabId: number, documentId: number, url: string): P
 
 async function commitIndexPayload(
   p: IndexPayload,
-  opts: { tabId?: number; extraChunks?: NewChunk[]; imageInputs?: ImageInput[]; replaceKinds?: ChunkKind[] } = {}
+  opts: { tabId?: number; tabUrl?: string; extraChunks?: NewChunk[]; imageInputs?: ImageInput[]; replaceKinds?: ChunkKind[] } = {}
 ): Promise<{
   id: number;
   chunks: number;
@@ -1194,8 +1231,13 @@ async function commitIndexPayload(
             ? {
                 location: detail?.location,
                 about: detail?.about,
+                aboutTruncated: detail?.aboutTruncated === true,
                 experience: detail?.experience ?? [],
                 education: detail?.education ?? [],
+                schools: detail?.schools ?? [],
+                skills: detail?.skills ?? [],
+                publicView: detail?.publicView === true,
+                detailsPage: detail?.detailsPage,
               }
             : {}),
         }
@@ -1206,6 +1248,7 @@ async function commitIndexPayload(
     title: p.title,
     visitedAt: p.visitedAt,
     tabId: opts.tabId ?? undefined,
+    tabUrl: opts.tabUrl,
     pageText: p.text.slice(0, ASSISTANT_SYNC_DRAFT_CHARS),
     linkedInFields,
   }).catch(() => undefined);
@@ -2377,6 +2420,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
           return;
         }
 
+        // A captcha, Cloudflare check, or login wall is not the page. Its real title triggers a new capture.
+        if (isChallengePage({ url: p.url, title: p.title, text: p.text })) {
+          sendResponse({ ok: false, reason: "challenge" });
+          return;
+        }
+
         const personRecorded = p.person ? await maybeRecordPerson(p.person, p.url) : false;
         if (!indexAllowed) {
           sendResponse({ ok: personRecorded, reason: "rate_limited", person: personRecorded });
@@ -2420,6 +2469,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
         delete p.imageInputs;
         const { id: docId, chunks } = await commitIndexPayload(p, {
           tabId: sender.tab?.id,
+          tabUrl: sender.tab?.url,
           extraChunks,
           imageInputs,
         });
@@ -3147,7 +3197,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       return true;
     }
     // Interactive Enable must come from Settings (user gesture + getAuthToken).
-    if (action === "enable" && !isOptionsPageSender(sender)) {
+    if ((action === "enable" || action === "pages") && !isOptionsPageSender(sender)) {
       sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
       return true;
     }
@@ -3168,8 +3218,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       });
       return true;
     }
-    void forwardAssistantSync(action, parsed.token, { choice: parsed.choice, cleanup: parsed.cleanup }).then(async (result) => {
+    void forwardAssistantSync(action, parsed.token, { choice: parsed.choice, cleanup: parsed.cleanup, pages: parsed.pages }).then(async (result) => {
       if (action === "enable" && result.more) await planAssistantFlush("now");
+      // Restored days upload on the next pass.
+      if (action === "pages" && parsed.pages === "undo" && result.ok) await planAssistantFlush("now");
       sendResponse(result);
     });
     return true;
@@ -3178,7 +3230,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
   if (type === "CORTEX_DWELL_ALLOWED") {
     const ask = parseMessage(DwellAllowedMessageSchema, msg);
     if (sender.id !== chrome.runtime.id || sender.tab?.id == null || !ask) return false;
-    void dwellAllowed(ask.url, sender).then((ok) => sendResponse({ ok }));
+    const tabId = sender.tab.id;
+    void dwellAllowed(ask.url, sender)
+      .then(async (ok) => {
+        if (ok) await rememberDwellPage(tabId, ask.url).catch(() => undefined);
+        sendResponse({ ok });
+      })
+      .catch(() => sendResponse({ ok: false }));
     return true;
   }
 

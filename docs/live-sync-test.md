@@ -199,6 +199,29 @@ row with appended 0 and writes 0, and the sheet does not change.
    The row is written as is. In the offscreen document's DevTools, IndexedDB
    cortex-assistant-sync, warnings lists it.
 
+## Optional: Phase 3B fixes checks
+
+1. About tab: Last checked, Last new activity, and the Rules line name your
+   IANA time zone (for example America/New_York), never UTC.
+2. Open a LinkedIn profile signed in, stay 10 seconds, and switch to another
+   tab. People shows minutes on the profile. Its Pages section has labeled
+   Name, Headline, Location, Current role, About (the whole text, without
+   "see more"), Experience, Education, and Skills, and no Sign in, Join now,
+   Message, Connect, or People also viewed text.
+3. Open /in/<slug>/details/experience/ from that profile. After the next
+   sync, the same person's section lists the extra roles, and the details
+   row's pages_doc points at that section.
+4. Open the profile in a signed out window. Its section ends with "Limited
+   public view. Sign in to LinkedIn for full details."
+5. Hit a LinkedIn checkpoint or a Cloudflare "Just a moment..." page. No row
+   is written for it. When the real page loads on the same address, its row
+   has the real title.
+6. A Google search results page has blank topics.
+7. In Drive, move today's day doc to the trash and browse a page with text.
+   After the next sync the doc stays in the trash, today's pages_doc cells are
+   blank, and Settings shows "Pages docs you removed". Undo brings the doc
+   back; the next sync fills it again.
+
 ## Pass criteria
 
 - Every expected row is in the sheet once, within 7 minutes of closing the

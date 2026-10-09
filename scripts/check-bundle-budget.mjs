@@ -9,8 +9,9 @@ export const BUNDLE_BUDGETS = {
   // content.js: lifecycle + messaging only since Phase 5 task 0.2 (was 45 KB).
   "content.js": 15 * KB,
   // extract.js is injected only after the privacy gate passes, never on every
-  // page. It grew with YouTube identity capture (Phase 6 follow-up).
-  "extract.js": 70 * KB,
+  // page. It grew with YouTube identity capture (Phase 6 follow-up), then to 76 KB in
+  // v2 Phase 3B fixes: LinkedIn profile sections (overlay stripping, full About, roles, schools, skills).
+  "extract.js": 76 * KB,
   "resurface-chip.js": 8 * KB,
   "youtube-bridge.js": 4 * KB,
   // Search cards, digest hierarchy, filters, and on-device photo sharpening.
@@ -29,7 +30,8 @@ export const BUNDLE_BUDGETS = {
   // 56 KB to 64 KB after the live test: Drive-created sheet setup and Google error details. Keeps 8 KB free.
   // 64 KB to 72 KB in v2 Phase 3: URL cleanup, instruction flags, other device visits, device column.
   // 72 KB to 77 KB in v2 Phase 3B: Pages day docs (sections, size cap, Drive upload), feed posts. Keeps 8 KB free.
-  "assistant-sync.js": 77 * KB,
+  // 77 KB to 83 KB in the Phase 3B fixes: user deleted day docs and Undo, labeled profile sections, challenge pages.
+  "assistant-sync.js": 83 * KB,
   "assistant-sync-topics.js": 48 * KB,
   "assistant-sync-capture.js": 16 * KB,
   // Options Assistant Sync panel. Stays far under a Dexie or Drive client import.

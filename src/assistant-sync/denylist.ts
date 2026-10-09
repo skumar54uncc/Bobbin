@@ -1,10 +1,11 @@
 import { isBlockedDomain, looksSensitiveHostname } from "../lib/privacy";
 import { shouldAlwaysSkipUrl } from "../lib/sensitive-domains";
+import { isChallengePage } from "./challenge";
 import { isRedirectUrl } from "./url-cleanup";
 
 export const PASSWORD_INPUT_SELECTOR = 'input[type="password"]';
 
-export type SyncDenyReason = "password" | "sensitive" | "user" | "local" | "browser" | "cortex" | "redirect";
+export type SyncDenyReason = "password" | "sensitive" | "user" | "local" | "browser" | "cortex" | "redirect" | "challenge";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
 
@@ -57,7 +58,13 @@ function browserProtocol(protocol: string): boolean {
  */
 export function syncDenyReason(
   raw: string,
-  opts?: { userDomains?: string[]; hasPasswordInput?: boolean; title?: string | null; ownIds?: OwnFileIds | null }
+  opts?: {
+    userDomains?: string[];
+    hasPasswordInput?: boolean;
+    title?: string | null;
+    pageText?: string | null;
+    ownIds?: OwnFileIds | null;
+  }
 ): SyncDenyReason | null {
   if (opts?.hasPasswordInput) return "password";
   if (isCortexOwnFile(raw, opts?.title, opts?.ownIds)) return "cortex";
@@ -75,6 +82,7 @@ export function syncDenyReason(
   if (looksSensitiveHostname(url.hostname, url.pathname)) return "sensitive";
   if (isBlockedDomain(url.hostname, opts?.userDomains ?? [])) return "user";
   if (isRedirectUrl(raw)) return "redirect";
+  if (isChallengePage({ url: raw, title: opts?.title, text: opts?.pageText })) return "challenge";
   return null;
 }
 

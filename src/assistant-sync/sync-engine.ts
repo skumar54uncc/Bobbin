@@ -47,7 +47,7 @@ import {
 import { localVisitStamp } from "./local-time";
 import { mergeDailyRepeats } from "./merge";
 import { buildDayDocs, pagesDocLink, type DayDoc } from "./pages-doc";
-import { syncPagesDocs } from "./pages-sync";
+import { syncPagesDocs, userRemovedDays } from "./pages-sync";
 import { pageTypeForUrl } from "./page-type";
 import { redactForSync, syncTitle } from "./redact-sync";
 import {
@@ -387,6 +387,7 @@ interface Plan {
   /** Day docs from the same memory the rows came from. */
   days: Map<string, DayDoc>;
   pagesCutoff: string;
+  dayDocChars: number;
 }
 
 type Tabs = ReturnType<typeof dataTabs>;
@@ -438,12 +439,21 @@ async function planFlush(
   const rowIds = new Set(
     [...synced.values()].filter((r) => r.key.startsWith("Visits:") && !r.of).map((r) => r.key.slice("Visits:".length))
   );
+  // A day the user removed from Drive gets no pages_doc links: its section is not there to read.
+  const removed = await userRemovedDays();
   const build = async () => {
     const memory = finalOnly(await loadMemory());
     const merged = mergeDailyRepeats(memory, tz, rowIds);
     const days = buildDayDocs(merged, memory.posts, tz);
     const links = new Map<string, string>();
-    for (const day of days.values()) for (const section of day.sections) links.set(section.id, pagesDocLink(day.name, section.id));
+    for (const day of days.values()) {
+      if (removed.all || removed.dates.has(day.date)) continue;
+      for (const section of day.sections) {
+        const link = pagesDocLink(day.name, section.id);
+        links.set(section.id, link);
+        for (const alias of section.aliases ?? []) links.set(alias, link);
+      }
+    }
     const pagesDoc = (rowId: string) => links.get(rowId) ?? "";
     return { merged, days, tabs: dataTabs(merged, { timeZone: tz, detail, pagesDoc }) };
   };
@@ -634,6 +644,7 @@ async function planFlush(
     stale,
     days,
     pagesCutoff: cutoffs.Pages,
+    dayDocChars: rules.dayDocChars,
   };
 }
 
@@ -708,7 +719,7 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
     }
 
     const plan = await planFlush(layout!, state, deps, synced);
-    const docs = () => pagesPass(deps, plan.days, plan.pagesCutoff);
+    const docs = () => pagesPass(deps, plan.days, plan.pagesCutoff, plan.dayDocChars);
     if (!plan.requests.length) {
       state.lastError = "";
       state.sheetBytes = plan.bytes;
@@ -762,10 +773,11 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
 async function pagesPass(
   deps: FlushDeps,
   days: Map<string, DayDoc>,
-  cutoff: string
+  cutoff: string,
+  maxChars: number
 ): Promise<{ docWrites: number; docsUploaded: string[]; more: boolean; pagesError?: string; errorDetail?: GoogleErrorDetail }> {
   if (!deps.ids.folderId) return { docWrites: 0, docsUploaded: [], more: false };
-  const out = await syncPagesDocs({ api: deps.api, memoryFolderId: deps.ids.folderId, days, cutoff, now: deps.now });
+  const out = await syncPagesDocs({ api: deps.api, memoryFolderId: deps.ids.folderId, days, cutoff, now: deps.now, maxChars });
   return {
     docWrites: out.writes,
     docsUploaded: out.uploaded,

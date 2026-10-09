@@ -35,3 +35,29 @@ export function indexPayloadUrlMatchesTab(
     return false;
   }
 }
+
+function withoutHash(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    url.hash = "";
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A dwell report names the tab's current page, or, for a final report only, the page the
+ * tab was cleared to measure. The final report is sent because the address changed, so by
+ * the time it arrives the tab already shows the next page.
+ */
+export function dwellReportPageOk(
+  report: { url: string; final: boolean },
+  tabUrl: string | undefined,
+  measuredUrl: string | undefined
+): boolean {
+  const page = withoutHash(report.url);
+  if (!page) return false;
+  if (tabUrl && page === withoutHash(tabUrl)) return true;
+  return report.final && !!measuredUrl && page === withoutHash(measuredUrl);
+}

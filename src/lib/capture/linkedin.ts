@@ -12,6 +12,18 @@ export interface LinkedInRole {
   company: string;
   /** The row's date line as shown, for example "Jan 2023 - Present · 1 yr 10 mos". */
   dates?: string;
+  /** "Bergen, Norway · On-site", when the row shows one. */
+  location?: string;
+  /** The start of the role description, up to 300 characters. */
+  description?: string;
+}
+
+/** One education row, split the way LinkedIn shows it. */
+export interface LinkedInSchool {
+  school: string;
+  degree: string;
+  field: string;
+  years: string;
 }
 
 export interface LinkedInEntity {
@@ -32,6 +44,16 @@ export interface LinkedInEntity {
   /** Every experience row in page order, current role first, with dates. */
   experience?: LinkedInRole[];
   education?: string[];
+  /** Education rows with degree, field, and years kept apart. */
+  schools?: LinkedInSchool[];
+  /** Skills the page lists, up to 10. */
+  skills?: string[];
+  /** The page held only a shortened About (no full copy in the page). */
+  aboutTruncated?: boolean;
+  /** The logged-out public profile, which shows less. */
+  publicView?: boolean;
+  /** /in/<slug>/details/experience/ and similar: one section of the profile. */
+  detailsPage?: "experience" | "education" | "skills";
   /** "1st", "2nd" or "3rd" as LinkedIn labels the distance. */
   connectionDegree?: string;
   connectionCount?: number;
@@ -58,14 +80,16 @@ const MAX_NAME = 120;
 const MAX_HEADLINE = 220;
 const MAX_COMPANY = 120;
 const MAX_LOCATION = 120;
-const MAX_ABOUT = 600;
+const MAX_ABOUT = 3000;
 const MAX_ROLE = 140;
 const MAX_EDUCATION = 160;
 const MAX_INDUSTRY = 120;
 const MAX_SIZE = 80;
 const MAX_PAST_ROLES = 5;
 const MAX_EXPERIENCE = 10;
-const MAX_EDUCATION_ITEMS = 3;
+const MAX_EDUCATION_ITEMS = 5;
+const MAX_SKILLS = 10;
+const MAX_DESCRIPTION = 300;
 /** Guards against a page claiming an absurd network size. */
 const MAX_CONNECTIONS = 1_000_000;
 
@@ -512,27 +536,103 @@ function headlineFrom(card: Element, name: string, titleRest: string): string {
 }
 
 /**
- * The card a profile section sits in. LinkedIn marks each section with an
- * empty anchor div (`<div id="experience">`) inside the card; older markup
- * puts the id on the section itself.
+ * Sign-in modals, login forms, ads, and rails about other people. Their text is never the
+ * profile's: the live About once held the login popup's text.
  */
+const FOREIGN_CLASS =
+  /modal|contextual-sign-in|sign-in-form|signin|authwall|join-form|join-now|guest-|cta-|ad-banner|\bads?\b|\bad-|promoted|browsemap|similar-profiles|people-also-viewed|aside|right-rail/i;
+/** Section headings of rails that list other profiles or posts. */
+const FOREIGN_HEADING =
+  /^(people also viewed|other similar profiles|people you may know|more profiles for you|people also follow|pages people also viewed|similar pages|explore (more )?(posts|collaborative articles|premium profiles)|you might like|promoted|ad options|others named .+|add new skills.*)$/i;
+
+function isForeignBlock(el: Element): boolean {
+  const tag = el.tagName.toLowerCase();
+  if (tag === "form" || tag === "dialog" || tag === "aside") return true;
+  const role = (el.getAttribute("role") ?? "").toLowerCase();
+  if (role === "dialog" || role === "alertdialog" || el.getAttribute("aria-modal") === "true") return true;
+  const cls = typeof el.className === "string" ? el.className : "";
+  if (FOREIGN_CLASS.test(`${el.id} ${cls}`)) return true;
+  if (tag === "section") {
+    const heading = el.querySelector("h2, h3");
+    if (heading && FOREIGN_HEADING.test(clean(heading.textContent, 80))) return true;
+  }
+  return false;
+}
+
+function inForeignBlock(el: Element | null): boolean {
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    const tag = node.tagName.toLowerCase();
+    if (tag === "main" || tag === "body") return false;
+    if (isForeignBlock(node)) return true;
+  }
+  return false;
+}
+
+/** Buttons, form fields, and media are controls or pictures, never profile text. */
+const NOT_TEXT = "button, input, select, textarea, label, script, style, svg, img, video, [role='button']";
+
+/**
+ * A copy of one profile section with overlays, forms, controls, and rails taken out.
+ * Public pages keep a shortened and a full copy of long text; the full one stays.
+ * A date range split over <time> elements becomes one line.
+ */
+function cleanCopy(section: Element): Element {
+  const copy = section.cloneNode(true) as Element;
+  for (const el of Array.from(copy.querySelectorAll("*"))) {
+    if (!copy.contains(el)) continue;
+    if (el.matches(NOT_TEXT) || isForeignBlock(el)) el.remove();
+  }
+  for (const box of Array.from(copy.querySelectorAll(".show-more-less-text"))) {
+    if (box.querySelector(".show-more-less-text__text--more")) {
+      box.querySelectorAll(".show-more-less-text__text--less").forEach((el) => el.remove());
+    }
+  }
+  for (const range of Array.from(copy.querySelectorAll(".date-range"))) {
+    range.textContent = clean(range.textContent, MAX_ROLE);
+  }
+  return copy;
+}
+
+/** LinkedIn controls and the login form, as whole lines. */
+const UI_LINE =
+  /^(?:\u2026|\.\.\.)?\s*(?:see more|see less|show more|show less|show all.*|message|connect|follow|following|join now|join|sign in|sign up|more|pending|save|send|report|endorse|endorsed|dismiss|close|cancel|continue|agree & join|email or phone|password|show|forgot password\??|new to linkedin\?.*|or|sign in to (?:view|see) .+|view .+ full profile|welcome back|contact info|\d+ endorsements?|endorsed by .+|.+ endorsed .+|\d+ (?:followers?|connections?)|by clicking (?:continue|agree).+|.*user agreement.*privacy policy.*)$/i;
+
+export function isUiLine(line: string): boolean {
+  const s = line.replace(/\s+/g, " ").trim();
+  return !s || UI_LINE.test(s) || isChromeSnippet(s);
+}
+
+/** Drops a trailing "...see more" and reports whether the text was cut on the page. */
+function untruncate(text: string): { text: string; truncated: boolean } {
+  let t = clean(text, MAX_ABOUT + 40);
+  const cut = /(?:\u2026|\.\.\.)\s*(?:see more|show more|more)$/i.test(t);
+  t = t.replace(/\s*(?:\u2026|\.\.\.)?\s*(?:see more|show more)$/i, "").trim();
+  const ellipsis = /(?:\u2026|\.\.\.)$/.test(t);
+  return { text: t.replace(/\s*(?:\u2026|\.\.\.)$/, "").trim(), truncated: cut || ellipsis };
+}
+
 const SECTION_LABEL: Record<string, RegExp> = {
   about: /^about(?:\s+us)?$/i,
   experience: /^experience$/i,
   education: /^education$/i,
+  skills: /^skills$/i,
 };
 
 /**
  * LinkedIn used to mark sections with an empty anchor (`<div id="experience">`).
- * The current profile drops those anchors and keeps a plain heading.
+ * The current profile drops those anchors and keeps a plain heading. Public profiles
+ * mark the section with data-section.
  */
 function sectionFor(main: Element, id: string): Element | null {
   const anchor = main.querySelector(`#${id}`);
-  if (anchor) return anchor.closest("section") ?? anchor.parentElement ?? anchor;
+  if (anchor && !inForeignBlock(anchor)) return anchor.closest("section") ?? anchor.parentElement ?? anchor;
+  const publicName = id === "about" ? '"summary"' : id === "education" ? '"educationsDetails"], section[data-section="education"' : `"${id}"`;
+  const publicSection = main.querySelector(`section[data-section=${publicName}]`);
+  if (publicSection && !inForeignBlock(publicSection)) return publicSection;
   const label = SECTION_LABEL[id];
   if (!label) return null;
   for (const h of Array.from(main.querySelectorAll("h2, h3"))) {
-    if (inChrome(h)) continue;
+    if (inChrome(h) || inForeignBlock(h)) continue;
     if (!label.test(clean(h.textContent, 40))) continue;
     return h.closest("section") ?? h.parentElement;
   }
@@ -544,6 +644,8 @@ function leafItems(section: Element): Element[] {
   return Array.from(section.querySelectorAll("li")).filter((li) => !li.querySelector("li"));
 }
 
+const LEAF = "h3, h4, div, span, p";
+
 /**
  * The visible lines of one experience or education row. LinkedIn renders each
  * line twice: once for sighted readers (aria-hidden) and once for screen
@@ -552,33 +654,40 @@ function leafItems(section: Element): Element[] {
 function entryLines(item: Element): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  const push = (s: string | null | undefined): void => {
-    const v = clean(s, MAX_ROLE);
+  const push = (s: string | null | undefined, max = MAX_ROLE): void => {
+    const v = clean(s, max);
     const key = v.toLowerCase();
-    if (!v || seen.has(key)) return;
+    if (!v || seen.has(key) || isUiLine(v)) return;
     seen.add(key);
     out.push(v);
   };
-  const hidden = item.querySelectorAll('span[aria-hidden="true"]');
+  const hidden = Array.from(item.querySelectorAll('span[aria-hidden="true"]'));
   if (hidden.length) {
-    hidden.forEach((el) => push(el.textContent));
+    hidden.forEach((el) => push(el.textContent, 1200));
     return out;
   }
-  // Older or trimmed markup: one line per leaf element.
-  const leaves = Array.from(item.querySelectorAll("div, span, p")).filter(
-    (el) => !el.querySelector("div, span, p")
+  // Public and older markup: one line per leaf element.
+  // A date range is one line however many elements it spans; lines stay in page order.
+  const leaves = Array.from(item.querySelectorAll(`${LEAF}, .date-range`)).filter((el) =>
+    el.matches(".date-range") ? !el.parentElement?.closest(".date-range") : !el.closest(".date-range") && !el.querySelector(`${LEAF}, .date-range`)
   );
-  for (const el of leaves.length ? leaves : [item]) push(el.textContent);
+  for (const el of leaves.length ? leaves : [item]) push(el.textContent, 1200);
   return out;
 }
 
 /** "Jan 2023 to Present", "2012 to 2014", "5 mos": not a title or a school. */
 function isDateLine(line: string): boolean {
   return (
-    /^(?:[A-Za-z]{3,9}\s+)?\d{4}\b/.test(line) ||
+    /^(?:[A-Za-z]{3,9}\.?\s+)?\d{4}\b/.test(line) ||
     /\bpresent\b/i.test(line) ||
-    /^\d+\s+(?:yrs?|mos?)\b/i.test(line)
+    /^\d+\s+(?:yrs?|mos?|years?|months?)\b/i.test(line)
   );
+}
+
+/** "Bergen, Norway · On-site", "Remote", "Oslo Area". */
+function isPlaceLine(line: string): boolean {
+  if (line.length > 90) return false;
+  return looksLikePlace(line) || /(?:^|·\s*)(?:on-site|remote|hybrid)$/i.test(line) || /\b(?:area|region|metropolitan)$/i.test(line);
 }
 
 /** The company half of "Tidora · Full-time". */
@@ -586,33 +695,92 @@ function companyOfLine(line: string): string {
   return clean(line.split("·")[0], MAX_COMPANY);
 }
 
-function rolesFrom(main: Element): LinkedInRole[] {
-  const section = sectionFor(main, "experience");
-  if (!section) return [];
+function clip(text: string, max: number): string {
+  const t = clean(text, max + 1);
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).trim()}...`;
+}
+
+/** First line of a grouped company block (several roles at one company), outside its nested rows. */
+function groupCompany(item: Element, section: Element): string {
+  const parent = item.parentElement?.closest("li");
+  if (!parent || !section.contains(parent)) return "";
+  for (const el of Array.from(parent.querySelectorAll('span[aria-hidden="true"], h3, h4'))) {
+    if (el.closest("li") !== parent) continue;
+    const t = clean(el.textContent, MAX_COMPANY);
+    if (t && !isUiLine(t) && !isDateLine(t)) return companyOfLine(t);
+  }
+  return "";
+}
+
+function rolesFrom(main: Element, wholePage = false): LinkedInRole[] {
+  const found = sectionFor(main, "experience") ?? (wholePage ? main : null);
+  if (!found) return [];
+  const section = cleanCopy(found);
   const roles: LinkedInRole[] = [];
   for (const item of leafItems(section)) {
     const all = entryLines(item);
-    const lines = all.filter((l) => !isDateLine(l));
-    const title = lines[0] ?? "";
+    const dateAt = all.findIndex(isDateLine);
+    const dates = dateAt >= 0 ? all[dateAt]! : "";
+    const head = (dateAt >= 0 ? all.slice(0, dateAt) : all.slice(0, 2)).filter((l) => !isDateLine(l));
+    const title = clean(head[0], MAX_ROLE);
     if (!title || /^(about|experience|education|activity|skills|featured)$/i.test(title)) continue;
     const linked = clean(item.querySelector('a[href*="/company/"]')?.textContent, MAX_COMPANY);
-    const dates = all.find(isDateLine);
-    roles.push({ title, company: companyOfLine(lines[1] ?? "") || linked, ...(dates ? { dates } : {}) });
+    const company = companyOfLine(head[1] ?? "") || linked || groupCompany(item, section);
+    const rest = (dateAt >= 0 ? all.slice(dateAt + 1) : all.slice(2)).filter((l) => !isDateLine(l));
+    const location = rest[0] && isPlaceLine(rest[0]) ? rest[0] : "";
+    const description = clip(
+      (location ? rest.slice(1) : rest).filter((l) => !/^skills:/i.test(l)).join(" "),
+      MAX_DESCRIPTION
+    );
+    roles.push({
+      title,
+      company,
+      ...(dates ? { dates: clean(dates, 80) } : {}),
+      ...(location ? { location: clean(location, MAX_LOCATION) } : {}),
+      ...(description ? { description } : {}),
+    });
+    if (roles.length >= MAX_EXPERIENCE) break;
   }
   return roles;
 }
 
-function educationFrom(main: Element): string[] {
-  const section = sectionFor(main, "education");
-  if (!section) return [];
-  const out: string[] = [];
+/** "Master of Science - MS, Electrical Engineering" to degree and field. */
+function splitDegree(line: string): { degree: string; field: string } {
+  const at = line.indexOf(", ");
+  if (at < 0) return { degree: clean(line, MAX_EDUCATION), field: "" };
+  return { degree: clean(line.slice(0, at), MAX_EDUCATION), field: clean(line.slice(at + 2), MAX_EDUCATION) };
+}
+
+function schoolsFrom(main: Element, wholePage = false): LinkedInSchool[] {
+  const found = sectionFor(main, "education") ?? (wholePage ? main : null);
+  if (!found) return [];
+  const section = cleanCopy(found);
+  const out: LinkedInSchool[] = [];
   for (const item of leafItems(section)) {
-    const lines = entryLines(item).filter((l) => !isDateLine(l));
-    const school = lines[0] ?? "";
+    const all = entryLines(item);
+    const lines = all.filter((l) => !isDateLine(l));
+    const school = clean(lines[0], MAX_EDUCATION);
     if (!school) continue;
-    const degree = lines[1] ?? "";
-    out.push(clean(degree ? `${school}, ${degree}` : school, MAX_EDUCATION));
+    // Public pages put the field on its own line.
+    const split = splitDegree(lines[1] ?? "");
+    const field = split.field || (lines[2] && lines[2].length <= 120 && !/^(activities|grade)/i.test(lines[2]) ? clean(lines[2], MAX_EDUCATION) : "");
+    out.push({ school, degree: split.degree, field, years: clean(all.find(isDateLine), 40) });
     if (out.length >= MAX_EDUCATION_ITEMS) break;
+  }
+  return out;
+}
+
+function skillsFrom(main: Element, wholePage = false): string[] {
+  const found = sectionFor(main, "skills") ?? (wholePage ? main : null);
+  if (!found) return [];
+  const out: string[] = [];
+  for (const item of leafItems(cleanCopy(found))) {
+    const name = clean(entryLines(item)[0], 80);
+    if (name && !out.includes(name)) out.push(name);
+    if (out.length >= MAX_SKILLS) break;
   }
   return out;
 }
@@ -625,24 +793,63 @@ function profileTextFrom(main: Element): string {
   for (const id of ["about", "experience", "education"]) {
     const section = sectionFor(main, id);
     if (!section) continue;
-    const t = clean(section.textContent, 2000);
+    const t = clean(cleanCopy(section).textContent, 2000);
     if (t) parts.push(t);
   }
   return clean(parts.join(" "), MAX_PROFILE_TEXT);
 }
 
-function aboutFrom(main: Element): string {
+/**
+ * The full About text. LinkedIn keeps the whole text in the page and shortens it with CSS,
+ * often with a second screen reader copy, so the longest copy wins. Nothing is clicked.
+ */
+function aboutFrom(main: Element): { text: string; truncated: boolean } {
   const section = sectionFor(main, "about");
-  const scope =
-    section ?? main.querySelector('[class*="org-about-us-organization-description"]');
-  if (!scope) return "";
-  for (const sel of ['span[aria-hidden="true"]', "p", ".inline-show-more-text"]) {
-    const el = scope.querySelector(sel);
-    const t = clean(el?.textContent, MAX_ABOUT);
-    if (t) return t;
+  const scope = section ?? main.querySelector('[class*="org-about-us-organization-description"]');
+  if (!scope) return { text: "", truncated: false };
+  const copy = cleanCopy(scope);
+  copy.querySelectorAll("h2, h3").forEach((el) => {
+    if (SECTION_LABEL.about!.test(clean(el.textContent, 40))) el.remove();
+  });
+  // Single copies first. A wrapper holds the visible and the screen reader copy back to back.
+  const pick = (selectors: string[]) => {
+    const out: string[] = [];
+    for (const sel of selectors) {
+      for (const el of Array.from(copy.querySelectorAll(sel))) {
+        const t = clean(el.textContent, MAX_ABOUT + 40);
+        if (t && !isUiLine(t)) out.push(t);
+      }
+    }
+    return out;
+  };
+  let copies = pick([".show-more-less-text__text--more", 'span[aria-hidden="true"]', ".visually-hidden"]);
+  if (!copies.length) copies = pick([".inline-show-more-text", ".core-section-container__content", "p"]);
+  if (!copies.length) {
+    const whole = clean(copy.textContent, MAX_ABOUT + 40).replace(/^about(?:\s+us)?\s+/i, "");
+    if (whole && !isUiLine(whole)) copies.push(whole);
   }
-  // Whole card as a last resort: drop the "About" heading it starts with.
-  return clean(scope.textContent, MAX_ABOUT + 20).replace(/^about(?:\s+us)?\s+/i, "").slice(0, MAX_ABOUT);
+  const longest = copies.sort((x, y) => y.length - x.length)[0] ?? "";
+  const { text, truncated } = untruncate(longest);
+  return { text: text.slice(0, MAX_ABOUT), truncated: truncated || longest.length > MAX_ABOUT };
+}
+
+/** Logged-out public layout: LinkedIn's guest top card with no signed-in navigation. */
+function isPublicLayout(doc: Document): boolean {
+  const guest = doc.querySelector(".top-card-layout, [data-tracking-control-name^='public_profile'], section.core-section-container");
+  const signedIn = doc.querySelector(".global-nav__me, section[data-member-id], .pv-top-card, .scaffold-layout__main");
+  return Boolean(guest) && !signedIn;
+}
+
+/** /in/<slug>/details/experience/ and its education and skills siblings. */
+function detailsPageOf(url: string): LinkedInEntity["detailsPage"] {
+  const m = (() => {
+    try {
+      return new URL(url).pathname.match(/^\/in\/[^/]+\/details\/(experience|education|skills)\/?/i);
+    } catch {
+      return null;
+    }
+  })();
+  return m ? (m[1]!.toLowerCase() as LinkedInEntity["detailsPage"]) : undefined;
 }
 
 const PHOTO_HOSTS = new Set(["media.licdn.com", "static.licdn.com", "avatars.githubusercontent.com"]);
@@ -852,7 +1059,7 @@ function topCardOf(main: Element): Element {
 
 function locationFrom(card: Element): string {
   const cands = card.querySelectorAll(
-    ".pv-text-details__left-panel .text-body-small, .text-body-small, .org-top-card-summary-info-list__info-item"
+    ".pv-text-details__left-panel .text-body-small, .text-body-small, .top-card__subline-item, .org-top-card-summary-info-list__info-item"
   );
   for (const el of Array.from(cands)) {
     const t = clean(el.textContent, MAX_LOCATION);
@@ -960,7 +1167,7 @@ export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | 
   const main = doc.querySelector("main") ?? doc.body;
   if (!main) return null;
   const title = titleParts(doc);
-  const about = aboutFrom(main);
+  const { text: about, truncated: aboutTruncated } = aboutFrom(main);
   const profileText = profileTextFrom(main);
 
   if (isCompany) {
@@ -1009,26 +1216,32 @@ export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | 
     return companySummary ? { ...entity, summary: companySummary } : entity;
   }
 
-  const name = resolveProfileName(
-    [...headingCandidates(main, false), title.name, ogTitleName(doc)],
-    profileUrl
-  );
+  const detailsPage = detailsPageOf(url);
+  const sectionName = /^(experience|education|skills|licenses.*|projects|volunteering|languages)$/i;
+  const named = (candidates: string[]) =>
+    candidates.map((c) => c.replace(/^(experience|education|skills)\s*[|\-\u2013\u00b7]\s*/i, "")).filter((c) => !sectionName.test(c.trim()));
+  const name =
+    resolveProfileName(named([...headingCandidates(main, false), title.name, ogTitleName(doc)]), profileUrl) ||
+    (detailsPage ? nameFromProfileUrl(profileUrl) : "");
   if (!name) return null;
   const card = topCardOf(main);
-  const headline = headlineFrom(card, name, title.rest);
+  const headline = detailsPage ? "" : headlineFrom(card, name, title.rest);
   const companyButton = main
     .querySelector('[aria-label^="Current company"]')
     ?.getAttribute("aria-label")
     ?.match(/^Current company:\s*([^.]+)/i)?.[1];
-  const roles = rolesFrom(main);
+  const roles = detailsPage && detailsPage !== "experience" ? [] : rolesFrom(main, detailsPage === "experience");
   const current = roles[0];
   const company = clean(
     companyButton || companyFromHeadline(headline) || current?.company || "",
     MAX_COMPANY
   );
-  const location = locationFrom(card);
+  const location = detailsPage ? "" : locationFrom(card);
   const { degree, count } = connectionsFrom(card);
-  const education = educationFrom(main);
+  const schools = detailsPage && detailsPage !== "education" ? [] : schoolsFrom(main, detailsPage === "education");
+  const education = schools.map((row) => clean([row.school, [row.degree, row.field].filter(Boolean).join(", ")].filter(Boolean).join(", "), MAX_EDUCATION));
+  const skills = detailsPage && detailsPage !== "skills" ? [] : skillsFrom(main, detailsPage === "skills");
+  const publicView = isPublicLayout(doc);
   const pastRoles = roles.slice(1, 1 + MAX_PAST_ROLES).map(({ title, company }) => ({ title, company }));
   const experience = roles.slice(0, MAX_EXPERIENCE);
 
@@ -1042,10 +1255,15 @@ export function parseLinkedInPage(doc: Document, url: string): LinkedInEntity | 
     ...(photoUrl ? { photoUrl } : {}),
     ...(location ? { location } : {}),
     ...(about ? { about } : {}),
+    ...(about && aboutTruncated ? { aboutTruncated: true } : {}),
     ...(current?.title ? { roleTitle: current.title } : {}),
     ...(pastRoles.length ? { pastRoles } : {}),
     ...(experience.length ? { experience } : {}),
     ...(education.length ? { education } : {}),
+    ...(schools.length ? { schools } : {}),
+    ...(skills.length ? { skills } : {}),
+    ...(publicView ? { publicView: true } : {}),
+    ...(detailsPage ? { detailsPage } : {}),
     ...(degree ? { connectionDegree: degree } : {}),
     ...(count !== undefined ? { connectionCount: count } : {}),
     ...(profileText ? { profileText } : {}),
@@ -1082,8 +1300,11 @@ export function sanitizePersonDetail(raw: unknown): Partial<LinkedInEntity> {
 
   const location = text(o.location, 160);
   if (location) out.location = location;
-  const about = text(o.about, 600);
+  const about = text(o.about, MAX_ABOUT);
   if (about) out.about = about;
+  if (about && o.aboutTruncated === true) out.aboutTruncated = true;
+  if (o.publicView === true) out.publicView = true;
+  if (o.detailsPage === "experience" || o.detailsPage === "education" || o.detailsPage === "skills") out.detailsPage = o.detailsPage;
   const roleTitle = text(o.roleTitle, 160);
   if (roleTitle) out.roleTitle = roleTitle;
 
@@ -1107,14 +1328,41 @@ export function sanitizePersonDetail(raw: unknown): Partial<LinkedInEntity> {
       const title = text(row?.title, 160);
       const company = text(row?.company, 120);
       const dates = text(row?.dates, 80);
-      if (title || company) roles.push({ title: title ?? "", company: company ?? "", ...(dates ? { dates } : {}) });
+      const location = text(row?.location, MAX_LOCATION);
+      const description = text(row?.description, MAX_DESCRIPTION + 3);
+      if (title || company) {
+        roles.push({
+          title: title ?? "",
+          company: company ?? "",
+          ...(dates ? { dates } : {}),
+          ...(location ? { location } : {}),
+          ...(description ? { description } : {}),
+        });
+      }
     }
     if (roles.length) out.experience = roles;
   }
 
   if (Array.isArray(o.education)) {
-    const schools = o.education.map((e) => text(e, 200)).filter((e): e is string => !!e).slice(0, 3);
+    const schools = o.education.map((e) => text(e, 200)).filter((e): e is string => !!e).slice(0, MAX_EDUCATION_ITEMS);
     if (schools.length) out.education = schools;
+  }
+
+  if (Array.isArray(o.schools)) {
+    const rows: LinkedInSchool[] = [];
+    for (const r of o.schools) {
+      if (rows.length >= MAX_EDUCATION_ITEMS) break;
+      const row = r as Record<string, unknown> | null;
+      const school = text(row?.school, MAX_EDUCATION);
+      if (!school) continue;
+      rows.push({ school, degree: text(row?.degree, MAX_EDUCATION) ?? "", field: text(row?.field, MAX_EDUCATION) ?? "", years: text(row?.years, 40) ?? "" });
+    }
+    if (rows.length) out.schools = rows;
+  }
+
+  if (Array.isArray(o.skills)) {
+    const skills = o.skills.map((e) => text(e, 80)).filter((e): e is string => !!e).slice(0, MAX_SKILLS);
+    if (skills.length) out.skills = skills;
   }
 
   const degree = text(o.connectionDegree, 8);

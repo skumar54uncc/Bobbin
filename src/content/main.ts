@@ -11,7 +11,13 @@ import { doubleShiftSwitch } from "./double-shift";
 import { createDwellTracker, DWELL_TICK_MS, pageScrollPct, videoPlaying, type DwellTracker } from "./dwell";
 import { createFeedWatcher, isLinkedInFeed, type SeenPost } from "./feed-posts";
 import { ASSISTANT_SYNC_FEED_POSTS_KEY } from "../assistant-sync/preference-keys";
-import { shouldReindexAfterMutation } from "./mutation-throttle";
+import {
+  contentFinishedRendering,
+  MAX_GROWTH_RECAPTURES,
+  MAX_TITLE_RECAPTURES,
+  shouldReindexAfterMutation,
+  THIN_PAGE_CHARS,
+} from "./mutation-throttle";
 import { devLog } from "../lib/extension-logger";
 
 declare global {
@@ -35,6 +41,15 @@ let mutationTimer: number | undefined;
 /** When a mutation last caused a re-index request on this page. */
 let lastMutationIndexAt: number | null = null;
 let currentUrl = normalizedUrl();
+/** Re-captures of this address after its title changed or its text finished rendering. */
+let titleRecaptures = 0;
+let growthRecaptures = 0;
+/** Visible text length when this address was last sent for capture, while the page was thin. */
+let capturedChars: number | null = null;
+
+function visibleChars(): number {
+  return (document.body?.innerText ?? "").length;
+}
 
 function scheduleIndex(delayMs: number): void {
   window.clearTimeout(indexTimer);
@@ -57,6 +72,7 @@ function scheduleCaptureRetries(): void {
 async function indexPage(): Promise<void> {
   try {
     if (!isExtensionRuntimeAlive()) return;
+    if (capturedChars == null || capturedChars < THIN_PAGE_CHARS) capturedChars = visibleChars();
     await sendRuntimeMessage({ type: "CORTEX_INDEX_REQUEST", url: normalizedUrl() });
   } catch (e) {
     if (isInvalidatedExtensionError(e)) return;
@@ -184,6 +200,9 @@ function onLocationLikeChange(reason: "spa" | "mutation" | "title"): void {
   const next = normalizedUrl();
   if (next !== currentUrl) {
     currentUrl = next;
+    titleRecaptures = 0;
+    growthRecaptures = 0;
+    capturedChars = null;
     // The old page gets its final report; the new page is measured only if the gate allows it.
     dwell?.end();
     stopDwell();
@@ -191,6 +210,21 @@ function onLocationLikeChange(reason: "spa" | "mutation" | "title"): void {
     scheduleIndex(reason === "spa" ? 900 : 1400);
     scheduleCaptureRetries();
     return;
+  }
+
+  // The real page replaced a challenge or loading shell: capture it now, not after the throttle.
+  if (reason === "title" && titleRecaptures < MAX_TITLE_RECAPTURES) {
+    titleRecaptures += 1;
+    scheduleIndex(1500);
+    return;
+  }
+  if (reason === "mutation" && growthRecaptures < MAX_GROWTH_RECAPTURES && capturedChars != null && capturedChars < THIN_PAGE_CHARS) {
+    if (contentFinishedRendering(capturedChars, visibleChars())) {
+      growthRecaptures += 1;
+      capturedChars = null;
+      scheduleIndex(1200);
+      return;
+    }
   }
 
   if (reason === "mutation" || reason === "title") {

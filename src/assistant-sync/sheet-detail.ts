@@ -16,11 +16,13 @@ export interface SheetDetailRules {
   /** Visits, Searches, People, and Companies older than this leave the sheet. Null: retention decides. */
   rowDays: number | null;
   targetBytes: number;
+  /** Characters one Pages day doc may hold. The longest sections are trimmed first. */
+  dayDocChars: number;
 }
 
 export const SHEET_DETAIL: Record<SheetDetail, SheetDetailRules> = {
-  standard: { pagesDays: null, rowDays: null, targetBytes: 3 * MB },
-  compact: { pagesDays: 14, rowDays: 30, targetBytes: 600 * KB },
+  standard: { pagesDays: null, rowDays: null, targetBytes: 3 * MB, dayDocChars: 500_000 },
+  compact: { pagesDays: 14, rowDays: 30, targetBytes: 600 * KB, dayDocChars: 150_000 },
 };
 
 export const DEFAULT_SHEET_DETAIL: SheetDetail = "standard";
