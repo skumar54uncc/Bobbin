@@ -57,8 +57,9 @@ describe("store listing fields (Phase 2.9)", () => {
     expect(manifest.name).toBe("Bobbin: Browsing Memory for AI");
     expect(manifest.short_name).toBe("Bobbin");
     expect(manifest.description).toBe(
-      "Ask anything you've read, watched or scanned. Pages, YouTube, tables and images, indexed on your device."
+      "Read it once. Ask your AI anytime. Remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free. No servers."
     );
+    expect(manifest.description.startsWith("Read it once. Ask your AI anytime.")).toBe(true);
   });
 
   it("keeps name within 75 and description within 132 characters", () => {

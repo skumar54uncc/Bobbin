@@ -30,8 +30,8 @@ Hosted from `docs/` once GitHub Pages deploys this branch:
 
 | Page | File | URL |
 |------|------|-----|
-| Privacy policy | `docs/privacy-policy.html` | https://skumar54uncc.github.io/Cortex/privacy-policy.html |
-| Data deletion | `docs/data-deletion.html` | https://skumar54uncc.github.io/Cortex/data-deletion.html |
+| Privacy policy | `docs/privacy-policy.html` | https://skumar54uncc.github.io/Bobbin/privacy-policy.html |
+| Data deletion | `docs/data-deletion.html` | https://skumar54uncc.github.io/Bobbin/data-deletion.html |
 | Listing draft | `docs/store-listing.md` | Not a public page. Copy it into the store console. |
 
 The policy states the `drive.file` scope, the single Cortex Memory folder, that the user owns the file, and that delete-all moves the folder to the Drive trash. The listing draft has the title, the 104 character short description, the full description, category Productivity, permission justifications, and the single purpose statement.

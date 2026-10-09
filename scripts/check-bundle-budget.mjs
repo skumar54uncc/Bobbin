@@ -51,7 +51,8 @@ export const BUNDLE_BUDGETS = {
   // on-page pointer (injected only into the assistant tab), and the lazy Settings section.
   "connect-frame.js": 24 * KB,
   "guide-panel.js": 26 * KB,
-  "guide-pointer.js": 16 * KB,
+  // 16 KB to 24 KB so the live pointer keeps 8 KB free (15.7 KB at the Bobbin rename).
+  "guide-pointer.js": 24 * KB,
   "connect-options.js": 24 * KB,
   "popup.js": 20 * KB,
   "onboarding.js": 10 * KB,

@@ -55,16 +55,16 @@ If you turn on **cloud chat** and add a **Google Gemini API key**, prompts are s
 
 ## Contact
 
-**GitHub Issues:** [github.com/skumar54uncc/Cortex/issues](https://github.com/skumar54uncc/Cortex/issues)
+**GitHub Issues:** [github.com/skumar54uncc/Bobbin/issues](https://github.com/skumar54uncc/Bobbin/issues)
 
 ## Public URLs for the Chrome Web Store
 
 After you enable **GitHub Pages** (Settings → Pages → **Deploy from branch** `main`, folder **`/docs`**), use:
 
-**`https://skumar54uncc.github.io/Cortex/privacy-policy.html`**
+**`https://skumar54uncc.github.io/Bobbin/privacy-policy.html`**
 
 as the **Privacy policy** URL in the listing. Data deletion:
 
-**`https://skumar54uncc.github.io/Cortex/data-deletion.html`**
+**`https://skumar54uncc.github.io/Bobbin/data-deletion.html`**
 
 The same content lives in this repo as `docs/privacy-policy.html`, `docs/data-deletion.html`, and `docs/PRIVACY_POLICY.md`.

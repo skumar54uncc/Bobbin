@@ -83,17 +83,23 @@ Leave unticked: health information, financial and payment information, authentic
 
 **Limited Use / Google APIs**: Bobbin's use of information received from Google APIs adheres to the Chrome Web Store User Data Policy, including the Limited Use requirements. State this on the privacy policy URL (see `docs/privacy-policy.html`).
 
-**Privacy policy URL**: the listing needs a public privacy policy page that matches the answers above (`https://skumar54uncc.github.io/Cortex/privacy-policy.html` after GitHub Pages deploy).
+**Privacy policy URL**: the listing needs a public privacy policy page that matches the answers above (`https://skumar54uncc.github.io/Bobbin/privacy-policy.html` after GitHub Pages deploy).
 
 ## Listing copy
 
 **Name:** Bobbin: Browsing Memory for AI
 
-**Short description (manifest, 104 characters):** Ask anything you've read, watched or scanned. Pages, YouTube, tables and images, indexed on your device.
+**Tagline:** Read it once. Ask your AI anytime.
+
+**Short description (123 characters):** Bobbin remembers the pages you read so Claude, ChatGPT, Gemini, and Grok can answer questions about them. Free. No servers.
+
+**Manifest description (tagline first, 116 characters):** Read it once. Ask your AI anytime. Remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free. No servers.
 
 **Detailed description:**
 
-Bobbin is a private memory for your browser. After you agree on the welcome page, it indexes what you read, watch and open, and lets you search it or ask questions in plain language. Indexing, search and the language model all run on your device. There is no Bobbin server, no account and no tracking.
+Read it once. Ask your AI anytime.
+
+Bobbin keeps the thread of everything you read. Bobbin is a private memory for your browser. After you agree on the welcome page, it indexes what you read, watch and open, and lets you search it or ask questions in plain language. Indexing, search and the language model all run on your device. There is no Bobbin server, no account and no tracking.
 
 Optional Assistant Sync copies that same memory into a folder named Bobbin Memory in your own Google Drive, only after you press Enable. The Google permission is drive.file (files Bobbin creates, not your whole Drive). Optional Cloud Chat uses your own Gemini API key and sends only short text snippets, never whole pages, PDFs or images. Assist Sync and Cloud Chat are features of the same private memory.
 

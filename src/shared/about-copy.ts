@@ -1,5 +1,17 @@
 /** Popup footer, About Bobbin, and header taglines. Exact user-facing Phase 6 copy. */
 
+/** Store listing tagline, homepage hero, onboarding first screen, and the start of the manifest description. */
+export const PRODUCT_TAGLINE = "Read it once. Ask your AI anytime.";
+/** About Bobbin and the homepage brand line. */
+export const BRAND_LINE = "Bobbin keeps the thread of everything you read.";
+/** Chrome Web Store short description. 132 characters max. */
+export const STORE_SUMMARY =
+  "Bobbin remembers the pages you read so Claude, ChatGPT, Gemini, and Grok can answer questions about them. Free. No servers.";
+
+/** Manifest description: tagline first, then a 132-character-safe rest. The store short description is STORE_SUMMARY. */
+export const MANIFEST_DESCRIPTION =
+  "Read it once. Ask your AI anytime. Remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free. No servers.";
+
 export const TAGLINE_SYNC_OFF = "Private library of pages you read on this device";
 export const TAGLINE_SYNC_ON = "On this device and in your Google Drive";
 
@@ -17,10 +29,11 @@ export const ABOUT_FREE_P1 =
 export const ABOUT_FREE_P2 =
   "What this means for you: some things that would need servers, like live answers while your browser is closed, are not part of Bobbin. The Google Sheet updates about every 5 minutes while you browse and at least every 15 minutes. Page text goes into Google Docs in your Bobbin Memory folder, one per day. That is how your assistant stays current without any paid infrastructure.";
 
-/** Published GitHub Pages URL. The repo is still named Cortex; do not invent a /Bobbin host. */
-export const PRIVACY_POLICY_URL = "https://skumar54uncc.github.io/Cortex/privacy-policy.html";
-export const DATA_DELETION_URL = "https://skumar54uncc.github.io/Cortex/data-deletion.html";
-export const TERMS_URL = "https://github.com/skumar54uncc/Cortex/blob/main/TERMS.md";
+/** GitHub Pages from main, /docs. Phase 7 adds /privacy and /terms as folders. */
+export const HOMEPAGE_URL = "https://skumar54uncc.github.io/Bobbin/";
+export const PRIVACY_POLICY_URL = "https://skumar54uncc.github.io/Bobbin/privacy-policy.html";
+export const DATA_DELETION_URL = "https://skumar54uncc.github.io/Bobbin/data-deletion.html";
+export const TERMS_URL = "https://github.com/skumar54uncc/Bobbin/blob/main/TERMS.md";
 export const FEEDBACK_FORM_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLSeC5bLybg056jJQzpohfgSX8r1OWlgtT7LSlSeHgvbT3CqQCQ/viewform";
 

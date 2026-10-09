@@ -5,10 +5,15 @@ import {
   ABOUT_FREE_P1,
   ABOUT_FREE_P2,
   ABOUT_FREE_TITLE,
+  BRAND_LINE,
   DATA_DELETION_URL,
   FEEDBACK_FORM_URL,
   FOOTER_FREE,
+  HOMEPAGE_URL,
+  MANIFEST_DESCRIPTION,
   PRIVACY_POLICY_URL,
+  PRODUCT_TAGLINE,
+  STORE_SUMMARY,
   TAGLINE_SYNC_OFF,
   TAGLINE_SYNC_ON,
   TERMS_URL,
@@ -53,7 +58,18 @@ describe("Phase 6 free and independent copy", () => {
     expect(html).toContain(">Privacy Policy<");
     expect(html).toContain(">Terms of Use<");
     expect(html).toContain(">Send feedback<");
-    expect(html).not.toContain("github.io/Bobbin");
+    expect(html).toContain(BRAND_LINE);
+    expect(html).toContain("github.io/Bobbin");
+    expect(html).not.toContain("github.io/Cortex");
+  });
+
+  it("uses the marketing tagline on onboarding and in the manifest", () => {
+    const onb = readFileSync(join(root, "src/onboarding/onboarding.html"), "utf8");
+    expect(onb).toContain(PRODUCT_TAGLINE);
+    expect(MANIFEST_DESCRIPTION.startsWith(PRODUCT_TAGLINE)).toBe(true);
+    expect(MANIFEST_DESCRIPTION.length).toBeLessThanOrEqual(132);
+    expect(STORE_SUMMARY.length).toBeLessThanOrEqual(132);
+    expect(HOMEPAGE_URL).toBe("https://skumar54uncc.github.io/Bobbin/");
   });
 
   it("uses the same taglines in the overlay", () => {

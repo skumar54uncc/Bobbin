@@ -66,7 +66,7 @@ Updated terms will be posted at this address with a new date.
 ## 9. Privacy
 
 The Bobbin Privacy Policy explains what data Bobbin handles and how you
-control it: https://skumar54uncc.github.io/Cortex/privacy.
+control it: https://skumar54uncc.github.io/Bobbin/privacy-policy.html.
 
 ## 10. Governing law
 
