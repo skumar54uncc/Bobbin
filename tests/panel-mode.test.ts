@@ -619,7 +619,7 @@ describe("panelSurfaceForGesture", () => {
     ).toBe("overlay");
   });
 
-  it("cannot dock on a page Cortex cannot inject into", () => {
+  it("cannot dock on a page Bobbin cannot inject into", () => {
     expect(surface("chrome://extensions", false)).toBe("side-panel");
     expect(surface("https://example.com/report.pdf", false)).toBe("side-panel");
     expect(

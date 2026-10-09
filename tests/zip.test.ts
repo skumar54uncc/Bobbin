@@ -37,7 +37,7 @@ function readZip(buf: Uint8Array): Map<string, string> {
 describe("createZip (store only)", () => {
   it("round-trips UTF-8 names and contents with valid CRCs", () => {
     const zip = createZip([
-      { path: "index.md", data: "# Cortex\n" },
+      { path: "index.md", data: "# Bobbin\n" },
       { path: "notes/café-été.md", data: "Glacier notes: 4 nT/h, ümlaut" },
       { path: "empty.md", data: "" },
     ]);

@@ -102,19 +102,22 @@ describe("denylist", () => {
     expect(documentHasPasswordInput({ querySelector: () => null })).toBe(false);
   });
 
-  it("never captures Cortex's own sheet or folder", () => {
+  it("never captures Bobbin's own sheet or folder", () => {
     const ownIds = { fileId: "1AbCsheetId", folderId: "0FolderId" };
     expect(syncDenyReason("https://docs.google.com/spreadsheets/d/1AbCsheetId/edit#gid=0", { ownIds })).toBe("cortex");
     expect(syncDenyReason("https://drive.google.com/drive/u/0/folders/0FolderId", { ownIds })).toBe("cortex");
     expect(syncDenyReason("https://drive.google.com/open?id=1AbCsheetId", { ownIds })).toBe("cortex");
     // By title, before any id is stored.
+    expect(syncDenyReason("https://docs.google.com/spreadsheets/d/x/edit", { title: "Bobbin Memory - Google Sheets" })).toBe("cortex");
+    expect(syncDenyReason("https://drive.google.com/drive/folders/y", { title: "Bobbin Memory - Google Drive" })).toBe("cortex");
     expect(syncDenyReason("https://docs.google.com/spreadsheets/d/x/edit", { title: "Cortex Memory - Google Sheets" })).toBe("cortex");
-    expect(syncDenyReason("https://drive.google.com/drive/folders/y", { title: "Cortex Memory - Google Drive" })).toBe("cortex");
+    expect(syncDenyReason("https://docs.google.com/document/d/p/edit", { title: "Cortex Pages 2026-10-08 Thursday - Google Docs" })).toBe("cortex");
+    expect(syncDenyReason("https://docs.google.com/document/d/p/edit", { title: "Bobbin Pages 2026-10-08 Thursday - Google Docs" })).toBe("cortex");
     expect(syncDenyReason("https://docs.google.com/spreadsheets/d/z/edit", { title: "Cortex Memory Archive 2026-09 - Google Sheets" })).toBe("cortex");
     // Other files, and the same title anywhere else, are kept.
     expect(syncDenyReason("https://docs.google.com/spreadsheets/d/other/edit", { title: "Budget - Google Sheets", ownIds })).toBeNull();
-    expect(syncDenyReason("https://docs.google.com/document/d/a/edit", { title: "Cortex Memory notes - Google Docs" })).toBeNull();
-    expect(syncDenyReason("https://example.com/blog", { title: "Cortex Memory" })).toBeNull();
+    expect(syncDenyReason("https://docs.google.com/document/d/a/edit", { title: "Bobbin Memory notes - Google Docs" })).toBeNull();
+    expect(syncDenyReason("https://example.com/blog", { title: "Bobbin Memory" })).toBeNull();
   });
 });
 
@@ -326,7 +329,7 @@ describe("capture", () => {
     });
   });
 
-  it("skips the Cortex Memory sheet by its stored id", async () => {
+  it("skips the Bobbin Memory sheet by its stored id", async () => {
     const result = await visit({
       url: "https://docs.google.com/spreadsheets/d/sheet-1/edit",
       title: "Untitled",

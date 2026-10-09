@@ -243,7 +243,7 @@ describe("validateBackup", () => {
     return JSON.parse(JSON.stringify(await collectBackup(T))) as CortexBackup;
   }
 
-  it("rejects files that are not a Cortex backup of this version", async () => {
+  it("rejects files that are not a Bobbin backup of this version", async () => {
     const b = await valid();
     expect(validateBackup(null).ok).toBe(false);
     expect(validateBackup({ ...b, format: "other" }).ok).toBe(false);

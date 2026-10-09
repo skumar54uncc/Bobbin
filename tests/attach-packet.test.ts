@@ -23,7 +23,7 @@ describe("packet text", () => {
 
   it("starts with the header, then one line per item", () => {
     expect(formatPacket(items, false, o).split("\n")).toEqual([
-      "Context from my Cortex browsing memory: 3 items, Oct 7 to Oct 9, 2026",
+      "Context from my Bobbin browsing memory: 3 items, Oct 7 to Oct 9, 2026",
       "- Oct 9, 10:42 AM: How to bake bread (https://example.com/bread)",
       '- Oct 8, 9:05 AM: Google search: "sourdough starter"',
       "- Oct 7: Ada Lovelace, Analyst (https://www.linkedin.com/in/ada)",
@@ -40,7 +40,7 @@ describe("packet text", () => {
   it("names one day, or a range across years", () => {
     expect(dateRangeLabel([items[0]!], o)).toBe("Oct 9, 2026");
     expect(dateRangeLabel([items[0]!, page("x", "2025-12-30T00:00:00Z", "t", "https://e.com")], o)).toBe("Dec 30, 2025 to Oct 9, 2026");
-    expect(formatPacket([items[0]!], false, o).split("\n")[0]).toBe("Context from my Cortex browsing memory: 1 item, Oct 9, 2026");
+    expect(formatPacket([items[0]!], false, o).split("\n")[0]).toBe("Context from my Bobbin browsing memory: 1 item, Oct 9, 2026");
     expect(formatPacket([], true, o)).toBe("");
   });
 

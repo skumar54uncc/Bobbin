@@ -205,7 +205,7 @@ function progress(a: AssistantConfig, current: GuideStep | null, done: readonly 
 
 function syncBlock(): HTMLElement {
   const sync = el("section", "cx-guide-sync");
-  sync.append(el("p", "cx-guide-text", "First, turn on Assistant Sync. Cortex copies your memory to the Cortex Memory folder in your Google Drive."));
+  sync.append(el("p", "cx-guide-text", "First, turn on Assistant Sync. Bobbin copies your memory to the Bobbin Memory folder in your Google Drive."));
   const enable = button("cx-btn cx-btn-primary cx-connect-enable", "Enable");
   const feedback = el("p", "cx-guide-feedback");
   feedback.setAttribute("role", "status");
@@ -260,7 +260,7 @@ function stepCard(a: AssistantConfig, s: GuideStep, current: GuideState): HTMLEl
 
   if (s.id === "test") {
     const ask = el("div", "cx-guide-ask");
-    ask.append(el("p", "cx-guide-text", "Did it answer from your Cortex Memory?"));
+    ask.append(el("p", "cx-guide-text", "Did it answer from your Bobbin Memory?"));
     const answers = el("div", "cx-guide-actions");
     const yes = button("cx-btn cx-btn-secondary", "Yes");
     const no = button("cx-btn cx-btn-secondary", "No");
@@ -297,7 +297,7 @@ function render(): void {
   const a = state ? assistantById(state.assistant) : undefined;
   if (!state || !a) {
     const empty = el("div", "cx-guide-empty");
-    empty.append(el("h1", "cx-guide-title", "No setup open"), el("p", undefined, "Start setup again from Connect your AI in the Cortex panel or Settings."));
+    empty.append(el("h1", "cx-guide-title", "No setup open"), el("p", undefined, "Start setup again from Connect your AI in the Bobbin panel or Settings."));
     root.append(empty);
     return;
   }
@@ -334,13 +334,13 @@ function render(): void {
   }
 
   if (step) root.append(stepCard(a, step, current));
-  else root.append(el("p", "cx-guide-success", `${a.name} is connected to your Cortex memory.`));
+  else root.append(el("p", "cx-guide-success", `${a.name} is connected to your Bobbin memory.`));
 
   if (a.attachHint) {
     const hint = el("p", "cx-guide-attach");
     const attach = button("cx-guide-link", "Ask any assistant");
     attach.addEventListener("click", () => void openAttach());
-    hint.append("No Google Drive access? Use ", attach, " in the Cortex side panel instead.");
+    hint.append("No Google Drive access? Use ", attach, " in the Bobbin side panel instead.");
     root.append(hint);
   }
 

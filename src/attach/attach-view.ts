@@ -14,12 +14,12 @@ export interface AttachDeps {
 }
 
 export const ATTACH_TITLE = "Ask any assistant";
-export const ATTACH_LEAD = "Works in any chat. Cortex finds it in your memory and puts it in the chat box; you press send.";
+export const ATTACH_LEAD = "Works in any chat. Bobbin finds it in your memory and puts it in the chat box; you press send.";
 
 const INSERT_ERRORS: Record<Exclude<InsertReply, { ok: true }>["reason"], string> = {
-  nofield: "Cortex could not find a chat box. Click into the message box on the page, then try again, or use Copy.",
+  nofield: "Bobbin could not find a chat box. Click into the message box on the page, then try again, or use Copy.",
   rejected: "The chat box did not accept the text. Use Copy and paste it instead.",
-  blocked: "Cortex cannot write on this page. Use Copy and paste it instead.",
+  blocked: "Bobbin cannot write on this page. Use Copy and paste it instead.",
 };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -119,7 +119,7 @@ export function renderAttachView(container: HTMLElement, deps: AttachDeps): void
     if (mine !== run) return;
     if (got == null) {
       items = [];
-      status.textContent = "Cortex could not search right now. Try again.";
+      status.textContent = "Bobbin could not search right now. Try again.";
     } else {
       items = got;
       status.textContent = got.length

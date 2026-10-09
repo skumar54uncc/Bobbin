@@ -183,7 +183,7 @@ describe("other device visits", () => {
     expect(row!.at(-1)).toBe("");
   });
 
-  it("applies the deny rules and the Cortex file skip", async () => {
+  it("applies the deny rules and the Bobbin file skip", async () => {
     const stored = await storeOtherDeviceVisits(
       [
         remote("other:1", "https://www.chase.com/account"),

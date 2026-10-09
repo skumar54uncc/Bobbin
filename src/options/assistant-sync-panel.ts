@@ -10,8 +10,8 @@ import { formatSheetSize, normalizeSheetDetail, SHEET_DETAIL } from "../assistan
 type EnableReply = { ok?: boolean; error?: string; status?: string; confirm?: "missing" | "trashed" } | undefined;
 
 const CONFIRM_TEXT = {
-  trashed: "Cortex Memory is in your Google Drive trash. Restore it to keep syncing into the same sheet.",
-  missing: "Cortex Memory was deleted from Google Drive. Create a new sheet to start syncing again. Cortex fills it from the history on this device.",
+  trashed: "Bobbin Memory is in your Google Drive trash. Restore it to keep syncing into the same sheet.",
+  missing: "Bobbin Memory was deleted from Google Drive. Create a new sheet to start syncing again. Bobbin fills it from the history on this device.",
 } as const;
 const CONFIRM_BUTTON = { trashed: "Restore from trash", missing: "Create a new sheet" } as const;
 
@@ -57,7 +57,7 @@ function paintNowButton(): void {
   if (!now) return;
   const resting = Date.now() < restUntil;
   now.disabled = !syncOn || resting || countdown !== 0;
-  now.title = syncOn ? "Sync Cortex Memory now" : "Turn Assistant Sync on before syncing";
+  now.title = syncOn ? "Sync Bobbin Memory now" : "Turn Assistant Sync on before syncing";
 }
 
 function rest(): void {
@@ -88,7 +88,7 @@ function paint(state: SyncEngineState, statusLine?: string): void {
     const file = connected ? "felt-connected" : "felt-lost";
     pose.src = `mascot/${file}.webp`;
     pose.srcset = `mascot/${file}@256.webp 256w, mascot/${file}.webp 512w`;
-    pose.alt = connected ? "Cortex mascot connected" : "Cortex mascot looking for a page";
+    pose.alt = connected ? "Bobbin mascot connected" : "Bobbin mascot looking for a page";
   }
   if (backfill) {
     backfill.textContent = state.backfillTotal
@@ -135,11 +135,11 @@ function paintLegacy(state: SyncEngineState): void {
 export function pagesRemovedText(notice: SyncEngineState["pagesNotice"]): string {
   if (!notice) return "";
   if (notice.kind === "folder") {
-    return "You moved the Pages folder out of Cortex Memory. Cortex leaves it that way and stops saving page text to Drive. Visits rows stay in the sheet.";
+    return "You moved the Pages folder out of Bobbin Memory. Bobbin leaves it that way and stops saving page text to Drive. Visits rows stay in the sheet.";
   }
   const days = notice.dates.join(", ");
   const one = notice.dates.length === 1;
-  return `You removed the Pages ${one ? "doc" : "docs"} for ${days}. Cortex leaves ${one ? "that day" : "those days"} out of Drive and keeps the rest in sync.`;
+  return `You removed the Pages ${one ? "doc" : "docs"} for ${days}. Bobbin leaves ${one ? "that day" : "those days"} out of Drive and keeps the rest in sync.`;
 }
 
 function paintPagesRemoved(state: SyncEngineState): void {
@@ -184,7 +184,7 @@ export function driveTokenFromClick(): Promise<string> {
     chrome.identity.getAuthToken({ interactive: true }, (value) => {
       const err = chrome.runtime.lastError;
       if (err?.message || !value) {
-        reject(new Error(err?.message || "Sign in to Google is needed before Cortex can sync."));
+        reject(new Error(err?.message || "Sign in to Google is needed before Bobbin can sync."));
         return;
       }
       resolve(value);
@@ -248,7 +248,7 @@ export function mountAssistantSyncPanel(): void {
       )
       .catch((error: unknown) => {
         showFeedback(
-          error instanceof Error ? error.message : "Sign in to Google is needed before Cortex can sync.",
+          error instanceof Error ? error.message : "Sign in to Google is needed before Bobbin can sync.",
           true
         );
       })

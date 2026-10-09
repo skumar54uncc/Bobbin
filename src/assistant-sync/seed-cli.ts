@@ -7,4 +7,4 @@ for (const tab of workbook.tabs) {
   console.info(`${tab.title} rows ${tab.rows.length} header ${tab.rows[0]?.join(" | ") ?? ""}`);
 }
 console.info(`needles ${needles.join(", ")}`);
-console.info("This file is Cortex Memory Seed, not the live Cortex Memory sheet.");
+console.info("This file is Bobbin Memory Seed, not the live Bobbin Memory sheet.");

@@ -40,13 +40,13 @@ export function installFeedbackCard(slot: HTMLElement): FeedbackCardController {
     const root = document.createElement("aside");
     root.className = "cortex-review";
     root.setAttribute("role", "dialog");
-    root.setAttribute("aria-label", "Rate Cortex");
+    root.setAttribute("aria-label", "Rate Bobbin");
 
     const text = document.createElement("div");
     text.className = "cortex-review-text";
     const title = document.createElement("p");
     title.className = "cortex-review-title";
-    title.textContent = "Enjoying Cortex?";
+    title.textContent = "Enjoying Bobbin?";
     const body = document.createElement("p");
     body.className = "cortex-review-body";
     body.textContent = "A short review on the Chrome Web Store helps others find it.";

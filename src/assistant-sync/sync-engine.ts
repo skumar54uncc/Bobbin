@@ -21,6 +21,7 @@ import {
   googleErrorDetail,
   googleStatus,
   inspectMemory,
+  renameMemoryToProduct,
   resolveMemory,
   syncedKey,
   type DriveApi,
@@ -79,14 +80,14 @@ export const DAY_MS = 86_400_000;
 export const FLUSH_BYTE_BUDGET = 1_500_000;
 
 export const SYNC_MISSING_MESSAGE =
-  "The Cortex Memory file is missing from Drive. Sync will stay paused until you turn it on again.";
+  "The Bobbin Memory file is missing from Drive. Sync will stay paused until you turn it on again.";
 export const SYNC_TRASHED_MESSAGE =
-  "The Cortex Memory file is in the trash. Sync will stay paused until you turn it on again.";
+  "The Bobbin Memory file is in the trash. Sync will stay paused until you turn it on again.";
 export const SYNC_ABSENT_MESSAGE =
-  "Cortex Memory has not been created in Drive yet. Turn sync on to create it.";
+  "Bobbin Memory has not been created in Drive yet. Turn sync on to create it.";
 export const SYNC_REJECTED_MESSAGE =
-  "Google did not accept the last update. Cortex will check the sheet and try again.";
-export const SYNC_FORBIDDEN_MESSAGE = "Google did not allow Cortex to create or edit the sheet.";
+  "Google did not accept the last update. Bobbin will check the sheet and try again.";
+export const SYNC_FORBIDDEN_MESSAGE = "Google did not allow Bobbin to create or edit the sheet.";
 
 /** The 403 message, with Google's own words when the reply had them. */
 export function forbiddenMessage(error: unknown): string {
@@ -777,6 +778,8 @@ async function pagesPass(
   maxChars: number
 ): Promise<{ docWrites: number; docsUploaded: string[]; more: boolean; pagesError?: string; errorDetail?: GoogleErrorDetail }> {
   if (!deps.ids.folderId) return { docWrites: 0, docsUploaded: [], more: false };
+  const pagesFolderId = (await readSyncEngineState()).pagesFolderId;
+  await renameMemoryToProduct(deps.api, deps.ids, pagesFolderId);
   const out = await syncPagesDocs({ api: deps.api, memoryFolderId: deps.ids.folderId, days, cutoff, now: deps.now, maxChars });
   return {
     docWrites: out.writes,

@@ -235,7 +235,7 @@ export async function* runChat(
             ? `I didn't find that in your library for ${parsed.timeRange.label}.`
             : "I didn't find that in your library.",
           userAction: searchResults.abstained
-            ? "Try different words, or read the page again so Cortex can index it."
+            ? "Try different words, or read the page again so Bobbin can index it."
             : undefined,
           recoverable: true,
         },
@@ -306,7 +306,7 @@ export async function* runChat(
       yield {
         type: "error",
         data: {
-          message: "Cortex did not get an answer. Try again.",
+          message: "Bobbin did not get an answer. Try again.",
           recoverable: true,
         },
       };

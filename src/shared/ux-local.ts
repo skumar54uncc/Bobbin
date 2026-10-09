@@ -196,7 +196,7 @@ export const COACH_COPY: Record<CoachTipId, { title: string; body: string }> = {
   },
   agents: {
     title: "Connect AI agents",
-    body: "Copy a prompt for Claude, ChatGPT, Gemini, or Cursor so it can read your Cortex Memory sheet.",
+    body: "Copy a prompt for Claude, ChatGPT, Gemini, or Cursor so it can read your Bobbin Memory sheet.",
   },
   assistSync: {
     title: "Assistant Sync",

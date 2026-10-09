@@ -91,7 +91,7 @@ function esc(s: string): string {
   return d.innerHTML;
 }
 
-const CORTEX_SETTINGS_PHRASE = "Cortex settings";
+const CORTEX_SETTINGS_PHRASE = "Bobbin settings";
 
 /** Plain segment: optionally link the exact phrase "Cortex settings" to the options page. */
 function openExtensionOptionsFromOverlay(section?: string): void {
@@ -129,7 +129,7 @@ function appendPlainWithOptionalSettingsLink(
     a.role = "link";
     a.className = linkClass;
     a.textContent = CORTEX_SETTINGS_PHRASE;
-    a.title = "Open Cortex settings";
+    a.title = "Open Bobbin settings";
     el.appendChild(a);
     p = i + CORTEX_SETTINGS_PHRASE.length;
   }
@@ -362,7 +362,7 @@ ${shadowCss}`;
             <img class="cx-brand-mark" src="${iconUrl}" alt="Cortex mascot" width="40" height="40" />
           </span>
           <div class="cx-brand-text">
-            <span id="cortex-overlay-title" class="cx-brand-wordmark">Cortex</span>
+            <span id="cortex-overlay-title" class="cx-brand-wordmark">Bobbin</span>
             <span id="cortex-overlay-tagline" class="cx-brand-tagline">Private library of pages you read on this device</span>
           </div>
         </div>
@@ -1374,7 +1374,7 @@ ${shadowCss}`;
       (resp.error === ERROR_CODES.QUESTION_TOO_LONG ||
       resp.code === ERROR_CODES.QUESTION_TOO_LONG
         ? undefined
-        : "Try again or open Cortex settings.");
+        : "Try again or open Bobbin settings.");
     return { message: msg, userAction: hint, recoverable: true };
   }
 
@@ -1676,7 +1676,7 @@ ${shadowCss}`;
     if (digest.pageCount === 0) {
       const empty = document.createElement("div");
       empty.className = "cortex-digest-empty-card";
-      empty.innerHTML = `${mascotHtml("sleepy", 96)}<p class="cortex-digest-empty-title">The digest fills as you read.</p><p class="cortex-digest-empty-hint">Pages you open show up here after Cortex indexes them.</p><button type="button" class="cx-m-action">Show last 7 days</button>`;
+      empty.innerHTML = `${mascotHtml("sleepy", 96)}<p class="cortex-digest-empty-title">The digest fills as you read.</p><p class="cortex-digest-empty-hint">Pages you open show up here after Bobbin indexes them.</p><button type="button" class="cx-m-action">Show last 7 days</button>`;
       empty.querySelector("button")?.addEventListener("click", () => {
         bodyEl.querySelector<HTMLButtonElement>('[data-digest-range="last_7_days"]')?.click();
       });

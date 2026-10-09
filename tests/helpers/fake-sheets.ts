@@ -1,5 +1,5 @@
 import { FOLDER_MIME, GoogleCallError, type DriveApi, type DriveFileInfo, type SheetInfo } from "../../src/assistant-sync/drive-api";
-import { PROTECTED_DESCRIPTION, SHEET_TABS } from "../../src/assistant-sync/sheet";
+import { isProtectedDescription, PROTECTED_DESCRIPTION, SHEET_TABS } from "../../src/assistant-sync/sheet";
 
 type Cells = { values: { userEnteredValue: { stringValue: string } }[] };
 interface Tab {
@@ -40,12 +40,12 @@ export class FakeSheets implements DriveApi {
 
   constructor(seed = true) {
     if (!seed) return;
-    this.files.set("folder", { name: "Cortex Memory", trashed: false });
-    this.files.set("file", { name: "Cortex Memory", trashed: false, parent: "folder", sheet: true });
+    this.files.set("folder", { name: "Bobbin Memory", trashed: false });
+    this.files.set("file", { name: "Bobbin Memory", trashed: false, parent: "folder", sheet: true });
     this.books.set("file", this.freshBook(true));
   }
 
-  /** `created`: as Cortex creates it, with its edit warning on every tab. */
+  /** `created`: as Bobbin creates it, with its edit warning on every tab. */
   private freshBook(created = false): Map<string, Tab> {
     const protections = () => (created ? [PROTECTED_DESCRIPTION] : []);
     return new Map(SHEET_TABS.map((title, sheetId) => [title, { sheetId, rows: [], protections: protections() }]));
@@ -110,7 +110,7 @@ export class FakeSheets implements DriveApi {
       .map(([id, file]) => ({ id, name: file.name, trashed: file.trashed }));
   }
 
-  /** Like Drive files.create with the spreadsheet mimeType: one untitled default tab, no Cortex tabs yet. */
+  /** Like Drive files.create with the spreadsheet mimeType: one untitled default tab, no Bobbin tabs yet. */
   async createSpreadsheet(name: string, parentId?: string): Promise<string> {
     this.creates += 1;
     const id = `file-${this.files.size + 1}`;
@@ -119,9 +119,14 @@ export class FakeSheets implements DriveApi {
     return id;
   }
 
-  /** Cortex Memory folders, oldest first. */
+  /** Memory folders, oldest first. */
   folders(): string[] {
-    return [...this.files].filter(([, file]) => !file.sheet && file.name === "Cortex Memory").map(([id]) => id);
+    return [...this.files].filter(([, file]) => !file.sheet && !file.doc && (file.name === "Bobbin Memory" || file.name === "Bobbin Memory")).map(([id]) => id);
+  }
+
+  async renameFile(id: string, name: string): Promise<void> {
+    const file = this.files.get(id);
+    if (file) file.name = name;
   }
 
   async untrashFile(id: string): Promise<void> {
@@ -130,20 +135,21 @@ export class FakeSheets implements DriveApi {
   }
 
   /**
-   * Understands the queries Cortex sends: files in a folder, and the Cortex Memory sheet or
+   * Understands the queries Bobbin sends: files in a folder, and the Bobbin Memory sheet or
    * folder by name. Files come back in creation order, as orderBy=createdTime returns them.
    */
   async listFiles(query: string): Promise<DriveFileInfo[]> {
     this.lists += 1;
     const parent = /^'([^']+)' in parents/.exec(query)?.[1];
-    const name = /name = '([^']+)'/.exec(query)?.[1];
+    const names = [...query.matchAll(/name = '([^']+)'/g)].map((m) => m[1]!);
     const folder = query.includes(FOLDER_MIME);
+    const nameOk = (fileName: string) => !names.length || names.includes(fileName);
     return [...this.files]
       .filter(([, file]) => !file.trashed)
       .filter(([, file]) =>
         parent
-          ? file.parent === parent && (name == null || file.name === name) && (!folder || (!file.sheet && !file.doc))
-          : !!file.sheet !== folder && file.name === name
+          ? file.parent === parent && nameOk(file.name) && (!folder || (!file.sheet && !file.doc))
+          : !!file.sheet !== folder && nameOk(file.name)
       )
       .map(([id, file]) => ({ id, name: file.name, trashed: file.trashed, parents: file.parent ? [file.parent] : [] }));
   }
@@ -257,7 +263,7 @@ export class FakeSheets implements DriveApi {
     if (!book) throw new Error("google_404");
     return {
       sheetIds: Object.fromEntries([...book].map(([name, tab]) => [name, tab.sheetId])),
-      protectedIds: [...book.values()].filter((tab) => tab.protections.includes(PROTECTED_DESCRIPTION)).map((tab) => tab.sheetId),
+      protectedIds: [...book.values()].filter((tab) => tab.protections.some(isProtectedDescription)).map((tab) => tab.sheetId),
       tabs: [...book].map(([title, tab]) => ({ sheetId: tab.sheetId, title })),
     };
   }

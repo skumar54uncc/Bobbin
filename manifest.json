@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Cortex: Private Memory for Everything You Read",
+  "name": "Bobbin: Browsing Memory for AI",
+  "short_name": "Bobbin",
   "version": "1.2.0",
   "description": "Ask anything you've read, watched or scanned. Pages, YouTube, tables and images, indexed on your device.",
   "minimum_chrome_version": "116",
@@ -41,7 +42,7 @@
     "service_worker": "service-worker.js"
   },
   "action": {
-    "default_title": "Open Cortex search",
+    "default_title": "Open Bobbin search",
     "default_icon": {
       "16": "icons/icon-16.png",
       "48": "icons/icon-48.png",

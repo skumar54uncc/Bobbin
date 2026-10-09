@@ -33,7 +33,8 @@ export const BUNDLE_BUDGETS = {
   // 64 KB to 72 KB in v2 Phase 3: URL cleanup, instruction flags, other device visits, device column.
   // 72 KB to 77 KB in v2 Phase 3B: Pages day docs (sections, size cap, Drive upload), feed posts. Keeps 8 KB free.
   // 77 KB to 83 KB in the Phase 3B fixes: user deleted day docs and Undo, labeled profile sections, challenge pages.
-  "assistant-sync.js": 83 * KB,
+  // 83 KB to 85 KB for the Bobbin Drive rename-in-place. Keeps 8 KB free.
+  "assistant-sync.js": 85 * KB,
   "assistant-sync-topics.js": 48 * KB,
   "assistant-sync-capture.js": 16 * KB,
   // v2 Phase 5: Ask any assistant's local record (searches and page text, sync on or off), lazy in offscreen.

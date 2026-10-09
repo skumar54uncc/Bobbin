@@ -45,7 +45,7 @@ describe("pass4 security gates", () => {
     // The Connect frame may send Enable and nothing else past the general gate.
     expect(syncGate).toContain('const frameEnable = parsed?.action === "enable" && isConnectFrameSender(sender);');
     expect(syncGate).toContain('action === "pages" && !isOptionsPageSender(sender)');
-    // Status alone is open to Cortex pages such as the Connect frame; content scripts are not extension pages.
+    // Status alone is open to Bobbin pages such as the Connect frame; content scripts are not extension pages.
     expect(syncGate).toContain('parsed?.action === "status" && isExtensionPageSender(sender)');
   });
 

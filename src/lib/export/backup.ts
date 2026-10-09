@@ -199,10 +199,10 @@ export type ValidateResult =
 export function validateBackup(raw: unknown): ValidateResult {
   try {
     const top = obj(raw, "backup");
-    if (top.format !== BACKUP_FORMAT) throw new Invalid("This file is not a Cortex backup.");
-    if (top.version !== BACKUP_VERSION) throw new Invalid("This backup was made by a different Cortex version.");
+    if (top.format !== BACKUP_FORMAT) throw new Invalid("This file is not a Bobbin backup.");
+    if (top.version !== BACKUP_VERSION) throw new Invalid("This backup was made by a different Bobbin version.");
     const schemaVersion = id(top, "schemaVersion", "backup");
-    if (schemaVersion > CORTEX_DB_SCHEMA_VERSION) throw new Invalid("This backup is newer than this Cortex. Update Cortex first.");
+    if (schemaVersion > CORTEX_DB_SCHEMA_VERSION) throw new Invalid("This backup is newer than this Bobbin. Update Bobbin first.");
     const exportedAt = num(top, "exportedAt", "backup");
     const s = obj(top.stores, "stores");
 
@@ -368,7 +368,7 @@ export function validateBackup(raw: unknown): ValidateResult {
     return { ok: true, backup, counts };
   } catch (e) {
     if (e instanceof Invalid) return { ok: false, error: e.message };
-    return { ok: false, error: "This file could not be read as a Cortex backup." };
+    return { ok: false, error: "This file could not be read as a Bobbin backup." };
   }
 }
 

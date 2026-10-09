@@ -30,7 +30,7 @@ import type { ChatSettings } from "./types";
 import type { ParsedQuestion } from "./question-parser";
 
 /** Exported for tests and the eval harness. */
-export const DIGEST_SYSTEM_PROMPT = `You are Cortex, generating a "what I read" digest.
+export const DIGEST_SYSTEM_PROMPT = `You are Bobbin, generating a "what I read" digest.
 
 You will be given the titles, summaries, and key passages from webpages a user
 visited during a specific time period, each one numbered. Your job is to produce
@@ -236,7 +236,7 @@ export function localReadingFocus(
   narrativeParts: DigestNarrativePart[];
 } {
   if (groups.length === 0) {
-    const text = "Cortex saved pages for this period, but none of them could be summarized.";
+    const text = "Bobbin saved pages for this period, but none of them could be summarized.";
     return { narrative: text, narrativeParts: [{ text, sourceIndexes: [] }] };
   }
   const byDomain = new Map<string, DigestSource[]>();
@@ -536,7 +536,7 @@ export async function generateDigest(
         : request.range === "yesterday"
           ? "yesterday"
           : "in the last 7 days";
-    const narrative = `You didn't visit any pages ${label} that Cortex indexed. Browse some content and try again.`;
+    const narrative = `You didn't visit any pages ${label} that Bobbin indexed. Browse some content and try again.`;
     return {
       schemaVersion: DIGEST_SCHEMA_VERSION,
       range: request.range,

@@ -87,7 +87,7 @@ describe("extractPdfPages (pdfjs-dist, no eval)", () => {
 });
 
 describe("pdfjs-dist ships no dynamic code evaluation", () => {
-  it("has no eval( or new Function( in the files Cortex bundles or copies", () => {
+  it("has no eval( or new Function( in the files Bobbin bundles or copies", () => {
     const dir = join(__dirname, "..", "node_modules", "pdfjs-dist", "legacy", "build");
     for (const f of ["pdf.mjs", "pdf.worker.min.mjs"]) {
       const src = readFileSync(join(dir, f), "utf8");

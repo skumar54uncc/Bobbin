@@ -1,3 +1,4 @@
+import { MEMORY_NAME, PAGES_DOC_PREFIX, SEED_SHEET_NAME as PRODUCT_SEED_SHEET_NAME } from "../shared/product-name";
 import { dailySummary } from "./daily-summary";
 import type { SyncCompanyRecord, SyncContentRecord, SyncPersonRecord, SyncSearchRecord, SyncVisitRecord } from "./db";
 import { localVisitStamp } from "./local-time";
@@ -6,9 +7,9 @@ import { mergeDailyRepeats, type MergedMemory } from "./merge";
 import { clipTitle } from "./redact-sync";
 import { csvBytes, DEFAULT_SHEET_DETAIL, formatSheetSize, SHEET_DETAIL, type SheetDetail } from "./sheet-detail";
 
-export const LIVE_SHEET_NAME = "Cortex Memory";
-export const LIVE_FOLDER_NAME = "Cortex Memory";
-export const SEED_SHEET_NAME = "Cortex Memory Seed";
+export const LIVE_SHEET_NAME = MEMORY_NAME;
+export const LIVE_FOLDER_NAME = MEMORY_NAME;
+export const SEED_SHEET_NAME = PRODUCT_SEED_SHEET_NAME;
 export const SCHEMA_VERSION = 6;
 export const CELL_WARN_AT = 5_000_000;
 
@@ -106,7 +107,7 @@ function dayCount(first: string, last: string): number {
 export function aboutRows(input: {
   firstDate: string;
   lastDate: string;
-  /** When Cortex last looked for new browsing. */
+  /** When Bobbin last looked for new browsing. */
   checkedAt: string;
   /** Date and time of the newest visit in the sheet, or "" when there is none. */
   newestAt: string;
@@ -126,24 +127,24 @@ export function aboutRows(input: {
   const coverage = input.firstDate
     ? `Coverage: ${input.firstDate} to ${input.lastDate} (${days} ${days === 1 ? "day" : "days"}).`
     : "Coverage: no visits yet.";
-  const checked = `Last checked: ${input.checkedAt} ${input.timeZone}. Cortex last looked for new browsing at this time.`;
+  const checked = `Last checked: ${input.checkedAt} ${input.timeZone}. Bobbin last looked for new browsing at this time.`;
   const newest = input.newestAt
     ? `Last new activity: ${input.newestAt} ${input.timeZone}. The newest visit in this sheet. If it is older than Last checked, nothing new was recorded in between.`
     : "Last new activity: none yet.";
   const kept = input.pagesDays ? ` Pages docs are kept for the last ${input.pagesDays} days.` : "";
   const cap = (input.dayDocChars ?? SHEET_DETAIL.standard.dayDocChars).toLocaleString("en-US");
   const lines = [
-    "Cortex Memory",
+    MEMORY_NAME,
     checked,
     newest,
     coverage,
     `Sheet size: ${formatSheetSize(input.sheetBytes)}. Rows: ${input.visits} visits, ${input.searches} searches, ${input.people} LinkedIn profiles, ${input.companies} company pages.`,
-    "This is the user's only browsing memory, written automatically by the Cortex Chrome extension: this sheet is the index, and the Google Docs in the Pages folder next to it hold what pages actually said. Use them when the user asks what they browsed, read, searched, watched, or looked at, or about a person or post they saw. Check them before using your own knowledge or the web, even if you already know the topic. Start the answer by saying whether it is in the log.",
+    "This is the user's only browsing memory, written automatically by the Bobbin Chrome extension: this sheet is the index, and the Google Docs in the Pages folder next to it hold what pages actually said. Use them when the user asks what they browsed, read, searched, watched, or looked at, or about a person or post they saw. Check them before using your own knowledge or the web, even if you already know the topic. Start the answer by saying whether it is in the log.",
     MANAGED_LINE,
     "How to look something up",
     "1. Read this About tab first.",
     "2. Find the matching rows in Visits, Searches, People, or Companies by date, weekday, time, title, domain, or topics.",
-    `3. For what a page, profile, or post said, read the row's pages_doc cell. It names a Google Doc in Cortex Memory/Pages and a section, for example ${PAGES_DOC_EXAMPLE}.${kept}`,
+    `3. For what a page, profile, or post said, read the row's pages_doc cell. It names a Google Doc in ${MEMORY_NAME}/Pages and a section, for example ${PAGES_DOC_EXAMPLE}.${kept}`,
     "4. Open that Doc and find the heading that starts with the row ID in brackets. The text under Website text is what the page said. If a pages_doc section is missing, it arrives with the next sync.",
     "5. LinkedIn feed posts have their own sections, with IDs that start with post:. A feed visit's section lists the posts seen in it.",
     "6. Answer only from this sheet and the Pages docs. If nothing matches, say so.",
@@ -177,9 +178,9 @@ export function aboutRows(input: {
   return lines.map((line) => [line]);
 }
 
-export const PAGES_DOC_EXAMPLE = "Cortex Pages 2026-10-08 Thursday#doc:42:1791480000000";
+export const PAGES_DOC_EXAMPLE = `${PAGES_DOC_PREFIX} 2026-10-08 Thursday#doc:42:1791480000000`;
 
-/** pages_doc for a row id: "Cortex Pages 2026-10-08 Thursday#<row id>", or "" when the row has no section. */
+/** pages_doc for a row id: "Bobbin Pages 2026-10-08 Thursday#<row id>", or "" when the row has no section. */
 export type PagesDocLookup = (rowId: string) => string;
 
 /** A Visits row. `visitCount` and `lastVisitedAt` are set once repeat visits are merged. */
@@ -417,9 +418,15 @@ export function cellWarning(cells: number): string | null {
   return `This sheet has ${cells} cells. Google Sheets limits a file to 10 million cells.`;
 }
 
-export const MANAGED_LINE = "This sheet is managed by Cortex. Editing or deleting rows can cause wrong answers.";
-/** Marks Cortex's own protection, so a check finds it and never adds a second one. */
-export const PROTECTED_DESCRIPTION = "Managed by Cortex";
+export const MANAGED_LINE = "This sheet is managed by Bobbin. Editing or deleting rows can cause wrong answers.";
+/** Marks Bobbin's own protection, so a check finds it and never adds a second one. */
+export const PROTECTED_DESCRIPTION = "Managed by Bobbin";
+/** Older sheets used this; treat it as already protected so a second warning is never added. */
+export const LEGACY_PROTECTED_DESCRIPTION = "Managed by Cortex";
+
+export function isProtectedDescription(description: string): boolean {
+  return description === PROTECTED_DESCRIPTION || description === LEGACY_PROTECTED_DESCRIPTION;
+}
 
 /** Warning-only protection on a whole tab. Google shows a warning before a manual edit; Cortex's writes are unaffected. */
 export function protectTabRequest(sheetId: number): object {

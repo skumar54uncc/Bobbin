@@ -60,7 +60,7 @@ export function mountWarnings(): void {
         );
         list.hidden = rows.length === 0;
         empty.hidden = rows.length > 0;
-        empty.textContent = res?.ok ? "No warnings yet. Every page so far reads like ordinary content." : "Cortex could not load warnings. Try again.";
+        empty.textContent = res?.ok ? "No warnings yet. Every page so far reads like ordinary content." : "Bobbin could not load warnings. Try again.";
         show.setAttribute("aria-expanded", "true");
         show.textContent = "Hide warnings";
       })

@@ -117,8 +117,8 @@ describe("section builder", () => {
 
   it("names one doc per local day and orders sections by time", () => {
     expect([...days.keys()].sort()).toEqual(["2026-10-07", "2026-10-08"]);
-    expect(today.name).toBe("Cortex Pages 2026-10-08 Thursday");
-    expect(pagesDocName("2026-10-07", "Wednesday")).toBe("Cortex Pages 2026-10-07 Wednesday");
+    expect(today.name).toBe("Bobbin Pages 2026-10-08 Thursday");
+    expect(pagesDocName("2026-10-07", "Wednesday")).toBe("Bobbin Pages 2026-10-07 Wednesday");
     expect(today.sections.map((s) => s.id)).toEqual(["a", "p", "f", "post:one", "b"]);
   });
 
@@ -182,7 +182,7 @@ describe("size trimming", () => {
   const day = (lengths: number[]): DayDoc => ({
     date: "2026-10-08",
     weekday: "Thursday",
-    name: "Cortex Pages 2026-10-08 Thursday",
+    name: "Bobbin Pages 2026-10-08 Thursday",
     sections: lengths.map((n, i) => ({
       id: `s${i}`,
       at: i,
@@ -233,12 +233,12 @@ describe("Pages doc upload", () => {
     const folder = (await readSyncEngineState()).pagesFolderId;
     expect(sheets.files.get(folder)).toMatchObject({ name: "Pages", parent: "folder" });
     expect(sheets.docsIn(folder).map((d) => d.name).sort()).toEqual([
-      "Cortex Pages 2026-10-07 Wednesday",
-      "Cortex Pages 2026-10-08 Thursday",
+      "Bobbin Pages 2026-10-07 Wednesday",
+      "Bobbin Pages 2026-10-08 Thursday",
     ]);
     expect(sheets.tab("Visits").slice(1).map((row) => [row[0], row[PAGES]])).toEqual([
-      ["y", "Cortex Pages 2026-10-07 Wednesday#y"],
-      ["a", "Cortex Pages 2026-10-08 Thursday#a"],
+      ["y", "Bobbin Pages 2026-10-07 Wednesday#y"],
+      ["a", "Bobbin Pages 2026-10-08 Thursday#a"],
     ]);
 
     const writes = sheets.docWrites;
@@ -457,7 +457,7 @@ describe("schema 6 migration", () => {
     for (const row of sheets.tab("Visits")) row.length = PAGES;
     for (const row of sheets.tab("People")) row.length = PEOPLE_HEADERS.indexOf("pages_doc");
     const book = sheets.books.get("file")!;
-    book.set("Content", { sheetId: 40, rows: [["id", "date", "weekday", "time", "title", "url", "topics", "excerpt"]], protections: ["Managed by Cortex"] });
+    book.set("Content", { sheetId: 40, rows: [["id", "date", "weekday", "time", "title", "url", "topics", "excerpt"]], protections: ["Managed by Bobbin"] });
     const state = await readSyncEngineState();
     state.layout!.schema = 5;
     state.layout!.visitColumns = PAGES;
@@ -638,6 +638,6 @@ describe("feed posts", () => {
     const html = sheets.docs.get(doc!.id)!;
     expect(html).toContain("Post by Mira Okafor-Lind");
     expect(html).toContain("Posts seen in this visit: [post:");
-    expect(sheets.tab("Visits")[1]?.[PAGES]).toBe("Cortex Pages 2026-10-08 Thursday#feed-1");
+    expect(sheets.tab("Visits")[1]?.[PAGES]).toBe("Bobbin Pages 2026-10-08 Thursday#feed-1");
   });
 });

@@ -36,7 +36,7 @@ describe("Ask any assistant", () => {
     chip(host, "What did I read today").click();
     await settle();
     expect(deps.request).toHaveBeenCalledWith({ source: "pages", from: new Date(2026, 9, 9).getTime(), to: new Date(2026, 9, 9, 15).getTime(), withText: false });
-    expect(host.querySelector(".cx-attach-header")?.textContent).toMatch(/^Context from my Cortex browsing memory: 2 items, /);
+    expect(host.querySelector(".cx-attach-header")?.textContent).toMatch(/^Context from my Bobbin browsing memory: 2 items, /);
     expect(host.querySelectorAll(".cx-attach-item")).toHaveLength(2);
     expect(host.querySelector(".cx-attach-excerpt")).toBeNull();
     expect(host.querySelector<HTMLInputElement>(".cx-attach-toggle input")!.checked).toBe(false);
@@ -68,7 +68,7 @@ describe("Ask any assistant", () => {
     buttonText(host, "Insert into chat").click();
     await settle();
     const sent = vi.mocked(deps.insert).mock.calls[0]![0] as string;
-    expect(sent).toMatch(/^Context from my Cortex browsing memory: 1 item, /);
+    expect(sent).toMatch(/^Context from my Bobbin browsing memory: 1 item, /);
     expect(sent).toContain("Butter (https://b.com)\n  Page text: Churn it.");
     expect(sent).not.toContain("Bread");
     expect(host.querySelector(".cx-attach-status")?.textContent).toBe("Inserted. Review it in the chat box, then send.");
@@ -85,7 +85,7 @@ describe("Ask any assistant", () => {
     buttonText(host, "Insert into chat").click();
     await settle();
     expect(host.querySelector(".cx-attach-status")?.textContent).toBe(
-      "Cortex could not find a chat box. Click into the message box on the page, then try again, or use Copy."
+      "Bobbin could not find a chat box. Click into the message box on the page, then try again, or use Copy."
     );
   });
 

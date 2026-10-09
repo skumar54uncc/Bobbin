@@ -4,7 +4,7 @@ import { installKeyShield } from "../src/content/key-shield";
 
 /**
  * YouTube plays or pauses on Space and cancels the key, which used to stop
- * Space reaching the Cortex question box. A content script cannot prevent the
+ * Space reaching the Bobbin question box. A content script cannot prevent the
  * page's handlers from running (isolated world), so the panel puts the
  * cancelled character back. Real-browser coverage: e2e/keys.spec.ts.
  */

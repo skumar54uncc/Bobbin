@@ -118,7 +118,7 @@ export function isDone(check: DoneCheck, el: Element): boolean {
   if (check === "toggle-on") return el.getAttribute("aria-checked") === "true" || (el as HTMLInputElement).checked === true;
   if (check === "contains-cortex") {
     const value = (el as HTMLTextAreaElement).value ?? el.textContent ?? "";
-    return value.includes("Cortex Memory");
+    return value.includes("Bobbin Memory") || value.includes("Cortex Memory");
   }
   const text = `${norm(el.textContent)} ${norm(el.getAttribute("aria-label"))}`;
   return /\b(connected|disconnect)\b/.test(text) || el.getAttribute("aria-pressed") === "true";

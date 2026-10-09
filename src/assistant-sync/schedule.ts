@@ -91,9 +91,9 @@ export function syncStatusLine(
   const slow = inSlowMode(state, now);
   if (pendingPages > 0 && state.nextAttemptAt > now) {
     const head = `Waiting to sync ${pages}. Next try in ${minutesWord(state.nextAttemptAt - now)}.`;
-    return slow ? `${head} Google asked Cortex to slow down, so it syncs every 15 minutes until ${timeLabel(state.slowUntil)}.` : head;
+    return slow ? `${head} Google asked Bobbin to slow down, so it syncs every 15 minutes until ${timeLabel(state.slowUntil)}.` : head;
   }
-  if (slow) return `Google asked Cortex to slow down. Syncing about every 15 minutes until ${timeLabel(state.slowUntil)}.`;
+  if (slow) return `Google asked Bobbin to slow down. Syncing about every 15 minutes until ${timeLabel(state.slowUntil)}.`;
   if (pendingPages > 0) {
     const due = Math.max(now, state.lastFlushAt + ACTIVITY_GAP_MS);
     return `Waiting to sync ${pages}. Next sync in about ${minutesWord(due - now + JITTER_MAX_MS / 2)}.`;

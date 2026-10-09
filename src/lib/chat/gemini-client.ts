@@ -56,7 +56,7 @@ function friendlyGeminiFailure(status: number): string {
   }
   if (status === 404) return "No Gemini model on this API key could answer.";
   if (status === 401 || status === 403) {
-    return "The Gemini API key was rejected. Check it in Cortex settings.";
+    return "The Gemini API key was rejected. Check it in Bobbin settings.";
   }
   return "Gemini could not answer just now.";
 }

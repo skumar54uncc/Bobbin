@@ -102,7 +102,7 @@ export function initBackupUi(doc: Document, deps: BackupUiDeps): void {
         | { ok?: boolean; counts?: Counts; exportedAt?: number; error?: string }
         | undefined;
       if (!res?.ok || !res.counts) {
-        feedback(restoreFb, res?.error ?? "This file could not be read as a Cortex backup.", true);
+        feedback(restoreFb, res?.error ?? "This file could not be read as a Bobbin backup.", true);
         fileInput.value = "";
         return;
       }
@@ -140,7 +140,7 @@ export function initBackupUi(doc: Document, deps: BackupUiDeps): void {
           ? ` ${plural(blocked, "page")} ${blocked === 1 ? "was" : "were"} left out by your privacy settings.`
           : "";
         closeConfirm();
-        feedback(restoreFb, `Restored ${plural(res.added?.documents ?? 0, "page")}.${left} Cortex is re-indexing in the background.`);
+        feedback(restoreFb, `Restored ${plural(res.added?.documents ?? 0, "page")}.${left} Bobbin is re-indexing in the background.`);
         deps.onRestored();
       } catch {
         feedback(restoreFb, "Could not restore. Try again.", true);

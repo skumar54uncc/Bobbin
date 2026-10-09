@@ -144,10 +144,10 @@ function plainSyncError(error: unknown): string {
     return "Google did not accept the sign-in. Press Enable to reconnect Google Drive.";
   }
   if (message === "google_bad_response") {
-    return "Google sent a reply Cortex could not read. Cortex will try again.";
+    return "Google sent a reply Bobbin could not read. Bobbin will try again.";
   }
   if (/failed to fetch/i.test(message)) {
-    return "Cortex could not reach Google. Reload the extension and press Enable again.";
+    return "Bobbin could not reach Google. Reload the extension and press Enable again.";
   }
   return message || "Sync did not start.";
 }

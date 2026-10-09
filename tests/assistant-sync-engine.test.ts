@@ -361,7 +361,7 @@ describe("backfill and enable", () => {
 
   it("folder exists, sheet missing: Enable reuses the folder and creates one sheet, set up in one batch", async () => {
     const sheets = new FakeSheets(false);
-    sheets.files.set("left-over", { name: "Cortex Memory", trashed: false });
+    sheets.files.set("left-over", { name: "Bobbin Memory", trashed: false });
     let ids: StoredMemoryIds = { folderId: null, fileId: null };
     const enable = () =>
       enableAssistantSync({
@@ -405,7 +405,7 @@ describe("backfill and enable", () => {
     sheets.outcomes.push({ status: 403, googleStatus: "PERMISSION_DENIED", message: "The caller does not have permission" });
     const result = await runFlush(deps(sheets, NOW, { mode: "user" }));
     expect(result.status).toBe("error");
-    expect(result.error).toBe("Google did not allow Cortex to create or edit the sheet. Google said: The caller does not have permission");
+    expect(result.error).toBe("Google did not allow Bobbin to create or edit the sheet. Google said: The caller does not have permission");
     expect(result.errorDetail).toEqual({
       call: "batchUpdate",
       http_status: 403,
@@ -468,7 +468,7 @@ describe("About freshness", () => {
     await enabled(sheets);
     await assistantSyncDb.visits.put(visit("v1", NOW + MIN));
     expect(await runFlush(deps(sheets, NOW + 6 * MIN))).toMatchObject({ writes: 1 });
-    expect(about(sheets)[1]).toBe("Last checked: 2026-10-02 12:06 America/New_York. Cortex last looked for new browsing at this time.");
+    expect(about(sheets)[1]).toBe("Last checked: 2026-10-02 12:06 America/New_York. Bobbin last looked for new browsing at this time.");
     expect(about(sheets)[2]).toMatch(/^Last new activity: 2026-10-02 12:01 America\/New_York\. /);
 
     // Nothing new: passes inside the hour write nothing.

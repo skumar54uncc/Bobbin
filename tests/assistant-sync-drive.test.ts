@@ -9,6 +9,7 @@ import {
   googleErrorDetail,
   googleStatus,
   inspectMemory,
+  renameMemoryToProduct,
   resolveMemory,
   trashMemory,
 } from "../src/assistant-sync/drive-api";
@@ -40,13 +41,13 @@ describe("sheet layout", () => {
     expect(SEED_DAYS).toBe(90);
     expect(SEED_VISITS_PER_WEEKDAY).toBe(150);
     const { workbook, needles } = buildSeed({ days: 12, visitsPerWeekday: 2, now: Date.parse("2026-10-02T16:00:00.000Z") });
-    expect(workbook.title).toBe("Cortex Memory Seed");
+    expect(workbook.title).toBe("Bobbin Memory Seed");
     expect(workbook.tabs.map((tab) => tab.title)).toEqual([...SHEET_TABS]);
-    expect(workbook.tabs[0]?.rows[0]).toEqual(["Cortex Memory"]);
+    expect(workbook.tabs[0]?.rows[0]).toEqual(["Bobbin Memory"]);
     expect(workbook.tabs[0]?.rows.at(-1)).toEqual(["schema_version: 6"]);
     expect(workbook.tabs.map((tab) => tab.title)).not.toContain("Content");
     const about = (workbook.tabs[0]?.rows ?? []).map((row) => row[0] ?? "");
-    expect(about[1]).toMatch(/^Last checked: 2026-10-02 12:00 .*\. Cortex last looked for new browsing at this time\.$/);
+    expect(about[1]).toMatch(/^Last checked: 2026-10-02 12:00 .*\. Bobbin last looked for new browsing at this time\.$/);
     expect(about[2]).toMatch(/^Last new activity: \d{4}-\d{2}-\d{2} \d{2}:\d{2} .*\. The newest visit in this sheet\./);
     expect(about[3]).toMatch(/^Coverage: .* \(\d+ days?\)\.$/);
     expect(about[4]).toMatch(/^Sheet size: \d+ KB\. Rows: \d+ visits, /);
@@ -54,7 +55,7 @@ describe("sheet layout", () => {
     expect(about.some((line) => line.startsWith("Content"))).toBe(false);
     expect(VISIT_HEADERS.slice(-4)).toEqual(["visit_count", "last_time", "device", "pages_doc"]);
     expect(about.some((line) => line.startsWith("device: this device, or other device"))).toBe(true);
-    expect(about).toContain("This sheet is managed by Cortex. Editing or deleting rows can cause wrong answers.");
+    expect(about).toContain("This sheet is managed by Bobbin. Editing or deleting rows can cause wrong answers.");
     expect(about.some((line) => line.includes("time (the first visit that day)") && line.includes("last_time (the last visit that day)"))).toBe(true);
     expect(about).toContain("Questions");
     expect(about.some((line) => line.startsWith("This is the user's only browsing memory"))).toBe(true);
@@ -125,7 +126,7 @@ describe("flush plan", () => {
 describe("drive memory", () => {
   it("asks before restoring a trashed sheet and never makes a second one", async () => {
     const api = new FakeSheets(false);
-    const created = await createMemoryFile(api, "Cortex Memory");
+    const created = await createMemoryFile(api, "Bobbin Memory");
     expect(created.folderId && api.files.get(created.folderId)?.name).toBe(LIVE_FOLDER_NAME);
     expect(await inspectMemory(api, created)).toBe("ready");
     await trashMemory(api, created);
@@ -178,7 +179,7 @@ describe("drive memory", () => {
       if (url.includes("protectedRanges")) {
         return Response.json({
           sheets: [
-            { properties: { sheetId: 0, title: "About" }, protectedRanges: [{ description: "Managed by Cortex" }] },
+            { properties: { sheetId: 0, title: "About" }, protectedRanges: [{ description: "Managed by Bobbin" }] },
             { properties: { sheetId: 1, title: "Visits" }, protectedRanges: [{ description: "Someone else's" }] },
           ],
         });
@@ -190,10 +191,10 @@ describe("drive memory", () => {
     };
     const api = new FetchDriveApi("token", fetchImpl);
     expect(await api.getFile("missing")).toBeNull();
-    expect(await api.createSpreadsheet("Cortex Memory", "folder-1")).toBe("sheet-1");
+    expect(await api.createSpreadsheet("Bobbin Memory", "folder-1")).toBe("sheet-1");
     expect(calls.at(-1)!.url).toBe("https://www.googleapis.com/drive/v3/files?fields=id");
     expect(JSON.parse(calls.at(-1)!.body)).toEqual({
-      name: "Cortex Memory",
+      name: "Bobbin Memory",
       mimeType: "application/vnd.google-apps.spreadsheet",
       parents: ["folder-1"],
     });
@@ -245,7 +246,7 @@ describe("drive memory", () => {
       if (url.endsWith("/v4/spreadsheets/sheet-1:batchUpdate")) return Response.json({});
       return new Response("{}", { status: 500 });
     });
-    expect(await createMemoryFile(api, "Cortex Memory")).toEqual({ folderId: "folder-1", fileId: "sheet-1" });
+    expect(await createMemoryFile(api, "Bobbin Memory")).toEqual({ folderId: "folder-1", fileId: "sheet-1" });
 
     expect(calls.some((c) => c.method === "POST" && /\/v4\/spreadsheets\/?(\?|$)/.test(c.url))).toBe(false);
     const sheetCreate = calls.find((c) => c.method === "POST" && JSON.parse(c.body || "{}").mimeType === "application/vnd.google-apps.spreadsheet");
@@ -260,11 +261,11 @@ describe("drive memory", () => {
     });
     expect(requests.filter((r) => r.addSheet).map((r) => r.addSheet.properties.title)).toEqual(SHEET_TABS.slice(1));
     const headerRows = requests.filter((r) => r.updateCells).map((r) => r.updateCells.rows[0].values.map((c: any) => c.userEnteredValue.stringValue));
-    expect(headerRows[0]).toEqual(["Cortex Memory"]);
+    expect(headerRows[0]).toEqual(["Bobbin Memory"]);
     expect(headerRows[1]).toEqual([...VISIT_HEADERS]);
     const protections = requests.filter((r) => r.addProtectedRange).map((r) => r.addProtectedRange.protectedRange);
     expect(protections).toHaveLength(SHEET_TABS.length);
-    expect(protections.every((p) => p.warningOnly === true && p.description === "Managed by Cortex")).toBe(true);
+    expect(protections.every((p) => p.warningOnly === true && p.description === "Managed by Bobbin")).toBe(true);
     expect(new Set(protections.map((p) => p.range.sheetId)).size).toBe(SHEET_TABS.length);
     expect(calls.map((c) => `${c.method} ${c.url.split("?")[0]}`)).toEqual([
       "GET https://www.googleapis.com/drive/v3/files",
@@ -283,7 +284,7 @@ describe("drive memory", () => {
   it("does not reuse the default tab's id for a new tab, whatever id Google gave it", async () => {
     const api = new FakeSheets(false);
     api.defaultSheetId = 3;
-    const ids = await createMemoryFile(api, "Cortex Memory");
+    const ids = await createMemoryFile(api, "Bobbin Memory");
     const info = await api.getSheetInfo(ids.fileId!);
     expect(info.tabs.map((t) => t.title)).toEqual([...SHEET_TABS]);
     expect(info.sheetIds.About).toBe(3);
@@ -292,17 +293,36 @@ describe("drive memory", () => {
     expect(api.writes).toBe(1);
   });
 
-  it("reuses a Cortex Memory folder left by a failed Enable and creates only the sheet", async () => {
+  it("renames existing Cortex Memory files in place by id, never creating new ones", async () => {
     const api = new FakeSheets(false);
-    api.files.set("old-folder", { name: "Cortex Memory", trashed: false });
-    api.files.set("newer-folder", { name: "Cortex Memory", trashed: false });
+    api.files.set("folder", { name: "Cortex Memory", trashed: false });
+    api.files.set("file", { name: "Cortex Memory", trashed: false, parent: "folder", sheet: true });
+    api.files.set("pages", { name: "Pages", trashed: false, parent: "folder" });
+    api.files.set("day", { name: "Cortex Pages 2026-10-08 Thursday", trashed: false, parent: "pages", doc: true });
+    const before = api.files.size;
+    await renameMemoryToProduct(api, { folderId: "folder", fileId: "file" }, "pages");
+    expect(api.files.size).toBe(before);
+    expect(api.files.get("folder")?.name).toBe("Bobbin Memory");
+    expect(api.files.get("file")?.name).toBe("Bobbin Memory");
+    expect(api.files.get("day")?.name).toBe("Bobbin Pages 2026-10-08 Thursday");
+    expect(await resolveMemory(api, { folderId: "folder", fileId: "file" })).toEqual({
+      ids: { folderId: "folder", fileId: "file" },
+      created: false,
+    });
+    expect(api.creates).toBe(0);
+  });
+
+  it("reuses a Bobbin Memory folder left by a failed Enable and creates only the sheet", async () => {
+    const api = new FakeSheets(false);
+    api.files.set("old-folder", { name: "Bobbin Memory", trashed: false });
+    api.files.set("newer-folder", { name: "Bobbin Memory", trashed: false });
     const made = await resolveMemory(api, { folderId: null, fileId: null });
     expect(made).toMatchObject({ created: true, ids: { folderId: "old-folder" } });
     expect(api.creates).toBe(1);
     expect(api.folders()).toEqual(["old-folder", "newer-folder"]);
     const fileId = "ids" in made ? made.ids.fileId! : "";
     expect(api.files.get(fileId)).toMatchObject({ parent: "old-folder", sheet: true });
-    expect(api.tab("About", fileId)[0]).toEqual(["Cortex Memory"]);
+    expect(api.tab("About", fileId)[0]).toEqual(["Bobbin Memory"]);
     expect(api.tab("Visits", fileId)[0]).toEqual([...VISIT_HEADERS]);
 
     // The next Enable finds that sheet: no new folder or sheet.
@@ -312,8 +332,8 @@ describe("drive memory", () => {
 
   it("finishes setting up a sheet an earlier Enable created but never set up, without a second file", async () => {
     const api = new FakeSheets(false);
-    api.files.set("folder", { name: "Cortex Memory", trashed: false });
-    const fileId = await api.createSpreadsheet("Cortex Memory", "folder");
+    api.files.set("folder", { name: "Bobbin Memory", trashed: false });
+    const fileId = await api.createSpreadsheet("Bobbin Memory", "folder");
     api.creates = 0;
     expect(await resolveMemory(api, { folderId: null, fileId: null })).toEqual({ ids: { folderId: "folder", fileId }, created: false });
     expect(api.creates).toBe(0);
@@ -334,7 +354,7 @@ describe("drive memory", () => {
   it("keeps Google's status and message and names the call that failed", async () => {
     const body = { error: { code: 403, message: "The caller does not have permission", status: "PERMISSION_DENIED" } };
     const api = new FetchDriveApi("token", async () => Response.json(body, { status: 403 }));
-    const error = await api.createSpreadsheet("Cortex Memory", "folder-1").catch((e: unknown) => e);
+    const error = await api.createSpreadsheet("Bobbin Memory", "folder-1").catch((e: unknown) => e);
     expect(googleStatus(error)).toBe(403);
     expect(googleErrorDetail(error)).toEqual({
       call: "sheet create",
@@ -342,7 +362,7 @@ describe("drive memory", () => {
       status: "PERMISSION_DENIED",
       message: "The caller does not have permission",
     });
-    expect(googleErrorDetail(await api.createFolder("Cortex Memory").catch((e: unknown) => e))?.call).toBe("folder create");
+    expect(googleErrorDetail(await api.createFolder("Bobbin Memory").catch((e: unknown) => e))?.call).toBe("folder create");
     expect(googleErrorDetail(await api.listFiles("q").catch((e: unknown) => e))?.call).toBe("search");
     expect(googleErrorDetail(await api.batchUpdate("x", [{}]).catch((e: unknown) => e))?.call).toBe("batchUpdate");
     expect(googleErrorDetail(await api.readColumns("x", ["A:A"]).catch((e: unknown) => e))?.call).toBe("read");

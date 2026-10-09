@@ -156,7 +156,7 @@ export class ChatStreamController {
       // Stop the run so a late answer does not appear on the next open.
       this.opts.send({ type: "CORTEX_CHAT_ABORT", requestId, shell: this.opts.shell });
       this.opts.callbacks.onError({
-        message: "No response from Cortex.",
+        message: "No response from Bobbin.",
         userAction: "Try again. If it keeps happening, reload the extension.",
         recoverable: true,
       });

@@ -45,9 +45,9 @@ describe("local database version 6", () => {
 
 describe("own files and dwell matching", () => {
   it("never records a Pages doc or the Pages folder", () => {
-    expect(isCortexOwnFile("https://docs.google.com/document/d/abc/edit", "Cortex Pages 2026-10-08 Thursday - Google Docs")).toBe(true);
+    expect(isCortexOwnFile("https://docs.google.com/document/d/abc/edit", "Bobbin Pages 2026-10-08 Thursday - Google Docs")).toBe(true);
     expect(isCortexOwnFile("https://drive.google.com/drive/folders/pf1", "Pages - Google Drive", { pagesFolderId: "pf1" })).toBe(true);
-    expect(isCortexOwnFile("https://docs.google.com/document/d/abc/edit", "Cortex Pages notes - Google Docs")).toBe(false);
+    expect(isCortexOwnFile("https://docs.google.com/document/d/abc/edit", "Bobbin Pages notes - Google Docs")).toBe(false);
   });
 
   it("matches a dwell report to its visit across hash, tracking key, and trailing slash changes", () => {

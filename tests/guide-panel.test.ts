@@ -240,7 +240,7 @@ describe("setup side panel", () => {
     expect(state(fake).result).toBe("no");
     buttonIn(card()!, "Yes")!.click();
     await settle();
-    expect(document.querySelector(".cx-guide-success")?.textContent).toBe("Gemini is connected to your Cortex memory.");
+    expect(document.querySelector(".cx-guide-success")?.textContent).toBe("Gemini is connected to your Bobbin memory.");
     expect(document.querySelector(".cx-guide-progress")?.textContent).toBe("All steps done");
     expect(card()).toBeNull();
   });
@@ -306,7 +306,7 @@ describe("setup side panel", () => {
     expect(state(fake).done).toEqual(["connect"]);
     expect(primary().textContent).toBe("Copy instruction");
     const hint = document.querySelector(".cx-guide-attach")!;
-    expect(hint.textContent).toBe("No Google Drive access? Use Ask any assistant in the Cortex side panel instead.");
+    expect(hint.textContent).toBe("No Google Drive access? Use Ask any assistant in the Bobbin side panel instead.");
     buttonIn(hint, "Ask any assistant")!.click();
     await settle();
     expect(fake.calls.find((c) => c.name === "sidePanel.setOptions")?.args).toEqual([{ tabId: 7, path: "search-shell.html?open=attach", enabled: true }]);

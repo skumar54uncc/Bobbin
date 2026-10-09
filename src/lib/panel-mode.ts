@@ -193,7 +193,7 @@ export function choosePanelMode(
     return {
       mode: "side-panel",
       reason: "not-injectable",
-      detail: "Cortex cannot run inside this page, so it opens in the side panel.",
+      detail: "Bobbin cannot run inside this page, so it opens in the side panel.",
     };
   }
 
@@ -202,7 +202,7 @@ export function choosePanelMode(
       mode: "side-panel",
       reason: "extension-gallery",
       detail:
-        "Chrome blocks extensions on the Web Store, so Cortex opens in the side panel.",
+        "Chrome blocks extensions on the Web Store, so Bobbin opens in the side panel.",
     };
   }
 
@@ -210,7 +210,7 @@ export function choosePanelMode(
     return {
       mode: "side-panel",
       reason: "pdf",
-      detail: "This is a PDF, so Cortex opens in the side panel.",
+      detail: "This is a PDF, so Bobbin opens in the side panel.",
     };
   }
 
@@ -218,7 +218,7 @@ export function choosePanelMode(
     return {
       mode: "side-panel",
       reason: "user-preference",
-      detail: "You asked Cortex to always open in the side panel.",
+      detail: "You asked Bobbin to always open in the side panel.",
     };
   }
 
@@ -226,7 +226,7 @@ export function choosePanelMode(
     return {
       mode: "overlay",
       reason: "user-preference",
-      detail: "You asked Cortex to always open on the page.",
+      detail: "You asked Bobbin to always open on the page.",
     };
   }
 
@@ -235,7 +235,7 @@ export function choosePanelMode(
     return {
       mode: "side-panel",
       reason: "keyboard-capturing-host",
-      detail: `${matchedHost} takes the keyboard back from the page, so Cortex opens in the side panel where you can type.`,
+      detail: `${matchedHost} takes the keyboard back from the page, so Bobbin opens in the side panel where you can type.`,
       matchedHost,
     };
   }
@@ -243,7 +243,7 @@ export function choosePanelMode(
   return {
     mode: "overlay",
     reason: "default",
-    detail: "Cortex opens on the page.",
+    detail: "Bobbin opens on the page.",
   };
 }
 

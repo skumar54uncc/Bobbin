@@ -12,7 +12,7 @@ export function smalltalkReply(question: string): string | null {
     return "You're welcome. Ask whenever you want something from your library.";
   }
   if (/^(who are you|what are you|what can you do)$/i.test(q)) {
-    return "I'm Cortex. I answer from pages you have read on this device.";
+    return "I'm Bobbin. I answer from pages you have read on this device.";
   }
   return null;
 }

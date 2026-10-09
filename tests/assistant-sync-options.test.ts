@@ -25,7 +25,7 @@ describe("assistant sync options", () => {
     expect(consent).toMatch(/page titles, URLs, searches, LinkedIn profiles, and topics/);
     expect(consent).toMatch(/one Google Doc per day with the text of pages you read \(20 seconds on screen or scrolled 30 percent\), up to 4,000 characters each/);
     expect(consent).toMatch(/Text of LinkedIn feed posts syncs only when you turn on Save text of LinkedIn posts I scroll past/);
-    expect(consent).toMatch(/folder named Cortex Memory/);
+    expect(consent).toMatch(/folder named Bobbin Memory/);
     expect(consent).toMatch(/drive\.file/);
     expect(consent).toMatch(/relevant rows and page text/);
     const enable = document.getElementById("cx-assistant-enable");

@@ -79,7 +79,7 @@ describe("status line", () => {
 
   it("says when slow mode is on and until when", () => {
     const line = syncStatusLine({ ...on, lastSyncedAt: NOW - MIN, slowUntil: NOW + 3_600_000 }, 0, NOW, () => "5:00 PM");
-    expect(line).toBe("Google asked Cortex to slow down. Syncing about every 15 minutes until 5:00 PM.");
+    expect(line).toBe("Google asked Bobbin to slow down. Syncing about every 15 minutes until 5:00 PM.");
   });
 
   it("reports off", () => {

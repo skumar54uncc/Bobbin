@@ -17,7 +17,7 @@ function setMascot(state: "wave" | "found"): void {
   img.dataset.k = state;
   img.src = `mascot/felt-${state}.webp`;
   img.srcset = `mascot/felt-${state}@256.webp 256w, mascot/felt-${state}.webp 512w`;
-  img.alt = state === "found" ? "Cortex mascot with a page it found" : "Cortex mascot waving";
+  img.alt = state === "found" ? "Bobbin mascot with a page it found" : "Bobbin mascot waving";
 }
 
 function setStatus(text: string, isError = false): void {
@@ -69,7 +69,7 @@ async function grantConsentAndStart(): Promise<void> {
     }
 
     setStatus(
-      "Indexing is on. Cortex is scanning recent history on this device when needed."
+      "Indexing is on. Bobbin is scanning recent history on this device when needed."
     );
     await openSettingsAndClose();
   } catch {

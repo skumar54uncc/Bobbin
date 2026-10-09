@@ -4,7 +4,7 @@
 
 Please report security issues privately. Do not open a public GitHub issue for anything that could be exploited.
 
-- Email: shailesh.entrant@gmail.com with the subject "Cortex security"
+- Email: shailesh.entrant@gmail.com with the subject "Bobbin security"
 - Include: affected version (chrome://extensions shows it), steps to reproduce, and impact.
 
 You will get an acknowledgement within 3 business days and a status update at least every 14 days until the issue is resolved. Coordinated disclosure is preferred: please allow 90 days before publishing details.
@@ -19,7 +19,7 @@ You will get an acknowledgement within 3 business days and a status update at le
 
 ## Scope
 
-Cortex is a Manifest V3 Chrome extension. Everything (indexing, embeddings, search, chat history) runs on the user's device. The only optional network call is to the Google Gemini API when the user turns cloud chat on and adds their own API key; it receives retrieved text snippets only.
+Bobbin is a Manifest V3 Chrome extension. Everything (indexing, embeddings, search, chat history) runs on the user's device. The only optional network call is to the Google Gemini API when the user turns cloud chat on and adds their own API key; it receives retrieved text snippets only.
 
 In scope:
 

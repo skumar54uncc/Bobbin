@@ -1,4 +1,4 @@
-# Cortex — Architecture, UI & ML
+# Bobbin — Architecture, UI & ML
 
 This document describes the **implemented** Chrome extension (Manifest V3, v1.0.1): runtime layers, data flows, user-facing surfaces, retrieval / embedding logic, and optional chat backends.
 
@@ -6,7 +6,7 @@ This document describes the **implemented** Chrome extension (Manifest V3, v1.0.
 
 ## 1. Product intent
 
-**Cortex** is a **privacy-first** Chrome extension that indexes readable page text into **chunk-level records** with **optional sentence embeddings**, stores everything in **IndexedDB**, and exposes:
+**Bobbin** is a **privacy-first** Chrome extension that indexes readable page text into **chunk-level records** with **optional sentence embeddings**, stores everything in **IndexedDB**, and exposes:
 
 - **Search** — hybrid retrieval (semantic + lexical + recency + engagement + query grounding)
 - **Ask** — RAG chat over your library (on-device Chrome AI and/or optional Gemini)

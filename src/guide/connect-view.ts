@@ -6,8 +6,8 @@ import { ASSISTANTS, firstUrl, troubleshootingFor, type AssistantConfig, type As
 import { mascotHtml } from "../content/mascot";
 import type { EnableResult } from "./enable-sync";
 
-export const CONNECT_TITLE = "Connect your AI to your Cortex memory";
-export const CONNECT_LEAD = "Pick your assistant. Cortex opens the right page and walks you through it. About 3 minutes.";
+export const CONNECT_TITLE = "Connect your AI to your Bobbin memory";
+export const CONNECT_LEAD = "Pick your assistant. Bobbin opens the right page and walks you through it. About 3 minutes.";
 
 export interface SyncStatus {
   on: boolean;
@@ -132,7 +132,7 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     start.dataset.assistant = a.id;
     const startNote = el("p", "cx-connect-start-note");
     startNote.setAttribute("role", "status");
-    startNote.textContent = `Cortex opens ${firstUrl(a) ? `${a.name} in a new tab` : "a new tab"} and shows these steps in the side panel beside it.`;
+    startNote.textContent = `Bobbin opens ${firstUrl(a) ? `${a.name} in a new tab` : "a new tab"} and shows these steps in the side panel beside it.`;
     start.addEventListener("click", () => {
       start.disabled = true;
       void deps
@@ -179,7 +179,7 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     try {
       s = await deps.status();
     } catch {
-      s = { on: false, line: "Cortex could not read the sync status.", problem: true };
+      s = { on: false, line: "Bobbin could not read the sync status.", problem: true };
     }
     status.dataset.state = s.problem ? "problem" : s.on ? "on" : "off";
     statusTitle.textContent = s.problem ? "Assistant Sync needs attention" : s.on ? "Assistant Sync is on" : "Assistant Sync is off";

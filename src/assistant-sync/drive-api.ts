@@ -1,6 +1,13 @@
 import * as v from "valibot";
+import {
+  LEGACY_DRIVE_ARCHIVE_NAME,
+  LEGACY_DRIVE_JSON_BACKUP_NAME,
+  LEGACY_MEMORY_NAME,
+  MEMORY_NAME,
+  renamedPagesDoc,
+} from "../shared/product-name";
 import { addSheetRequest, updateCellsRequest } from "./flush-plan";
-import { headerFormatRequests, MANAGED_LINE, PROTECTED_DESCRIPTION, protectTabRequest, SHEET_TABS, TAB_HEADERS } from "./sheet";
+import { headerFormatRequests, isProtectedDescription, MANAGED_LINE, protectTabRequest, SHEET_TABS, TAB_HEADERS } from "./sheet";
 
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
@@ -12,11 +19,11 @@ export interface DriveFileInfo {
 }
 
 /** Name of the Drive JSON backup that older builds wrote. Kept so the cleanup can find it. */
-export const DRIVE_JSON_BACKUP_NAME = "Cortex Memory Backup.json";
+export const DRIVE_JSON_BACKUP_NAME = LEGACY_DRIVE_JSON_BACKUP_NAME;
 /** Monthly archive spreadsheets older builds wrote: "Cortex Memory Archive 2026-09". */
-export const DRIVE_ARCHIVE_NAME = /^Cortex Memory Archive \d{4}-\d{2}$/;
-const MEMORY_SHEET_NAME = "Cortex Memory";
-const MEMORY_FOLDER_NAME = "Cortex Memory";
+export const DRIVE_ARCHIVE_NAME = LEGACY_DRIVE_ARCHIVE_NAME;
+const MEMORY_SHEET_NAME = MEMORY_NAME;
+const MEMORY_FOLDER_NAME = MEMORY_NAME;
 export const SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
 export const FOLDER_MIME = "application/vnd.google-apps.folder";
 export const DOCUMENT_MIME = "application/vnd.google-apps.document";
@@ -32,7 +39,8 @@ export type GoogleCall =
   | "trash"
   | "restore"
   | "doc create"
-  | "doc update";
+  | "doc update"
+  | "rename";
 
 /** What Google said about a failed call. Shown under Last error and kept in the flush log as error_detail. */
 export interface GoogleErrorDetail {
@@ -74,6 +82,8 @@ export interface DriveApi {
   /** Drive files.create with the spreadsheet mimeType. The new file has one default tab. */
   createSpreadsheet(name: string, parentId: string): Promise<string>;
   getFile(id: string): Promise<DriveFileInfo | null>;
+  /** files.update metadata: rename in place. Never creates a second file. */
+  renameFile(id: string, name: string): Promise<void>;
   trashFile(id: string): Promise<void>;
   untrashFile(id: string): Promise<void>;
   /**
@@ -120,7 +130,7 @@ export async function inspectMemory(api: DriveApi, ids: StoredMemoryIds): Promis
 }
 
 /** About rows written at setup, before the first flush replaces them with coverage and counts. */
-export const SETUP_ABOUT: string[][] = [["Cortex Memory"], [MANAGED_LINE]];
+export const SETUP_ABOUT: string[][] = [[MEMORY_NAME], [MANAGED_LINE]];
 
 /**
  * The one batchUpdate that turns a new Drive spreadsheet into Cortex Memory: the
@@ -162,13 +172,13 @@ export async function setupMemorySheet(api: DriveApi, fileId: string, about?: st
   return true;
 }
 
-/** The oldest Cortex Memory folder this app made, outside the trash. */
+/** The oldest memory folder this app made, outside the trash. Prefers Bobbin Memory, then Cortex Memory. */
 export async function findMemoryFolder(api: DriveApi): Promise<string | null> {
   const folders = await api.listFiles(
-    `name = ${q(MEMORY_FOLDER_NAME)} and mimeType = ${q(FOLDER_MIME)} and trashed = false`,
+    `(name = ${q(MEMORY_FOLDER_NAME)} or name = ${q(LEGACY_MEMORY_NAME)}) and mimeType = ${q(FOLDER_MIME)} and trashed = false`,
     "createdTime"
   );
-  return folders[0]?.id ?? null;
+  return folders.find((f) => f.name === MEMORY_FOLDER_NAME)?.id ?? folders[0]?.id ?? null;
 }
 
 /**
@@ -176,7 +186,9 @@ export async function findMemoryFolder(api: DriveApi): Promise<string | null> {
  * Reuses a Cortex Memory folder left by an earlier attempt, so there is never a second folder.
  */
 export async function createMemoryFile(api: DriveApi, title: string, about?: string[][]): Promise<StoredMemoryIds> {
-  const folderId = (await findMemoryFolder(api)) ?? (await api.createFolder(MEMORY_FOLDER_NAME));
+  const existingFolder = await findMemoryFolder(api);
+  const folderId = existingFolder ?? (await api.createFolder(MEMORY_FOLDER_NAME));
+  if (existingFolder) await renameIfLegacy(api, folderId, MEMORY_FOLDER_NAME, LEGACY_MEMORY_NAME);
   const fileId = await api.createSpreadsheet(title, folderId);
   await setupMemorySheet(api, fileId, about);
   return { folderId, fileId };
@@ -191,16 +203,37 @@ function q(value: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
-/** The Cortex Memory sheet this app made earlier, if Drive still has it outside the trash. */
+/** The Bobbin or Cortex Memory sheet this app made earlier, if Drive still has it outside the trash. */
 export async function findMemoryFile(api: DriveApi): Promise<StoredMemoryIds | null> {
   const files = await api.listFiles(
-    `name = ${q(MEMORY_SHEET_NAME)} and mimeType = ${q(SPREADSHEET_MIME)} and trashed = false`,
+    `(name = ${q(MEMORY_SHEET_NAME)} or name = ${q(LEGACY_MEMORY_NAME)}) and mimeType = ${q(SPREADSHEET_MIME)} and trashed = false`,
     "createdTime"
   );
-  const file = files[0];
+  const file = files.find((f) => f.name === MEMORY_SHEET_NAME) ?? files[0];
   if (!file) return null;
   // A sheet with no parent folder stands in as its own folder; trashMemory handles that.
   return { fileId: file.id, folderId: file.parents?.[0] ?? file.id };
+}
+
+async function renameIfLegacy(api: DriveApi, id: string | null | undefined, want: string, legacy: string): Promise<void> {
+  if (!id) return;
+  const info = await api.getFile(id);
+  if (info && !info.trashed && info.name === legacy) await api.renameFile(id, want);
+}
+
+/**
+ * Renames the stored folder, sheet, and day docs in place by id. Never creates a second file.
+ * Called on Enable and on flush so existing Drive files pick up the Bobbin names.
+ */
+export async function renameMemoryToProduct(api: DriveApi, ids: StoredMemoryIds, pagesFolderId?: string | null): Promise<void> {
+  await renameIfLegacy(api, ids.folderId, MEMORY_FOLDER_NAME, LEGACY_MEMORY_NAME);
+  await renameIfLegacy(api, ids.fileId, MEMORY_SHEET_NAME, LEGACY_MEMORY_NAME);
+  if (!pagesFolderId) return;
+  const files = await api.listFiles(`${q(pagesFolderId)} in parents and trashed = false`);
+  for (const file of files) {
+    const next = renamedPagesDoc(file.name);
+    if (next) await api.renameFile(file.id, next);
+  }
 }
 
 /** Restore from trash, or create a new sheet after the old one was deleted. Only ever from a click. */
@@ -219,12 +252,16 @@ export async function resolveMemory(
   about?: string[][]
 ): Promise<ResolvedMemory> {
   const status = await inspectMemory(api, previous);
-  if (status === "ready") return { ids: previous, created: false };
+  if (status === "ready") {
+    await renameMemoryToProduct(api, previous);
+    return { ids: previous, created: false };
+  }
   if (status === "absent") {
     const found = await findMemoryFile(api);
     if (found) {
       // An earlier Enable may have created the file and stopped before setting it up.
       await setupMemorySheet(api, found.fileId!, about);
+      await renameMemoryToProduct(api, found);
       return { ids: found, created: false };
     }
     return { ids: await createMemoryFile(api, MEMORY_SHEET_NAME, about), created: true };
@@ -402,6 +439,14 @@ export class FetchDriveApi implements DriveApi {
     return { id: file.id, name: file.name, trashed: file.trashed };
   }
 
+  async renameFile(id: string, name: string): Promise<void> {
+    const res = await this.send(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,name`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+    await ensureOk(res, "rename");
+  }
+
   async trashFile(id: string): Promise<void> {
     const res = await this.send(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -450,7 +495,7 @@ export class FetchDriveApi implements DriveApi {
     for (const sheet of (await parsed(res, SheetsList, "read")).sheets) {
       sheetIds[sheet.properties.title] = sheet.properties.sheetId;
       tabs.push({ sheetId: sheet.properties.sheetId, title: sheet.properties.title });
-      if (sheet.protectedRanges.some((range) => range.description === PROTECTED_DESCRIPTION)) protectedIds.push(sheet.properties.sheetId);
+      if (sheet.protectedRanges.some((range) => isProtectedDescription(range.description))) protectedIds.push(sheet.properties.sheetId);
     }
     return { sheetIds, protectedIds, tabs };
   }

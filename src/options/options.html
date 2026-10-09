@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Cortex Settings</title>
+    <title>Bobbin Settings</title>
     <link rel="stylesheet" href="fonts.css" />
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="cortex-theme.css" />
@@ -17,7 +17,7 @@
 
     <header class="cx-opt-topbar">
       <div class="cx-opt-topbar-inner">
-        <div class="cx-opt-brand" aria-label="Cortex">
+        <div class="cx-opt-brand" aria-label="Bobbin">
           <img
             class="cx-opt-brand-mark"
             src="mascot/felt-head.webp"
@@ -25,12 +25,12 @@
             width="28"
             height="28"
           />
-          <span class="cx-opt-brand-wordmark">Cortex</span>
+          <span class="cx-opt-brand-wordmark">Bobbin</span>
         </div>
         <div class="cx-opt-page-head">
           <h1 class="cx-opt-title">Settings</h1>
           <p class="cx-opt-subtitle">
-            Configure how Cortex indexes and answers from your browsing.
+            Configure how Bobbin indexes and answers from your browsing.
           </p>
         </div>
       </div>
@@ -53,6 +53,10 @@
       </nav>
 
       <main class="cx-opt-main" id="cx-opt-main">
+        <div id="cx-rename-notice" class="cx-rename-notice" role="status" hidden>
+          <p>Cortex is now Bobbin. Same extension, same data, new name.</p>
+          <button type="button" id="cx-rename-notice-ok" class="cx-btn cx-btn-secondary">OK</button>
+        </div>
         <div id="cx-managed-banner" class="cx-managed-banner" role="note" hidden>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="11" width="18" height="11" rx="2"></rect>
@@ -65,7 +69,7 @@
         <section class="cx-sec" id="cx-sec-library" tabindex="-1" aria-labelledby="cx-library-h">
           <div class="cx-sec-head">
             <h2 class="cx-sec-title" id="cx-library-h">Library</h2>
-            <p class="cx-sec-desc">What Cortex has indexed on this device.</p>
+            <p class="cx-sec-desc">What Bobbin has indexed on this device.</p>
           </div>
 
           <div class="cx-panel">
@@ -121,7 +125,7 @@
         <section class="cx-sec" id="cx-sec-appearance" tabindex="-1" aria-labelledby="cx-theme-h">
           <div class="cx-sec-head">
             <h2 class="cx-sec-title" id="cx-theme-h">Appearance</h2>
-            <p class="cx-sec-desc">How the Cortex panel looks while you browse. Settings and the toolbar popup stay light.</p>
+            <p class="cx-sec-desc">How the Bobbin panel looks while you browse. Settings and the toolbar popup stay light.</p>
           </div>
 
           <div class="cx-panel">
@@ -162,9 +166,9 @@
               </div>
             </div>
             <div class="cx-group">
-              <h3 class="cx-group-title" id="cx-panel-where">Where Cortex opens</h3>
+              <h3 class="cx-group-title" id="cx-panel-where">Where Bobbin opens</h3>
               <p class="cx-group-desc">
-                Some apps take the keyboard back while you type. On those, Cortex opens in the
+                Some apps take the keyboard back while you type. On those, Bobbin opens in the
                 Chrome side panel instead, where typing always works.
               </p>
               <div class="cx-radio-cards" role="radiogroup" aria-labelledby="cx-panel-where">
@@ -207,7 +211,7 @@
         <section class="cx-sec" id="cx-sec-capture" tabindex="-1" aria-labelledby="cx-features-h">
           <div class="cx-sec-head">
             <h2 class="cx-sec-title" id="cx-features-h">Capture</h2>
-            <p class="cx-sec-desc">Choose what Cortex indexes as you browse. Changes save immediately.</p>
+            <p class="cx-sec-desc">Choose what Bobbin indexes as you browse. Changes save immediately.</p>
           </div>
 
           <div class="cx-panel">
@@ -267,7 +271,7 @@
                 <div class="cx-feature-row">
                   <label for="cx-feat-highlightsEnabled" class="cx-feature-label">
                     <span class="cx-field-label">Highlights</span>
-                    <span class="cx-field-hint">Add "Save to Cortex" to the right-click menu for selected text.</span>
+                    <span class="cx-field-hint">Add "Save to Bobbin" to the right-click menu for selected text.</span>
                   </label>
                   <input type="checkbox" id="cx-feat-highlightsEnabled" class="cx-check-native cx-switch" data-feature="highlightsEnabled" />
                 </div>
@@ -294,7 +298,7 @@
         <section class="cx-sec" id="cx-sec-intelligence" tabindex="-1" aria-labelledby="cx-chat-h">
           <div class="cx-sec-head">
             <h2 class="cx-sec-title" id="cx-chat-h">Intelligence</h2>
-            <p class="cx-sec-desc">How Cortex answers your questions.</p>
+            <p class="cx-sec-desc">How Bobbin answers your questions.</p>
           </div>
 
           <div class="cx-panel">
@@ -438,12 +442,12 @@
             <div class="cx-group" id="cx-assistant-consent">
               <h3 class="cx-group-title">Before you turn this on</h3>
               <p class="cx-group-desc">
-                Assistant Sync copies your library into a folder named Cortex Memory in your own Google Drive. After you enable it, Cortex updates it about every 5 minutes while you browse, and at least every 15 minutes. The Cortex Memory sheet holds page titles, URLs, searches, LinkedIn profiles, and topics. The Pages folder holds one Google Doc per day with the text of pages you read (20 seconds on screen or scrolled 30 percent), up to 4,000 characters each, and the name, headline, location, current role, About, Experience, Education, and skills of LinkedIn profiles you open. Text of LinkedIn feed posts syncs only when you turn on Save text of LinkedIn posts I scroll past. The Google permission is drive.file: Cortex can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can read the relevant rows and page text while it answers you. Sync stays off until you press Enable.
+                Assistant Sync copies your library into a folder named Bobbin Memory in your own Google Drive. After you enable it, Bobbin updates it about every 5 minutes while you browse, and at least every 15 minutes. The Bobbin Memory sheet holds page titles, URLs, searches, LinkedIn profiles, and topics. The Pages folder holds one Google Doc per day with the text of pages you read (20 seconds on screen or scrolled 30 percent), up to 4,000 characters each, and the name, headline, location, current role, About, Experience, Education, and skills of LinkedIn profiles you open. Text of LinkedIn feed posts syncs only when you turn on Save text of LinkedIn posts I scroll past. The Google permission is drive.file: Bobbin can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can read the relevant rows and page text while it answers you. Sync stays off until you press Enable.
               </p>
               <p class="cx-field-hint">
-                <a href="https://skumar54uncc.github.io/Cortex/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
+                <a href="https://skumar54uncc.github.io/Bobbin/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
                 ·
-                <a href="https://skumar54uncc.github.io/Cortex/data-deletion.html" target="_blank" rel="noopener noreferrer">How to delete this data</a>
+                <a href="https://skumar54uncc.github.io/Bobbin/data-deletion.html" target="_blank" rel="noopener noreferrer">How to delete this data</a>
               </p>
               <div class="cx-actions-row">
                 <button type="button" id="cx-assistant-enable" class="cx-btn cx-btn-primary">Enable</button>
@@ -460,10 +464,10 @@
               </div>
             </div>
             <div class="cx-group" id="cx-assistant-legacy" hidden>
-              <h3 class="cx-group-title">Older Cortex files in Drive</h3>
+              <h3 class="cx-group-title">Older Bobbin files in Drive</h3>
               <p class="cx-group-desc">
-                Earlier versions of Cortex saved a JSON backup and monthly archive sheets in the Cortex Memory folder.
-                Cortex no longer writes them, and Cortex Memory is the only file assistants need.
+                Earlier versions of Bobbin saved a JSON backup and monthly archive sheets in the Bobbin Memory folder.
+                Bobbin no longer writes them, and Bobbin Memory is the only file assistants need.
               </p>
               <ul id="cx-assistant-legacy-list" class="cx-assistant-legacy-list"></ul>
               <div class="cx-actions-row">
@@ -497,7 +501,7 @@
                   class="cx-assistant-lost is-lost"
                   width="96"
                   height="96"
-                  alt="Cortex mascot looking for a page"
+                  alt="Bobbin mascot looking for a page"
                   src="mascot/felt-lost.webp"
                   srcset="mascot/felt-lost@256.webp 256w, mascot/felt-lost.webp 512w"
                 />
@@ -540,14 +544,14 @@
                   </span>
                 </label>
               </div>
-              <p class="cx-field-hint">Repeat visits to a page on the same day share one row. When the sheet passes its size, Cortex removes the oldest visits first. Each day's Pages doc stays under 500,000 characters with Standard and 150,000 with Compact.</p>
+              <p class="cx-field-hint">Repeat visits to a page on the same day share one row. When the sheet passes its size, Bobbin removes the oldest visits first. Each day's Pages doc stays under 500,000 characters with Standard and 150,000 with Compact.</p>
             </div>
             <div class="cx-group">
               <h3 class="cx-group-title">LinkedIn feed</h3>
               <div class="cx-feature-row">
                 <label for="cx-assistant-feed-posts" class="cx-feature-label">
                   <span class="cx-field-label">Save text of LinkedIn posts I scroll past</span>
-                  <span class="cx-field-hint">When a post in your LinkedIn feed stays on screen for 2 seconds, Cortex saves the author's name and up to 1,500 characters of the post to that day's Pages doc in your Drive. Your assistant can then answer questions about posts you saw. Photos and messages are never saved. Off until you turn it on.</span>
+                  <span class="cx-field-hint">When a post in your LinkedIn feed stays on screen for 2 seconds, Bobbin saves the author's name and up to 1,500 characters of the post to that day's Pages doc in your Drive. Your assistant can then answer questions about posts you saw. Photos and messages are never saved. Off until you turn it on.</span>
                 </label>
                 <input type="checkbox" id="cx-assistant-feed-posts" class="cx-check-native cx-switch" />
               </div>
@@ -571,7 +575,7 @@
             <div class="cx-group" id="cx-indexing-consent-group" hidden>
               <h3 class="cx-group-title">Allow on-device indexing</h3>
               <p class="cx-group-desc">
-                Cortex has not started indexing yet. Press Allow to index pages you read on this
+                Bobbin has not started indexing yet. Press Allow to index pages you read on this
                 device and, if you choose Scan history below, to import recent browser history.
                 Data stays on this device unless you later enable Assistant Sync or Cloud Chat.
               </p>
@@ -620,7 +624,7 @@
 
             <div class="cx-group">
               <h3 class="cx-group-title">Blocked domains</h3>
-              <p class="cx-group-desc">Cortex never indexes these sites. One domain per line.</p>
+              <p class="cx-group-desc">Bobbin never indexes these sites. One domain per line.</p>
               <div class="cx-field">
                 <label class="cx-field-label" for="cx-opt-blocklist">Domains to block</label>
                 <p class="cx-field-hint">Click × on a chip to remove it from the list.</p>
@@ -692,7 +696,7 @@
             <div class="cx-group" id="cx-warnings-group">
               <h3 class="cx-group-title">Warnings</h3>
               <p class="cx-group-desc">
-                Page text that reads like instructions to an AI. Cortex lists it here for you to review and leaves the text as it is. The Connect your AI instruction tells your assistant to treat page text as website content, not as a request from you.
+                Page text that reads like instructions to an AI. Bobbin lists it here for you to review and leaves the text as it is. The Connect your AI instruction tells your assistant to treat page text as website content, not as a request from you.
               </p>
               <div class="cx-actions-row">
                 <button type="button" id="cx-warnings-show" class="cx-btn cx-btn-secondary" aria-expanded="false" aria-controls="cx-warnings-list">View warnings</button>
@@ -722,7 +726,7 @@
             <div class="cx-group cx-danger-zone">
               <h3 class="cx-group-title cx-danger-title">Forget all</h3>
               <p class="cx-group-desc">
-                Deletes all indexed pages, text chunks, visit history and chats from this browser. If Assistant Sync has been used, this also moves the Cortex Memory folder in Google Drive to the trash. Your
+                Deletes all indexed pages, text chunks, visit history and chats from this browser. If Assistant Sync has been used, this also moves the Bobbin Memory folder in Google Drive to the trash. Your
                 extension settings (blocklist, chat mode) are kept. This cannot be undone.
               </p>
               <button type="button" id="cx-opt-delete-all" class="cx-btn cx-btn-danger">
@@ -775,7 +779,7 @@
               <p class="cx-group-desc">Nothing changes until you confirm the restore.</p>
               <div class="cx-field">
                 <label class="cx-field-label" for="cx-restore-file">Restore from a backup</label>
-                <p class="cx-field-hint" id="cx-restore-hint">Choose a Cortex backup file (.json).</p>
+                <p class="cx-field-hint" id="cx-restore-hint">Choose a Bobbin backup file (.json).</p>
                 <input type="file" id="cx-restore-file" class="cx-input cx-file-input" accept=".json,application/json" aria-describedby="cx-restore-hint" />
               </div>
               <div id="cx-restore-confirm" class="cx-restore-confirm" hidden>
@@ -817,7 +821,7 @@
         <section class="cx-sec" id="cx-sec-about" tabindex="-1" aria-labelledby="cx-about-h">
           <div class="cx-sec-head">
             <h2 class="cx-sec-title" id="cx-about-h">About</h2>
-            <p class="cx-sec-desc">Version, and how Cortex handles your data.</p>
+            <p class="cx-sec-desc">Version, and how Bobbin handles your data.</p>
           </div>
 
           <div class="cx-panel cx-about-panel">
@@ -837,14 +841,14 @@
             </div>
 
             <div class="cx-group">
-              <h3 class="cx-group-title">How Cortex works</h3>
+              <h3 class="cx-group-title">How Bobbin works</h3>
               <div class="cx-prose">
                 <p>
-                  Cortex helps you search and ask questions about pages you have visited. Your library
+                  Bobbin helps you search and ask questions about pages you have visited. Your library
                   of saved pages stays on this computer. Indexing does not upload your browsing history.
                 </p>
                 <p>
-                  If you turn on Cloud Chat and add a Google API key, Cortex can use Google’s Gemini
+                  If you turn on Cloud Chat and add a Google API key, Bobbin can use Google’s Gemini
                   service to answer harder questions. In that case, only the short passages needed to
                   answer your question are sent, not your full library.
                 </p>
@@ -874,7 +878,7 @@
               srcset="mascot/felt-portrait@256.webp 256w, mascot/felt-portrait.webp 512w"
               width="112"
               height="112"
-              alt="Cortex mascot portrait"
+              alt="Bobbin mascot portrait"
             />
           </div>
         </section>

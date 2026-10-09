@@ -29,7 +29,7 @@ describe("Insert into chat", () => {
     expect(keys).not.toHaveBeenCalled();
   });
 
-  it("uses the box that had focus when the Cortex panel opened", () => {
+  it("uses the box that had focus when the Bobbin panel opened", () => {
     document.body.innerHTML = `<textarea id="chat"></textarea><button id="other">x</button>`;
     (window as { __cortexLastField?: unknown }).__cortexLastField = document.getElementById("chat");
     (document.getElementById("other") as HTMLButtonElement).focus();

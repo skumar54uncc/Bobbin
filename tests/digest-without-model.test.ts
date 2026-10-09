@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 /**
  * The digest used to show one line, "Cloud chat is turned off.", and nothing
- * else: no model, no digest. Cortex already knows every page of the period
+ * else: no model, no digest. Bobbin already knows every page of the period
  * without asking a model, so the reading focus is written from those pages.
  */
 vi.mock("../src/lib/chat/llm-router", async () => {

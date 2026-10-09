@@ -4,7 +4,7 @@ import { newGuideState, saveGuide } from "./state";
 export type StartResult = { ok: true; tabId: number } | { ok: false; error: string };
 
 export const PANEL_FAILED =
-  "The assistant opened in a new tab. Press the Cortex button in the toolbar to see the steps beside it.";
+  "The assistant opened in a new tab. Press the Bobbin button in the toolbar to see the steps beside it.";
 
 /**
  * Opens the assistant's first page in a new tab and the guide in that tab's side panel.
@@ -15,7 +15,7 @@ export async function startGuide(id: AssistantId): Promise<StartResult> {
   if (!assistant) return { ok: false, error: "Pick an assistant first." };
   const url = firstUrl(assistant);
   const tab = await chrome.tabs.create(url ? { url, active: true } : { active: true });
-  if (tab.id == null) return { ok: false, error: "Cortex could not open a tab." };
+  if (tab.id == null) return { ok: false, error: "Bobbin could not open a tab." };
   const saved = saveGuide(newGuideState(id, tab.id));
   try {
     // The service worker sets the panel: it also points new tabs' panels at search, so it must know.

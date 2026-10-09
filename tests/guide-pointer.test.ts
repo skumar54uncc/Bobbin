@@ -131,7 +131,7 @@ describe("done checks read only the target", () => {
     expect(isDone("toggle-on", page(`<button role="switch" aria-checked="false"></button>`).body.firstElementChild!)).toBe(false);
     const box = page(`<textarea></textarea>`).body.firstElementChild as HTMLTextAreaElement;
     expect(isDone("contains-cortex", box)).toBe(false);
-    box.value = 'My browsing history lives in my Google Drive folder "Cortex Memory".';
+    box.value = 'My browsing history lives in my Google Drive folder "Bobbin Memory".';
     expect(isDone("contains-cortex", box)).toBe(true);
   });
 
@@ -196,7 +196,7 @@ describe("on-page pointer", () => {
 
   it("reports the step done when the target shows it, and keeps the paste reminder", async () => {
     document.body.innerHTML = load("claude").body.innerHTML;
-    (document.getElementById("ins") as HTMLTextAreaElement).value = "Cortex Memory is my history";
+    (document.getElementById("ins") as HTMLTextAreaElement).value = "Bobbin Memory is my history";
     expect(await showPointer("claude", "instructions", visible)).toBe("done");
     expect(sent).toEqual([{ type: "CORTEX_GUIDE_DONE", assistant: "claude", step: "instructions" }]);
     expect(shownPointer()?.label).toBe("Now click Save");
@@ -225,7 +225,7 @@ describe("on-page pointer", () => {
     const find = readFileSync(join(__dirname, "..", "src", "guide", "pointer-find.ts"), "utf8");
     expect(src).toMatch(/\.ring \{[^}]*pointer-events: none/);
     expect(src).toMatch(/\.tag \{[^}]*pointer-events: none/);
-    expect(src).not.toMatch(/pointer-events: auto|\.card|Cortex setup/);
+    expect(src).not.toMatch(/pointer-events: auto|\.card|Bobbin setup/);
     for (const code of [src, find]) {
       expect(code).not.toMatch(/\.click\(|dispatchEvent|execCommand|\.focus\(|innerHTML|\.(value|checked)\s*=(?!=)/);
     }

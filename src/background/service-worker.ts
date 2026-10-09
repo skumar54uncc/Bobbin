@@ -343,7 +343,7 @@ async function ensureOffscreen(): Promise<void> {
         url: chrome.runtime.getURL("offscreen.html"),
         reasons: [chrome.offscreen.Reason.WORKERS, chrome.offscreen.Reason.DOM_PARSER],
         justification:
-          "Compute local MiniLM embeddings (Transformers.js) and read the text of imported history pages for Cortex.",
+          "Compute local MiniLM embeddings (Transformers.js) and read the text of imported history pages for Bobbin.",
       });
       // #region agent log
       agentDebugLog({
@@ -427,7 +427,7 @@ async function silentDriveToken(): Promise<string> {
     chrome.identity.getAuthToken({ interactive: false }, (token) => {
       const err = chrome.runtime.lastError;
       if (err?.message || !token) {
-        reject(new Error(err?.message || "Sign in to Google is needed before Cortex can sync."));
+        reject(new Error(err?.message || "Sign in to Google is needed before Bobbin can sync."));
         return;
       }
       resolve(token);
@@ -637,7 +637,7 @@ async function forwardAssistantSync(
     let token = action === "enable" ? tokenFromPage : await silentDriveToken().catch(() => "");
     if (!token) {
       if (action !== "enable" && action !== "cleanup" && action !== "pages") await markAuthNeeded();
-      return { ok: false, status: "auth", error: "Sign in to Google is needed before Cortex can sync." };
+      return { ok: false, status: "auth", error: "Sign in to Google is needed before Bobbin can sync." };
     }
     if (action === "enable") mirrorSyncOn(true);
     let reply = await sendSyncWork(action, token, answer);
@@ -2186,7 +2186,7 @@ async function syncContextMenus(): Promise<void> {
     chrome.contextMenus.create(
       {
         id: HIGHLIGHT_MENU_ID,
-        title: "Save to Cortex",
+        title: "Save to Bobbin",
         contexts: ["selection"],
         documentUrlPatterns: WEB_PATTERNS,
       },
@@ -2221,7 +2221,7 @@ async function handleSaveHighlight(info: chrome.contextMenus.OnClickData, tab?: 
     const [r] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: (q: string) =>
-        window.prompt(`Save to Cortex:\n"${q.slice(0, 140)}"\n\nAdd a note (optional):`, ""),
+        window.prompt(`Save to Bobbin:\n"${q.slice(0, 140)}"\n\nAdd a note (optional):`, ""),
       args: [quote],
     });
     // prompt() returns null on Cancel; executeScript reports that as a missing
@@ -2254,7 +2254,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ---------------------------------------------------------------------------
 // Address bar: keyword "cx" (Phase 5.2). Local search only.
 // ---------------------------------------------------------------------------
-const OMNIBOX_DEFAULT = "Search your Cortex library for <match>%s</match>";
+const OMNIBOX_DEFAULT = "Search your Bobbin library for <match>%s</match>";
 let omniboxSeq = 0;
 let omniboxLast: { query: string; bestUrl: string | null } = { query: "", bestUrl: null };
 
@@ -2266,7 +2266,7 @@ chrome.omnibox?.onInputChanged.addListener((text, suggest) => {
     const settings = await getEffectiveSettings();
     if (!settings.omniboxEnabled) {
       chrome.omnibox.setDefaultSuggestion({
-        description: "Cortex address bar search is off. Turn it on in Cortex settings.",
+        description: "Bobbin address bar search is off. Turn it on in Bobbin settings.",
       });
       suggest([]);
       return;
@@ -3119,7 +3119,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
 
   if (type === "CORTEX_INDEXING_CONSENT_GRANT") {
     if (!isConsentUiSender(sender)) {
-      sendResponse({ ok: false, error: "This action is only available from Cortex." });
+      sendResponse({ ok: false, error: "This action is only available from Bobbin." });
       return true;
     }
     const runBackfill =
@@ -3253,7 +3253,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     const frameEnable = parsed?.action === "enable" && isConnectFrameSender(sender);
     // Options opens in a tab, so sender.tab is set. A web page still cannot send this.
     if (!isPrivilegedExtensionSender(sender) && !isOptionsPageSender(sender) && !frameEnable) {
-      sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
+      sendResponse({ ok: false, error: "This action is only available from Bobbin settings." });
       return true;
     }
     if (!parsed) {
@@ -3267,11 +3267,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     }
     // Interactive Enable comes from the Enable click in Settings, the setup side panel, or the Connect frame.
     if (action === "enable" && !isOptionsPageSender(sender) && !isGuidePanelSender(sender) && !frameEnable) {
-      sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
+      sendResponse({ ok: false, error: "This action is only available from Bobbin settings." });
       return true;
     }
     if (action === "pages" && !isOptionsPageSender(sender)) {
-      sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
+      sendResponse({ ok: false, error: "This action is only available from Bobbin settings." });
       return true;
     }
     if (action === "now") {
@@ -3319,7 +3319,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
 
   if (type === "CORTEX_SYNC_WARNINGS") {
     if (!isOptionsPageSender(sender)) {
-      sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
+      sendResponse({ ok: false, error: "This action is only available from Bobbin settings." });
       return true;
     }
     void listSyncWarnings().then(

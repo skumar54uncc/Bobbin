@@ -88,6 +88,6 @@ export async function browsePages(f: BrowseFilters): Promise<{ hits: SearchHitDT
       ? "No saved page in this range contains that exact phrase."
       : site
         ? "No saved page from that site in this range."
-        : "Nothing saved in this range yet. Pages you read show up here once Cortex saves them.",
+        : "Nothing saved in this range yet. Pages you read show up here once Bobbin saves them.",
   };
 }

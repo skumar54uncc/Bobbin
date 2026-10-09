@@ -9,14 +9,14 @@ export type SyncDenyReason = "password" | "sensitive" | "user" | "local" | "brow
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
 
-/** Hosts where Cortex's own Drive files open. */
+/** Hosts where Bobbin's own Drive files open. */
 const OWN_FILE_HOSTS = new Set(["docs.google.com", "drive.google.com"]);
 /**
- * "Cortex Memory - Google Sheets", "Cortex Memory - Google Drive", the day docs
- * ("Cortex Pages 2026-10-08 Thursday - Google Docs"), and the files older builds made.
+ * "Bobbin Memory - Google Sheets" and the same titles Cortex used, the day docs
+ * ("Bobbin Pages 2026-10-08 Thursday - Google Docs"), and the files older builds made.
  */
 const OWN_FILE_TITLE =
-  /^Cortex (Memory( Archive \d{4}-\d{2}| Backup\.json| Seed)?|Pages \d{4}-\d{2}-\d{2} [A-Za-z]+)(\s+[-\u2013\u2014]\s+.*)?$/i;
+  /^(Bobbin|Cortex) (Memory( Archive \d{4}-\d{2}| Backup\.json| Seed)?|Pages \d{4}-\d{2}-\d{2} [A-Za-z]+)(\s+[-\u2013\u2014]\s+.*)?$/i;
 
 export interface OwnFileIds {
   fileId?: string | null;
@@ -24,7 +24,7 @@ export interface OwnFileIds {
   pagesFolderId?: string | null;
 }
 
-/** The Cortex Memory sheet, folders, or a Pages doc, by stored Drive id or by title on a Google Docs or Drive page. */
+/** The Bobbin Memory sheet, folders, or a Pages doc (and the old Cortex names), by stored Drive id or by title on a Google Docs or Drive page. */
 export function isCortexOwnFile(raw: string, title?: string | null, ids?: OwnFileIds | null): boolean {
   let url: URL;
   try {

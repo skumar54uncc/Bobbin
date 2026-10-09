@@ -177,7 +177,7 @@ describe("repeat visits in the sheet", () => {
     expect(sheets.tab("Visits")[2]?.[DEVICE]).toBe("this device");
     expect((await readSyncEngineState()).layout?.schema).toBe(SCHEMA_VERSION);
     // The edit warning went out in that same single write, once per tab.
-    expect(Object.values(sheets.protections()).every((p) => p.length === 1 && p[0] === "Managed by Cortex")).toBe(true);
+    expect(Object.values(sheets.protections()).every((p) => p.length === 1 && p[0] === "Managed by Bobbin")).toBe(true);
     const kinds = sheets.batches.at(-1)!.map((r) => Object.keys(r)[0]);
     expect(kinds.filter((k) => k === "addProtectedRange")).toHaveLength(6);
     expect(kinds).toContain("copyPaste");
@@ -284,13 +284,13 @@ describe("sheet detail", () => {
     const pages = VISIT_HEADERS.indexOf("pages_doc");
     expect(sheets.tab("Visits").slice(1).map((row) => row[pages])).toEqual([
       "",
-      "Cortex Pages 2026-09-22 Tuesday#d10",
-      "Cortex Pages 2026-10-01 Thursday#d1",
+      "Bobbin Pages 2026-09-22 Tuesday#d10",
+      "Bobbin Pages 2026-10-01 Thursday#d1",
     ]);
     const folder = (await readSyncEngineState()).pagesFolderId;
     expect(sheets.docsIn(folder).map((doc) => doc.name).sort()).toEqual([
-      "Cortex Pages 2026-09-22 Tuesday",
-      "Cortex Pages 2026-10-01 Thursday",
+      "Bobbin Pages 2026-09-22 Tuesday",
+      "Bobbin Pages 2026-10-01 Thursday",
     ]);
 
     const cut = tabCutoffs(NOW, ZONE, 90, "compact");

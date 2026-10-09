@@ -10,6 +10,7 @@ interface WarEntry {
 interface Manifest {
   manifest_version: number;
   name: string;
+  short_name: string;
   description: string;
   version: string;
   permissions: string[];
@@ -53,7 +54,8 @@ describe("manifest.json", () => {
 
 describe("store listing fields (Phase 2.9)", () => {
   it("uses the release name and description", () => {
-    expect(manifest.name).toBe("Cortex: Private Memory for Everything You Read");
+    expect(manifest.name).toBe("Bobbin: Browsing Memory for AI");
+    expect(manifest.short_name).toBe("Bobbin");
     expect(manifest.description).toBe(
       "Ask anything you've read, watched or scanned. Pages, YouTube, tables and images, indexed on your device."
     );

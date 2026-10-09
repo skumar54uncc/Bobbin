@@ -110,7 +110,7 @@ test.describe("guided setup", () => {
     await start("claude");
     const assistantTab = context.pages().find((p) => p.url().startsWith("https://claude.ai/"))!;
     expect(assistantTab.url()).toBe("https://claude.ai/customize/connectors");
-    await expect(frame.locator(".cx-connect-start-note")).toHaveText("Cortex opens Claude in a new tab and shows these steps in the side panel beside it.");
+    await expect(frame.locator(".cx-connect-start-note")).toHaveText("Bobbin opens Claude in a new tab and shows these steps in the side panel beside it.");
     const panel = await panelFor("https://claude.ai/");
     expect(panel.options).toMatchObject({ path: "guide-panel.html", enabled: true });
     expect(panel.state?.assistant).toBe("claude");
@@ -122,7 +122,7 @@ test.describe("guided setup", () => {
     await frame.evaluate(() => (document.querySelector(".cx-connect-start") as HTMLButtonElement).click());
     await expect(frame.locator(".cx-connect-start")).toBeEnabled();
     await page.waitForTimeout(1500);
-    await expect(frame.locator(".cx-connect-start-note")).toHaveText("Cortex opens a new tab and shows these steps in the side panel beside it.");
+    await expect(frame.locator(".cx-connect-start-note")).toHaveText("Bobbin opens a new tab and shows these steps in the side panel beside it.");
     const otherPanel = await panelFor("chrome://newtab");
     expect(otherPanel.options).toMatchObject({ path: "guide-panel.html", enabled: true });
     expect(otherPanel.state?.assistant).toBe("other");
@@ -167,7 +167,7 @@ test.describe("guided setup", () => {
     await expect(panel.locator(".cx-guide-done")).toContainText("Connect Google Drive, done");
     await expect(claude.locator("[data-cortex-guide]")).toHaveCount(1);
     // The user pastes; the step completes itself and the tab stays so Save is not lost.
-    await claude.fill("#ins", 'My browsing history lives in my Google Drive folder "Cortex Memory".');
+    await claude.fill("#ins", 'My browsing history lives in my Google Drive folder "Bobbin Memory".');
     await expect(panel.locator(".cx-guide-progress")).toHaveText("Step 3 of 3");
     await expect(panel.locator(".cx-guide-step")).toContainText("Click Save on the page if you have not yet.");
     expect(claude.url()).toBe("https://claude.ai/new#settings/account");

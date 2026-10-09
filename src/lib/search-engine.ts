@@ -415,7 +415,7 @@ export async function runAdvancedSearch(
       evidence:
         opts?.collectionId != null
           ? "This collection has no pages yet."
-          : "Nothing indexed yet. Browse pages normally so Cortex can store text chunks locally.",
+          : "Nothing indexed yet. Browse pages normally so Bobbin can store text chunks locally.",
     };
   }
 
@@ -667,7 +667,7 @@ export async function runAdvancedSearch(
     effectiveParsed.timeRange != null
   ) {
     evidence =
-      "No memories matched strongly. Try quoted names, shorter keywords (e.g. linkedin), or revisit pages so Cortex can index them.";
+      "No memories matched strongly. Try quoted names, shorter keywords (e.g. linkedin), or revisit pages so Bobbin can index them.";
   }
 
   const chunks: ChunkWithDoc[] | undefined = opts?.includeChunks

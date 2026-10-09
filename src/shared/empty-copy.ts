@@ -4,7 +4,7 @@
  */
 
 export const EMPTY_LIBRARY_LEAD = "No pages in your library yet.";
-export const EMPTY_LIBRARY_NEXT = "Browse normally. Cortex saves pages on this device.";
+export const EMPTY_LIBRARY_NEXT = "Browse normally. Bobbin saves pages on this device.";
 
 export const EMPTY_VISITS_LEAD = "No visits logged yet.";
 export const EMPTY_VISITS_NEXT = "Keep browsing. Recent pages show up here.";

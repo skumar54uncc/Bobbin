@@ -1,7 +1,7 @@
 # Sheet size
 
-Assistants read the whole Cortex Memory sheet. Claude's Drive connector
-exports every tab as CSV, so Cortex estimates the sheet as the UTF-8 size
+Assistants read the whole Bobbin Memory sheet. Claude's Drive connector
+exports every tab as CSV, so Bobbin estimates the sheet as the UTF-8 size
 of that CSV (every tab, header rows included, cells quoted the way CSV
 quotes them). The estimate is computed after every flush from local
 memory, saved as `sheetBytes` in the sync state, shown in Settings under
@@ -24,7 +24,7 @@ one Visits row with `visit_count`, `last_time`, and total dwell, and drop visits
 
 ## Trimming
 
-When the estimate passes the target, Cortex removes whole days of Visits,
+When the estimate passes the target, Bobbin removes whole days of Visits,
 oldest first. Today is never removed. Searches, People, and Companies are
 trimmed only if the sheet would pass 8 MB. Trimmed rows are removed from
 the sheet and from local sync memory in the same flush, with no reads. The

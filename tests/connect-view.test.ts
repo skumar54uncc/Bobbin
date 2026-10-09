@@ -30,7 +30,7 @@ describe("Connect your AI view", () => {
     const { host } = mount();
     await settle();
     expect(host.querySelector(".cx-connect-title")?.textContent).toBe(CONNECT_TITLE);
-    expect(CONNECT_TITLE).toBe("Connect your AI to your Cortex memory");
+    expect(CONNECT_TITLE).toBe("Connect your AI to your Bobbin memory");
     expect(host.querySelector(".cx-connect-lead")?.textContent).toBe(CONNECT_LEAD);
     expect(host.querySelector(".cx-connect-mascot img")?.getAttribute("src")).toContain("felt-wave");
     expect(host.querySelector(".cx-connect-status-title")?.textContent).toBe("Assistant Sync is on");
@@ -54,7 +54,7 @@ describe("Connect your AI view", () => {
     // Step titles only: the side panel does the copying and the opening.
     expect([...guide.querySelectorAll(".cx-connect-steps li")].map((li) => li.textContent)).toEqual([
       "Connect Google Drive",
-      "Add the Cortex instruction",
+      "Add the Bobbin instruction",
       "Test it in a new chat",
     ]);
     expect(guide.querySelector(".cx-connect-copy, .cx-connect-preview, pre")).toBeNull();
@@ -79,7 +79,7 @@ describe("Connect your AI view", () => {
     expect(host.querySelectorAll(".cx-connect-enable")).toHaveLength(1);
   });
 
-  it("sends people to Settings when Cortex has a question about an earlier folder", async () => {
+  it("sends people to Settings when Bobbin has a question about an earlier folder", async () => {
     const { host, deps } = mount({ enable: vi.fn(async () => ({ message: "Answer it in Settings.", needsSettings: true })) }, false);
     await settle();
     host.querySelector<HTMLButtonElement>(".cx-connect-enable")!.click();
@@ -110,12 +110,12 @@ describe("Connect your AI view", () => {
   });
 
   it("shows the start failure in words", async () => {
-    const { host } = mount({ start: async () => ({ ok: false, error: "Press the Cortex button." }) });
+    const { host } = mount({ start: async () => ({ ok: false, error: "Press the Bobbin button." }) });
     await settle();
     card(host, "claude").click();
     host.querySelector<HTMLButtonElement>(".cx-connect-start")!.click();
     await settle();
-    expect(host.querySelector(".cx-connect-start-note")?.textContent).toBe("Press the Cortex button.");
+    expect(host.querySelector(".cx-connect-start-note")?.textContent).toBe("Press the Bobbin button.");
   });
 
   it("lists every troubleshooting item, the chosen assistant's first", async () => {

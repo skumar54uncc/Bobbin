@@ -112,7 +112,7 @@ export function buildVault(backup: CortexBackup): ZipEntry[] {
   }
 
   const files: ZipEntry[] = [];
-  const index = ["# Cortex library", "", `Exported ${day(backup.exportedAt)}. ${docs.length} pages.`, ""];
+  const index = ["# Bobbin library", "", `Exported ${day(backup.exportedAt)}. ${docs.length} pages.`, ""];
   for (const d of [...docs].sort((a, b) => b.lastVisitedAt - a.lastVisitedAt || a.id - b.id)) {
     index.push(`- [${md(d.title)}](${pathOf.get(d.id)}) (${d.domain}, ${day(d.lastVisitedAt)})`);
   }

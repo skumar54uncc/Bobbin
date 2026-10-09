@@ -3,13 +3,14 @@
  * day's HTML replaces the Doc's content. Days whose HTML is unchanged are not sent.
  */
 import { assistantSyncDb, readSyncEngineState, writeSyncEngineState, type PagesDeletedNotice, type SyncPagesDocRecord } from "./db";
+import { legacyPagesDocTitle } from "../shared/product-name";
 import { FOLDER_MIME, googleErrorDetail, googleStatus, type DriveApi, type GoogleErrorDetail } from "./drive-api";
 import { DAY_DOC_MAX_CHARS, dayChars, dayDocHtml, htmlSignature, PAGES_FOLDER_NAME, trimDay, type DayDoc } from "./pages-doc";
 
 /** Day docs sent in one pass. Today goes first; older days follow on later passes. */
 export const MAX_DOC_UPLOADS_PER_PASS = 6;
 
-export const PAGES_ERROR_MESSAGE = "Google did not accept the last Pages doc update. Cortex will try again.";
+export const PAGES_ERROR_MESSAGE = "Google did not accept the last Pages doc update. Bobbin will try again.";
 
 export interface PagesSyncResult {
   /** Drive writes: uploads, folder creation, restores, and retention trashing. */
@@ -51,6 +52,16 @@ async function noteRemoved(kind: PagesDeletedNotice["kind"], date?: string): Pro
 }
 
 class PagesFolderRemoved extends Error {}
+
+/** Finds today's doc by the Bobbin name, then the Cortex name, so a rename never creates a second file. */
+async function findDayDoc(api: DriveApi, folder: string, day: DayDoc): Promise<{ id: string; name: string } | null> {
+  const names = [day.name, legacyPagesDocTitle(day.date, day.weekday)];
+  for (const name of names) {
+    const found = await api.listFiles(`${q(folder)} in parents and name = ${q(name)} and trashed = false`, "createdTime");
+    if (found[0]) return { id: found[0].id, name: found[0].name };
+  }
+  return null;
+}
 
 /**
  * The Pages folder. A stored folder the user trashed or deleted is never restored or replaced:
@@ -136,15 +147,20 @@ export async function syncPagesDocs(input: {
           await noteRemoved("day", day.date);
           continue;
         }
+        if (info.name !== day.name) {
+          counts.writes += 1;
+          await input.api.renameFile(fileId, day.name);
+        }
         counts.writes += 1;
         await input.api.updateDoc(fileId, html);
       } else {
         folder ??= await pagesFolder(input.api, input.memoryFolderId, counts);
         counts.reads += 1;
-        const existing = await input.api.listFiles(`${q(folder)} in parents and name = ${q(day.name)} and trashed = false`, "createdTime");
+        const existing = await findDayDoc(input.api, folder, day);
         counts.writes += 1;
-        if (existing[0]) {
-          fileId = existing[0].id;
+        if (existing) {
+          fileId = existing.id;
+          if (existing.name !== day.name) await input.api.renameFile(fileId, day.name);
           await input.api.updateDoc(fileId, html);
         } else {
           fileId = await input.api.createDoc(day.name, folder, html);

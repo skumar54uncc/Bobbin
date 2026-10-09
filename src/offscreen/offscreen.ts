@@ -207,7 +207,7 @@ async function runBackupWork(m: BackupWorkMessage): Promise<unknown> {
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { ok: false, error: "This file is not a Cortex backup (it is not valid JSON)." };
+    return { ok: false, error: "This file is not a Bobbin backup (it is not valid JSON)." };
   }
   const v = validateBackup(parsed);
   if (!v.ok) return { ok: false, error: v.error };

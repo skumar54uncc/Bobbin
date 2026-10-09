@@ -28,12 +28,12 @@ function cloudKeyMissingOrDisabled(settings: ChatSettings): ChatUnavailableError
   if (!settings.cloudEnabled) {
     return new ChatUnavailableError(
       "Cloud chat is turned off.",
-      "Turn on Enable cloud chat in Cortex settings, then add an API key."
+      "Turn on Enable cloud chat in Bobbin settings, then add an API key."
     );
   }
   return new ChatUnavailableError(
     "You haven't added an API key yet.",
-    `Open Cortex settings, choose a model provider, and paste an API key. A free Gemini key is at ${GEMINI_API_KEY_HELP_URL}`
+    `Open Bobbin settings, choose a model provider, and paste an API key. A free Gemini key is at ${GEMINI_API_KEY_HELP_URL}`
   );
 }
 

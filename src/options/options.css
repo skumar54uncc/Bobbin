@@ -1284,6 +1284,29 @@ body {
 }
 
 /* Enterprise policy lockout (release 1.2.0, Phase 4.1) */
+.cx-rename-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-sm);
+}
+
+.cx-rename-notice[hidden] {
+  display: none;
+}
+
+.cx-rename-notice p {
+  margin: 0;
+}
+
 .cx-managed-banner {
   display: flex;
   align-items: center;

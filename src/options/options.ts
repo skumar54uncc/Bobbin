@@ -11,7 +11,8 @@ import { getEffectiveSettings } from "../shared/managed-policy";
 import { applyManagedLockout, stripLockedFields } from "./managed-ui";
 import type { HistoryImportProgress } from "../lib/history-import";
 import { INDEXING_CONSENT_KEY } from "../shared/onboarding-constants";
-import { storageLocalGet } from "../shared/storage-local";
+import { RENAME_NOTICE_KEY } from "../shared/product-name";
+import { storageLocalGet, storageLocalSet } from "../shared/storage-local";
 import { requestPersistentStorage } from "../shared/persist-storage";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import { siteBadgeColors, siteInitial } from "../lib/site-badge";
@@ -762,9 +763,23 @@ function updateDeleteConfirmEnabled(): void {
   btn.disabled = !(typed || (deleteOpenAt > 0 && Date.now() - deleteOpenAt < 5000));
 }
 
+async function showRenameNotice(): Promise<void> {
+  const banner = document.getElementById("cx-rename-notice");
+  const ok = document.getElementById("cx-rename-notice-ok");
+  if (!banner || !ok) return;
+  const stored = await storageLocalGet(RENAME_NOTICE_KEY);
+  if (stored[RENAME_NOTICE_KEY] === true) return;
+  banner.hidden = false;
+  ok.addEventListener("click", () => {
+    banner.hidden = true;
+    void storageLocalSet({ [RENAME_NOTICE_KEY]: true });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // Installs from before onboarding asked for persistent storage get asked here.
   void requestPersistentStorage();
+  void showRenameNotice();
   initBackupUi(document, {
     send: (m) => chrome.runtime.sendMessage(m),
     download: saveBlob,

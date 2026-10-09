@@ -106,7 +106,7 @@ export function itemLine(item: PacketItem, o: FormatOptions = {}): string {
 
 export function packetHeader(items: readonly PacketItem[], o: FormatOptions = {}): string {
   const n = items.length;
-  return `Context from my Cortex browsing memory: ${n} ${n === 1 ? "item" : "items"}, ${dateRangeLabel(items, o)}`;
+  return `Context from my Bobbin browsing memory: ${n} ${n === 1 ? "item" : "items"}, ${dateRangeLabel(items, o)}`;
 }
 
 /** The text that goes into the chat box. Page text appears only when asked for. */

@@ -36,7 +36,7 @@ async function* readSse(
   if (!response.ok || !response.body) {
     throw new Error(
       response.status === 401 || response.status === 403
-        ? "The API key was rejected. Check the provider and key in Cortex settings."
+        ? "The API key was rejected. Check the provider and key in Bobbin settings."
         : "Cloud chat could not answer just now."
     );
   }
@@ -198,7 +198,7 @@ export async function* cloudStream(
   }
   const url = id === "custom" ? safeCloudBaseUrl(settings.cloudBaseUrl ?? "") : OPENAI_URLS[id];
   if (!url || !model) {
-    throw new Error("Add an https endpoint and a model id in Cortex settings.");
+    throw new Error("Add an https endpoint and a model id in Bobbin settings.");
   }
   yield* withContinuation(prompt, opts.signal, (messages, end) =>
     openAiCompatible(url, model, messages, settings.geminiApiKey, opts, end)

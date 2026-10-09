@@ -1,7 +1,7 @@
 # Assistant Sync: cadence and quota math
 
 Quota numbers come from `docs/quotas.md`: 300 reads and 300 writes per minute per project, 60 of each per
-minute per user. Every Cortex user shares one Google Cloud project, so the per-project numbers are the ones
+minute per user. Every Bobbin user shares one Google Cloud project, so the per-project numbers are the ones
 that bind.
 
 ## What triggers a flush
@@ -45,7 +45,7 @@ The status line in Settings is built from this recorded state, never from a fixe
 
 ## Reads
 
-A normal flush makes zero reads. Cortex keeps the sheet layout locally: tab ids, which tabs have a header,
+A normal flush makes zero reads. Bobbin keeps the sheet layout locally: tab ids, which tabs have a header,
 and the rows of each tab as a run-length list of dates in sheet order. Appends extend the list. Retention
 turns old runs into row ranges and deletes them bottom first, so earlier indexes stay valid.
 
@@ -57,13 +57,13 @@ means an unchanged row is never sent again.
 
 ## Pages docs
 
-What pages said lives in Google Docs, not in the sheet: `Cortex Memory/Pages`, one Doc per local day named
-"Cortex Pages YYYY-MM-DD Weekday" (`src/assistant-sync/pages-doc.ts`, `pages-sync.ts`).
+What pages said lives in Google Docs, not in the sheet: `Bobbin Memory/Pages`, one Doc per local day named
+"Bobbin Pages YYYY-MM-DD Weekday" (`src/assistant-sync/pages-doc.ts`, `pages-sync.ts`).
 
 - A page counts as read when it was visible and focused for 20 seconds or more, or scrolled 30% or more
   (`page-text.ts`). Scroll depth is the bottom of the window over the page height, so a page shorter than
   the window counts as 100% scrolled. Up to 4,000 characters of main text (Readability) are kept. When the
-  part the user scrolled through is longer than that, Cortex keeps the start and the last part read, with
+  part the user scrolled through is longer than that, Bobbin keeps the start and the last part read, with
   " [...] " between them.
 - Search result pages, feeds, and LinkedIn profile and company pages keep no page text. A LinkedIn profile
   keeps headline, location, About, Experience (title, company, dates), and Education as labeled fields.
@@ -81,20 +81,20 @@ What pages said lives in Google Docs, not in the sheet: `Cortex Memory/Pages`, o
   to 10 Skills. A logged out public layout adds "Limited public view. Sign in to LinkedIn for full details."
   /in/<slug>/details/experience/ and /details/education/ visits merge into that person's section that day,
   and their rows link to it. Visits and People have a `pages_doc` column,
-  "Cortex Pages 2026-10-08 Thursday#<row id>".
+  "Bobbin Pages 2026-10-08 Thursday#<row id>".
 - Upload: the day is built locally as HTML. A new day is one multipart `files.create` with mimeType
   `application/vnd.google-apps.document`; a changed day is one `files.update` media upload of the whole HTML.
   A hash of the HTML per day is kept locally, so an unchanged day sends nothing. Never more than one write
   per changed day per pass, and at most 6 days per pass (newest first; the rest go next pass).
-- No duplicates: the stored file id is reused. If it is lost, Cortex looks the name up in the Pages folder
+- No duplicates: the stored file id is reused. If it is lost, Bobbin looks the name up in the Pages folder
   before creating.
-- User deleted: before a stored day doc is rewritten, Cortex checks it (one `files.get`). If the user
+- User deleted: before a stored day doc is rewritten, Bobbin checks it (one `files.get`). If the user
   trashed or deleted it, that day is marked deleted by the user: nothing is restored, its page text is
   not uploaded again, and its `pages_doc` cells go blank. A trashed or deleted Pages folder stops all day
-  doc uploads the same way; Cortex never restores it or makes a new one. Settings says so once, with Undo
+  doc uploads the same way; Bobbin never restores it or makes a new one. Settings says so once, with Undo
   (restores from the trash, or makes the doc again from local text if it was deleted for good) and OK.
   The sheet keeps its own restore prompt.
-- Size: a day doc is capped at 500,000 characters (150,000 with Compact sheet detail). Cortex shortens the longest section bodies first, to one
+- Size: a day doc is capped at 500,000 characters (150,000 with Compact sheet detail). Bobbin shortens the longest section bodies first, to one
   common length, marks them "[trimmed to fit the day]", and never drops a heading.
 - Retention: Standard keeps day docs as long as retention; Compact keeps the last 14 days. Older day docs
   move to the Drive trash and their local text is deleted.
@@ -115,14 +115,14 @@ The upgrade pass also adds the `visit_count` and `last_time` headers to Visits, 
 `visit_count` for every row already there, copies `time` into `last_time` (a `copyPaste` of values, no
 read), and adds the edit warning below to every tab, all in the same single write.
 
-Every tab carries a warning-only protected range ("Managed by Cortex"): Sheets asks before a manual edit
-but never blocks one, and Cortex's own writes are unaffected. It is added in the formatting batch when
+Every tab carries a warning-only protected range ("Managed by Bobbin"): Sheets asks before a manual edit
+but never blocks one, and Bobbin's own writes are unaffected. It is added in the formatting batch when
 the sheet is set up, when a deleted tab is re-added, and in the upgrade pass. Verification reads the
 existing protections, so a tab is never protected twice. About also says: "This sheet is managed by
-Cortex. Editing or deleting rows can cause wrong answers."
+Bobbin. Editing or deleting rows can cause wrong answers."
 
 Topics: when a page is captured, the offscreen document embeds its title and the first 1,200 characters
-of its text with the on-device search model (all-MiniLM-L6-v2, mean pooled, normalized). Cortex compares
+of its text with the on-device search model (all-MiniLM-L6-v2, mean pooled, normalized). Bobbin compares
 that vector by cosine similarity with 73 specific topic labels embedded the same way (`topic-catalog.ts`,
 stored as int8): for example "semiconductors", "export controls", "AI security", "vector databases",
 "job search", "apartment hunting", "layoffs", "mortgages and home buying". There is no catch-all label such
@@ -137,8 +137,8 @@ shipments overseas" for "New rules limit sales of advanced chips to China"); eve
 through a shared topic. At 0.40 recall drops to 0.911 and one question misses; at 0.36 a tariffs page also
 gets "export controls". `eval/__tests__/topic-precision.test.ts` holds these numbers.
 
-Never captured: the Cortex Memory sheet and folder (by their stored Drive ids, and on docs.google.com or
-drive.google.com by a "Cortex Memory" title), and sites on the block list. The block list starts with
+Never captured: the Bobbin Memory sheet and folder (by their stored Drive ids, and on docs.google.com or
+drive.google.com by a "Bobbin Memory" title), and sites on the block list. The block list starts with
 myaccount.google.com, accounts.google.com, one.google.com, photos.google.com, payments.google.com, and
 pay.google.com; users can remove them.
 
@@ -149,7 +149,7 @@ pay.google.com; users can remove them.
   `popstate`, and watches the `<title>`. DOM changes are throttled (one check per 950 ms), not debounced,
   so a feed that never stops changing is still checked.
 - Dwell counts only while the tab is visible and focused and the user has had input in the last 60
-  seconds (`dwell.ts`). Cortex has no `idle` permission; the input check stands in for `chrome.idle`.
+  seconds (`dwell.ts`). Bobbin has no `idle` permission; the input check stands in for `chrome.idle`.
 - A prerendered page starts nothing until `prerenderingchange`. A page restored from the back/forward
   cache is not a visit until the first pointer, key, wheel, or touch input.
 - Feeds (any `/feed` path such as LinkedIn's, X `/home`, Reddit home and popular, YouTube home;
@@ -166,7 +166,7 @@ pay.google.com; users can remove them.
   (Chrome 115 and later; Chrome history sync must be on) since a cursor in `chrome.storage.local`. The first
   pass looks back 7 days. At most 500 pages and 300 visits per pass; the cursor moves only after offscreen
   stores them. Stored with title, URL, and time only (no dwell, scroll, topics, page text, or search rows),
-  through the same block list, deny rules, and Cortex file skip, with ids `other:<visitId>` so a repeated
+  through the same block list, deny rules, and Bobbin file skip, with ids `other:<visitId>` so a repeated
   pass adds nothing. Visits has a last column `device`: "this device" or "other device". The two never merge
   into one row. A schema 4 sheet gets the header and "this device" on every existing row in the next
   flush's single write, with no read.
@@ -188,30 +188,30 @@ Retention, the Sheet detail setting, and the size budget decide which rows stay.
 
 ## Drive files
 
-Enable uses the stored sheet. With no stored ids it first looks for a Cortex Memory sheet this app made
-(`files.list`, which with the drive.file scope sees only files Cortex created), and creates one only if
+Enable uses the stored sheet. With no stored ids it first looks for a Bobbin Memory sheet this app made
+(`files.list`, which with the drive.file scope sees only files Bobbin created), and creates one only if
 none exists. When the stored sheet is in the trash, Settings offers Restore from trash. When it was
 deleted, Settings offers Create a new sheet, in the old folder if that is still there. Nothing is created
-or restored without that click, so there is never a second Cortex Memory file.
+or restored without that click, so there is never a second Bobbin Memory file.
 
 Creating the sheet:
 
-1. Folder: the oldest Cortex Memory folder Cortex made that is not in the trash (`files.list`, ordered by
+1. Folder: the oldest Bobbin Memory folder Bobbin made that is not in the trash (`files.list`, ordered by
    `createdTime`). A folder is created only when there is none, so an Enable that failed halfway never
    leaves a second folder behind. Extra empty folders from earlier attempts are left in place.
 2. Spreadsheet: Drive `files.create` with mimeType `application/vnd.google-apps.spreadsheet`, name
-   "Cortex Memory", parents the folder. Never Sheets `spreadsheets.create`, which returned 403
+   "Bobbin Memory", parents the folder. Never Sheets `spreadsheets.create`, which returned 403
    PERMISSION_DENIED with drive.file in live testing.
 3. Setup: one `spreadsheets.get` for the id of the file's default tab, then one `spreadsheets.batchUpdate`
    that renames that tab to About, adds the six data tabs, writes the headers and About, bolds and
    freezes the header rows, and adds the edit warning to every tab.
 
-A Cortex Memory sheet found with only its default tab (an Enable that stopped after step 2) is set up the
+A Bobbin Memory sheet found with only its default tab (an Enable that stopped after step 2) is set up the
 same way instead of creating another file.
 
 ## Errors
 
-A 403 shows under Last error as "Google did not allow Cortex to create or edit the sheet." followed by
+A 403 shows under Last error as "Google did not allow Bobbin to create or edit the sheet." followed by
 "Google said:" and Google's `error.message`. The flush log entry gets `error_detail`: `call` (search,
 folder create, sheet create, batchUpdate, read, file check, trash, restore), `http_status`, `status`
 (Google's `error.status`), and `message`.
@@ -232,13 +232,13 @@ makes no requests, except one About-only write an hour (see About freshness).
 
 About rows 2 and 3:
 
-- "Last checked: 2026-10-08 23:20 America/New_York. Cortex last looked for new browsing at this time."
+- "Last checked: 2026-10-08 23:20 America/New_York. Bobbin last looked for new browsing at this time."
 - "Last new activity: 2026-10-08 19:18 America/New_York. The newest visit in this sheet. If it is older
   than Last checked, nothing new was recorded in between."
 
 Last new activity is the newest date and last_time in Visits, so it comes from the rows themselves. Last
 checked is the time of the write that carried it. Every write already rewrites About, so while there is
-new browsing Last checked rides along at no cost. When passes find nothing new, Cortex sends nothing until
+new browsing Last checked rides along at no cost. When passes find nothing new, Bobbin sends nothing until
 About's Last checked is an hour old, then one write with a single About update and no reads. So an idle
 hour costs at most 1 write instead of the 4 a write per 15 minute pass would, and Last checked is never
 more than about an hour and 15 minutes behind while Chrome is open. With Chrome closed nothing runs, and
@@ -259,7 +259,7 @@ are ceilings.
 Idle users add at most 1 About write an hour each: 10,000 idle users is about 167 writes a minute at
 worst, and only when none of them is browsing (a browsing user's About rides on its normal writes).
 
-Per user, Cortex never exceeds 1 write and 2 reads in a minute, far under the 60 per user limit.
+Per user, Bobbin never exceeds 1 write and 2 reads in a minute, far under the 60 per user limit.
 
 ### The previous engine, for comparison
 
