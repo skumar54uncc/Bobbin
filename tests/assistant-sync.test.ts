@@ -170,8 +170,8 @@ describe("excerpt", () => {
 });
 
 describe("topics", () => {
-  it("lists 40 labels and returns at most three above the threshold", () => {
-    expect(new Set(TOPIC_CATALOG.map((t) => t.label)).size).toBe(40);
+  it("lists 73 distinct labels and returns at most three above the threshold", () => {
+    expect(new Set(TOPIC_CATALOG.map((t) => t.label)).size).toBe(73);
     expect(tagTopics(null)).toEqual([]);
     const labels = [
       { label: "RAG", vector: [1, 0, 0] },

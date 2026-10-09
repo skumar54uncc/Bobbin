@@ -459,3 +459,39 @@ describe("service worker boundaries", () => {
     expect(handler).toContain("extractPageTextFromHtml");
   });
 });
+
+describe("About freshness", () => {
+  const about = (sheets: FakeSheets) => sheets.tab("About").map((row) => row[0] ?? "");
+
+  it("shows Last checked and Last new activity, refreshing Last checked alone at most once an hour", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW + MIN));
+    expect(await runFlush(deps(sheets, NOW + 6 * MIN))).toMatchObject({ writes: 1 });
+    expect(about(sheets)[1]).toBe("Last checked: 2026-10-02 12:06 America/New_York. Cortex last looked for new browsing at this time.");
+    expect(about(sheets)[2]).toMatch(/^Last new activity: 2026-10-02 12:01 America\/New_York\. /);
+
+    // Nothing new: passes inside the hour write nothing.
+    for (const at of [20, 40, 65]) expect(await runFlush(deps(sheets, NOW + at * MIN))).toMatchObject({ reads: 0, writes: 0 });
+
+    // An hour after the last write, one About-only write moves Last checked. Activity stays put.
+    const idle = await runFlush(deps(sheets, NOW + 66 * MIN));
+    expect(idle).toMatchObject({ status: "ready", reads: 0, writes: 1, appended: 0 });
+    const sent = sheets.batches.at(-1)!;
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent)).toContain(`"sheetId":${0}`);
+    expect(about(sheets)[1]).toContain("Last checked: 2026-10-02 13:06");
+    expect(about(sheets)[2]).toMatch(/^Last new activity: 2026-10-02 12:01 /);
+    expect(await runFlush(deps(sheets, NOW + 80 * MIN))).toMatchObject({ writes: 0 });
+  });
+
+  it("a write with new rows carries Last checked, so no extra write follows it", async () => {
+    const sheets = new FakeSheets();
+    await enabled(sheets);
+    await assistantSyncDb.visits.put(visit("v1", NOW + 100 * MIN));
+    expect(await runFlush(deps(sheets, NOW + 110 * MIN))).toMatchObject({ writes: 1, appended: 2 });
+    expect(about(sheets)[1]).toContain("Last checked: 2026-10-02 13:50");
+    expect(about(sheets)[2]).toContain("Last new activity: 2026-10-02 13:40");
+    expect(await runFlush(deps(sheets, NOW + 150 * MIN))).toMatchObject({ writes: 0 });
+  });
+});

@@ -74,10 +74,19 @@ Cortex. Editing or deleting rows can cause wrong answers."
 
 Topics: when a page is captured, the offscreen document embeds its title and the first 1,200 characters
 of its text with the on-device search model (all-MiniLM-L6-v2, mean pooled, normalized). Cortex compares
-that vector by cosine similarity with 40 topic labels embedded the same way (`topic-catalog.ts`, stored as
-int8) and keeps up to 3 labels scoring 0.42 or more. Nothing leaves the device. A page with no text gets
-no topics; a page nothing clears 0.42 for stays blank rather than getting a guess. Visits imported from
-history without page text have none.
+that vector by cosine similarity with 73 specific topic labels embedded the same way (`topic-catalog.ts`,
+stored as int8): for example "semiconductors", "export controls", "AI security", "vector databases",
+"job search", "apartment hunting", "layoffs", "mortgages and home buying". There is no catch-all label such
+as "technology" or "news". It keeps up to 3 labels scoring 0.38 or more, best first. Nothing leaves the
+device. A page with no text gets no topics; a page nothing clears 0.38 for stays blank rather than getting
+a guess. Visits imported from history without page text, and other device visits, have none.
+
+The threshold is tuned with `node --import tsx eval/src/tune-topics.ts` on 55 fixture pages
+(`eval/queries/topic-fixtures.ts`), scored with the shipped int8 vectors: precision 0.951, recall 0.964.
+16 vague recall questions share no word with their page's title ("the government stopping processor
+shipments overseas" for "New rules limit sales of advanced chips to China"); every one reaches its page
+through a shared topic. At 0.40 recall drops to 0.911 and one question misses; at 0.36 a tariffs page also
+gets "export controls". `eval/__tests__/topic-precision.test.ts` holds these numbers.
 
 Never captured: the Cortex Memory sheet and folder (by their stored Drive ids, and on docs.google.com or
 drive.google.com by a "Cortex Memory" title), and sites on the block list. The block list starts with
@@ -167,7 +176,25 @@ Reads per user per day, normal use: 2. Upper bound with one recovery a day: 4.
 ## Writes per user
 
 While browsing without pause: at most one write every 5 minutes, about 12 an hour. The jitter makes the
-average gap about 5.5 minutes, about 11 an hour. An idle browser with nothing new makes no requests.
+average gap about 5.5 minutes, about 11 an hour. With Chrome open and nothing new, a pass every 15 minutes
+makes no requests, except one About-only write an hour (see About freshness).
+
+## About freshness
+
+About rows 2 and 3:
+
+- "Last checked: 2026-10-08 23:20 America/New_York. Cortex last looked for new browsing at this time."
+- "Last new activity: 2026-10-08 19:18 America/New_York. The newest visit in this sheet. If it is older
+  than Last checked, nothing new was recorded in between."
+
+Last new activity is the newest date and last_time in Visits, so it comes from the rows themselves. Last
+checked is the time of the write that carried it. Every write already rewrites About, so while there is
+new browsing Last checked rides along at no cost. When passes find nothing new, Cortex sends nothing until
+About's Last checked is an hour old, then one write with a single About update and no reads. So an idle
+hour costs at most 1 write instead of the 4 a write per 15 minute pass would, and Last checked is never
+more than about an hour and 15 minutes behind while Chrome is open. With Chrome closed nothing runs, and
+Last checked shows when it last did. The rules on About tell the assistant to give both times when asked
+how up to date the log is.
 
 ## Project-wide math
 
@@ -179,6 +206,9 @@ are ceilings.
 | 30 | 6 | 2% | 0 | 60 reads if all 30 start Chrome in the same minute (20%) |
 | 1,000 | 200 | 67% | 0 | 2,000 reads if all start in the same minute |
 | 10,000 | 2,000 | 667% | 0 | 20,000 reads if all start in the same minute |
+
+Idle users add at most 1 About write an hour each: 10,000 idle users is about 167 writes a minute at
+worst, and only when none of them is browsing (a browsing user's About rides on its normal writes).
 
 Per user, Cortex never exceeds 1 write and 2 reads in a minute, far under the 60 per user limit.
 

@@ -10,6 +10,7 @@ import {
   type SyncVisitRecord,
 } from "../src/assistant-sync/db";
 import type { StoredMemoryIds } from "../src/assistant-sync/drive-api";
+import { canonicalizeUrl } from "../src/assistant-sync/canonical-url";
 import { mergeDailyRepeats } from "../src/assistant-sync/merge";
 import { VISIT_HEADERS } from "../src/assistant-sync/sheet";
 import { csvBytes, formatSheetSize, MB, planTrim, trimNote } from "../src/assistant-sync/sheet-detail";
@@ -219,6 +220,29 @@ describe("repeat visits in the sheet", () => {
     expect(kinds).not.toContain("addProtectedRange");
   });
 
+  it("merges one page's visits into one row and keeps different pages apart (the one.google.com case)", () => {
+    const raw = [
+      "https://one.google.com/storage",
+      "https://one.google.com/storage?utm_source=drive&g1_landing_page=1",
+      "https://one.google.com/storage#management",
+      "https://one.google.com/about/plans",
+      "https://one.google.com/settings",
+      "https://one.google.com/settings?hl=en",
+      "https://one.google.com/storage/management",
+    ];
+    const visits = raw.map((u, i) => {
+      const url = canonicalizeUrl(u)!;
+      return visit(`g${i}`, NOW + i * MIN, { url, domain: "one.google.com" });
+    });
+    const merged = mergeDailyRepeats({ visits, content: [], searches: [], people: [], companies: [] }, ZONE);
+    expect(merged.visits.map((v) => [v.url, v.visitCount])).toEqual([
+      ["https://one.google.com/storage", 3],
+      ["https://one.google.com/about/plans", 1],
+      ["https://one.google.com/settings", 2],
+      ["https://one.google.com/storage/management", 1],
+    ]);
+  });
+
   it("keeps this device and other device visits to the same page as separate rows", () => {
     const merged = mergeDailyRepeats(
       {
@@ -264,7 +288,7 @@ describe("sheet detail", () => {
     expect(cut.Content > cut.Visits).toBe(true);
     const state = await readSyncEngineState();
     expect(state.sheetBytes).toBeGreaterThan(0);
-    expect(sheets.tab("About")[2]?.[0]).toMatch(/^Sheet size: \d+ KB\. Rows: 2 visits, 1 content excerpts/);
+    expect(sheets.tab("About")[4]?.[0]).toMatch(/^Sheet size: \d+ KB\. Rows: 2 visits, 1 content excerpts/);
   });
 
   it("standard keeps 800 character excerpts for 30 days", () => {

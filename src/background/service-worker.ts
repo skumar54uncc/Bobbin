@@ -785,14 +785,21 @@ const FINAL_REPORT_GRACE_MS = 1_500;
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!changeInfo.url) return;
-  const next = changeInfo.url.split("#")[0];
   setTimeout(() => {
-    void withOpenVisits((visits) => {
-      const visit = visits[tabId];
-      if (!visit || visit.url.split("#")[0] === next) return null;
-      delete visits[tabId];
-      return visit;
-    })
+    // Compare with the tab's address now, not the one in this event: a tab that moves twice inside
+    // the grace window (about:blank then the page, a redirect) already has a visit for the new page.
+    void chrome.tabs
+      .get(tabId)
+      .then((tab) => tab.url ?? "", () => "")
+      .then((now) => {
+        const page = (url: string) => canonicalizeUrl(url) ?? url.split("#")[0] ?? url;
+        return withOpenVisits((visits) => {
+          const visit = visits[tabId];
+          if (!visit || (now && page(visit.url) === page(now))) return null;
+          delete visits[tabId];
+          return visit;
+        });
+      })
       .then((visit) => (visit ? finalizeVisits([visit]) : undefined))
       .catch(() => undefined);
   }, FINAL_REPORT_GRACE_MS);

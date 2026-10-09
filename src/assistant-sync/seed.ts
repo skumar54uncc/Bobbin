@@ -17,7 +17,7 @@ export interface SeedOptions {
   visitsPerWeekday?: number;
   now?: number;
   timeZone?: string;
-  syncedAt?: string;
+  checkedAt?: string;
 }
 
 function rng(seed: number): () => number {
@@ -38,8 +38,8 @@ export const SEED_NEEDLES = ["needle-pinecone", "needle-search", "needle-tesla",
 /** Deterministic fake history. Needles are fixed ids an assistant recall test can ask for. */
 export function buildSeed(opts: SeedOptions = {}): { workbook: Workbook; needles: string[] } {
   const timeZone = opts.timeZone ?? "America/New_York";
-  const syncedAt = opts.syncedAt ?? "2026-10-02 12:00";
-  const workbook = buildWorkbook(seedMemory(opts), { title: SEED_SHEET_NAME, timeZone, syncedAt });
+  const checkedAt = opts.checkedAt ?? "2026-10-02 12:00";
+  const workbook = buildWorkbook(seedMemory(opts), { title: SEED_SHEET_NAME, timeZone, checkedAt });
   return { workbook, needles: SEED_NEEDLES };
 }
 

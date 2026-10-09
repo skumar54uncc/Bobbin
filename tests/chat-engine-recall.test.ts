@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { search } = vi.hoisted(() => ({
   search: vi.fn(async () => ({ hits: [], chunks: [] })),
@@ -30,7 +30,13 @@ async function addDoc(url: string, title: string, when: number, summary = "") {
 }
 
 describe("Ask answers 'what did I see today' from the visit record", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   beforeEach(async () => {
+    // "Today" must not depend on when the suite runs: an hour ago is yesterday just after midnight.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 8, 15, 0, 0));
     for (const t of db.tables) await t.clear();
     search.mockClear();
     const now = Date.now();

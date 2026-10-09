@@ -48,7 +48,8 @@ everyday profile and Drive stay untouched.
 
    `call` is search, folder create, sheet create, batchUpdate, or read.
    Send that object as it is.
-5. Write down the time. About row 2 shows "Last synced" with that time.
+5. Write down the time. About row 2 shows "Last checked" with that time,
+   and row 3 "Last new activity" (none yet, or the newest imported visit).
 
 ## Minutes 1 to 4: browse
 
@@ -89,8 +90,9 @@ The first activity flush comes 5 minutes after the Enable pass, plus 0 to
      (a page that matches no topic stays blank).
    - Searches: 2. People: 1 if you opened a profile.
    - Content: empty. Excerpts are written only for pages read 5 minutes or more.
-   - About row 2: "Last synced" moved to this flush.
-   - About row 3: "Sheet size: N KB." and the counts match the tab row
+   - About row 2: "Last checked" moved to this flush. Row 3: "Last new
+     activity" is the time of your newest visit.
+   - About row 5: "Sheet size: N KB." and the counts match the tab row
      counts. Settings, Status, Sheet size shows the same size.
    - About, last row: schema_version: 5. Near the top: "This sheet is
      managed by Cortex. Editing or deleting rows can cause wrong answers."
@@ -135,6 +137,14 @@ without changing it.
 Do nothing. The safety alarm runs every 15 minutes and plans a pass. With
 nothing pending the pass makes no write: the flush log shows an `alarm`
 row with appended 0 and writes 0, and the sheet does not change.
+
+## Optional: About freshness (needs an idle hour)
+
+1. Stop browsing for 70 minutes with Chrome open.
+2. Flush log: the alarm rows in between show writes 0, then one row with
+   writes 1 and appended 0.
+3. About row 2: Last checked moved to that write. Row 3: Last new activity
+   is still your last visit.
 
 ## Optional: capture hardening checks
 

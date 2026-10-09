@@ -197,12 +197,26 @@ window.addEventListener("popstate", () => onLocationLikeChange("spa"));
 
 // A content script runs in an isolated world: the wrappers above see only this script's
 // own history calls, never the page's pushState or replaceState (LinkedIn, YouTube, X).
-// Watch the address once a second instead, plus popstate and the title below.
-window.setInterval(() => {
+// Watch the address once a second instead, plus popstate and the title below. Only while the tab
+// is visible: a hidden tab is checked once when it is shown again.
+function checkAddress(): void {
   if (!isExtensionRuntimeAlive()) return;
   if (normalizedUrl() === currentUrl) return;
   onLocationLikeChange("spa");
-}, 1000);
+}
+
+let addressTimer: number | undefined;
+function watchAddress(): void {
+  if (document.visibilityState === "visible") {
+    addressTimer ??= window.setInterval(checkAddress, 1000);
+    checkAddress();
+  } else if (addressTimer !== undefined) {
+    window.clearInterval(addressTimer);
+    addressTimer = undefined;
+  }
+}
+document.addEventListener("visibilitychange", watchAddress);
+watchAddress();
 
 // Throttle, not debounce: a page that never stops changing (feeds, players) still gets checked.
 const mo = new MutationObserver(() => {

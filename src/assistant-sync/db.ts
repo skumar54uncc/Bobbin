@@ -155,6 +155,8 @@ export interface SyncEngineState {
   backfillPhase: BackfillPhase;
   /** Epoch ms when the last flush request was sent, successful or not. Enforces one flush a minute. */
   lastFlushAt: number;
+  /** Epoch ms of the Last checked time the sheet's About tab shows. */
+  aboutCheckedAt: number;
   /** Earliest epoch ms for the next attempt after a 429 or 5xx. 0 when no backoff is active. */
   nextAttemptAt: number;
   /** Failed flushes in a row (429 or 5xx). Drives the backoff exponent. */
@@ -196,6 +198,7 @@ export function defaultSyncEngineState(): SyncEngineState {
     backfillTotal: 0,
     backfillPhase: "idle",
     lastFlushAt: 0,
+    aboutCheckedAt: 0,
     nextAttemptAt: 0,
     backoffFailures: 0,
     consecutive429: 0,

@@ -159,6 +159,9 @@ function dateOf(visitedAt: number, timeZone: string): string {
   return localVisitStamp(visitedAt, timeZone).date;
 }
 
+/** How stale About's Last checked may get when passes find nothing new. One About-only write at most per hour. */
+export const ABOUT_CHECK_EVERY_MS = 60 * 60_000;
+
 function syncedAtLabel(now: number, timeZone: string): string {
   const stamp = localVisitStamp(now, timeZone);
   return `${stamp.date} ${stamp.time}`;
@@ -414,7 +417,7 @@ async function planFlush(
     return { merged, tabs: dataTabs(merged, { timeZone: tz, detail }) };
   };
   let { merged, tabs } = await build();
-  const sizeOf = (t: Tabs) => sizedAbout(t, { timeZone: tz, syncedAt: syncedAtLabel(deps.now, tz), detail });
+  const sizeOf = (t: Tabs) => sizedAbout(t, { timeZone: tz, checkedAt: syncedAtLabel(deps.now, tz), detail });
   const trim = planTrim({
     bytes: sizeOf(tabs).bytes,
     targetBytes: rules.targetBytes,
@@ -567,7 +570,9 @@ async function planFlush(
 
   const { about, bytes } = sizeOf(tabs);
   const changed = adds.length + deletes.length + appends.length + updates.length > 0;
-  if (changed) {
+  // With nothing new, About's Last checked is refreshed alone at most once an hour.
+  const aboutDue = deps.now - state.aboutCheckedAt >= ABOUT_CHECK_EVERY_MS;
+  if (changed || aboutDue) {
     const padded = [...about];
     while (padded.length < layout.aboutRows) padded.push([""]);
     updates.push(updateCellsRequest(layout.sheetIds.About!, 0, padded));
@@ -677,6 +682,7 @@ export async function runFlush(deps: FlushDeps): Promise<FlushResult> {
     Object.assign(state, {
       layout: plan.layout,
       lastSyncedAt: deps.now,
+      aboutCheckedAt: deps.now,
       lastError: "",
       backoffFailures: 0,
       consecutive429: 0,
@@ -927,7 +933,7 @@ export async function enableAssistantSync(input: {
   const emptyTabs = Object.fromEntries(DATA_TABS.map((tab) => [tab, [[...TAB_HEADERS[tab]]]])) as Tabs;
   const { about } = sizedAbout(emptyTabs, {
     timeZone: input.timeZone,
-    syncedAt: syncedAtLabel(input.now, input.timeZone),
+    checkedAt: syncedAtLabel(input.now, input.timeZone),
     detail: previous.sheetDetail,
   });
   const resolved = await resolveMemory(input.api, input.ids, input.choice, about);

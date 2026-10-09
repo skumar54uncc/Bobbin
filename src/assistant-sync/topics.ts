@@ -1,5 +1,4 @@
 import { cosineSimilarity } from "../lib/similarity";
-import { TOPIC_LABELS } from "./topic-catalog";
 
 export interface TopicVector {
   label: string;
@@ -7,11 +6,11 @@ export interface TopicVector {
 }
 
 /**
- * Locked on eval/queries/topic-fixtures.ts (18 pages).
- * At 0.42, precision and recall are both 1 on that set.
- * At 0.40 the academic paper page also receives "evals and benchmarking".
+ * Tuned on eval/queries/topic-fixtures.ts (55 pages, 73 labels) with the shipped int8 vectors:
+ * precision 0.951, recall 0.964, and 16 of 16 vague recall questions matched. At 0.40 recall falls
+ * to 0.911 and one vague question misses; at 0.36 the tariffs page also gets "export controls".
  */
-export const TOPIC_SIMILARITY_THRESHOLD = 0.42;
+export const TOPIC_SIMILARITY_THRESHOLD = 0.38;
 
 export const MAX_TOPICS = 3;
 
@@ -30,7 +29,6 @@ export function tagTopics(
   const out: string[] = [];
   for (const row of ranked) {
     if (seen.has(row.label)) continue;
-    if (!TOPIC_LABELS.includes(row.label)) continue;
     seen.add(row.label);
     out.push(row.label);
     if (out.length >= MAX_TOPICS) break;

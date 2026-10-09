@@ -5,7 +5,7 @@ exports every tab as CSV, so Cortex estimates the sheet as the UTF-8 size
 of that CSV (every tab, header rows included, cells quoted the way CSV
 quotes them). The estimate is computed after every flush from local
 memory, saved as `sheetBytes` in the sync state, shown in Settings under
-Status as "Sheet size", and written to About row 3 ("Sheet size: 1.2 MB.
+Status as "Sheet size", and written to About row 5 ("Sheet size: 1.2 MB.
 Rows: ..."). Units are binary: 1 MB is 1,048,576 bytes.
 
 ## Modes

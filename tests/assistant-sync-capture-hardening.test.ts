@@ -215,13 +215,34 @@ describe("other device visits", () => {
   });
 });
 
+describe("service worker visit ending", () => {
+  const sw = readFileSync("src/background/service-worker.ts", "utf8");
+
+  it("ends a tab's visit only if the tab is on another page when the grace window closes", () => {
+    // about:blank then the page (or a redirect) inside 1.5 s used to end the new page's visit and
+    // write the page twice. The check now reads the tab's address at that moment.
+    const handler = /chrome\.tabs\.onUpdated\.addListener\(\(tabId, changeInfo\) => \{([\s\S]*?)\n\}\);/.exec(sw)?.[1] ?? "";
+    expect(handler).toMatch(/setTimeout\(\(\) => \{[\s\S]*chrome\.tabs\s*\.get\(tabId\)/);
+    expect(handler).toMatch(/if \(!visit \|\| \(now && page\(visit\.url\) === page\(now\)\)\) return null;/);
+    expect(handler).not.toMatch(/changeInfo\.url\.split\("#"\)\[0\];/);
+  });
+});
+
 describe("content script", () => {
   const main = readFileSync("src/content/main.ts", "utf8");
 
   it("watches the address on every site, since the page's own pushState is invisible to it", () => {
     expect(main).not.toMatch(/if \(\/\(\^\|\\\.\)linkedin/);
-    expect(main).toMatch(/window\.setInterval\(\(\) => \{\s*if \(!isExtensionRuntimeAlive\(\)\) return;\s*if \(normalizedUrl\(\) === currentUrl\) return;/);
+    expect(main).toMatch(/function checkAddress\(\): void \{\s*if \(!isExtensionRuntimeAlive\(\)\) return;\s*if \(normalizedUrl\(\) === currentUrl\) return;/);
     expect(main).toMatch(/addEventListener\("popstate"/);
+  });
+
+  it("checks the address only while the tab is visible, and once when it is shown again", () => {
+    const watch = /function watchAddress\(\): void \{([\s\S]*?)\n\}/.exec(main)?.[1] ?? "";
+    expect(watch).toMatch(/if \(document\.visibilityState === "visible"\) \{\s*addressTimer \?\?= window\.setInterval\(checkAddress, 1000\);\s*checkAddress\(\);/);
+    expect(watch).toMatch(/window\.clearInterval\(addressTimer\);\s*addressTimer = undefined;/);
+    expect(main).toMatch(/document\.addEventListener\("visibilitychange", watchAddress\);\s*watchAddress\(\);/);
+    expect(main.match(/setInterval\(checkAddress/g)).toHaveLength(1);
   });
 
   it("watches title changes and throttles DOM changes", () => {
