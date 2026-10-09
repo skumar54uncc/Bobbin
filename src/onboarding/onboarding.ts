@@ -3,11 +3,22 @@ import {
   INDEXING_CONSENT_KEY,
   ONBOARDING_DONE_KEY,
 } from "../shared/onboarding-constants";
+import { headerTagline } from "../shared/about-copy";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import { storageLocalGet, storageLocalSet } from "../shared/storage-local";
 import { requestPersistentStorage } from "../shared/persist-storage";
 
 injectBrandFontFacesInto(document.head);
+
+function applyHeaderTagline(): void {
+  const el = document.querySelector("#cx-onb-tagline");
+  if (!el || typeof chrome.runtime?.sendMessage !== "function") return;
+  chrome.runtime.sendMessage({ type: "CORTEX_SYNC_LABEL" }, (resp?: { on?: boolean }) => {
+    if (chrome.runtime.lastError) return;
+    el.textContent = headerTagline(Boolean(resp?.on));
+  });
+}
+applyHeaderTagline();
 // Onboarding opens on install: ask once then for storage that survives low disk space.
 void requestPersistentStorage();
 

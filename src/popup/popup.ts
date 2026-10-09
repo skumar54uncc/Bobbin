@@ -1,3 +1,4 @@
+import { headerTagline } from "../shared/about-copy";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import type { StatsSnapshot } from "../lib/stats-snapshot-types";
 import {
@@ -173,9 +174,19 @@ async function onManualRefresh(): Promise<void> {
   }
 }
 
+function applyHeaderTagline(): void {
+  const el = document.querySelector("#cx-tagline");
+  if (!el || typeof chrome.runtime?.sendMessage !== "function") return;
+  chrome.runtime.sendMessage({ type: "CORTEX_SYNC_LABEL" }, (resp?: { on?: boolean }) => {
+    if (chrome.runtime.lastError) return;
+    el.textContent = headerTagline(Boolean(resp?.on));
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   injectBrandFontFacesInto(document.head);
   void refreshPrivacyBlurb();
+  applyHeaderTagline();
   void loadPopup();
 
   qs("#cx-privacy-ack").addEventListener("click", () => {
@@ -207,6 +218,15 @@ document.addEventListener("DOMContentLoaded", () => {
   qs("#cx-empty-get-started").addEventListener("click", () => {
     void chrome.tabs.create({
       url: chrome.runtime.getURL("onboarding.html"),
+      active: true,
+    });
+    window.close();
+  });
+
+  document.querySelector("#cx-why-free")?.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    void chrome.tabs.create({
+      url: chrome.runtime.getURL("options.html#cx-sec-about"),
       active: true,
     });
     window.close();

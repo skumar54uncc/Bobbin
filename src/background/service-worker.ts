@@ -3397,7 +3397,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       try {
         const section = String((msg as { section?: unknown }).section ?? "");
         // Whitelist only known options sections (Assist Sync deep link from Agents tab).
-        if (section === "cx-sec-assistant" || section === "cx-sec-capture" || section === "cx-sec-connect") {
+        if (
+          section === "cx-sec-assistant" ||
+          section === "cx-sec-capture" ||
+          section === "cx-sec-connect" ||
+          section === "cx-sec-about"
+        ) {
           await chrome.tabs.create({
             url: chrome.runtime.getURL(`options.html#${section}`),
             active: true,

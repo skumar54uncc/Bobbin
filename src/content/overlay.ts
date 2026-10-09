@@ -39,6 +39,7 @@ import { recordPanelOpen, type CoachTipId } from "../shared/ux-local";
 import { siteBadgeColors, siteInitial } from "../lib/site-badge";
 import { overlayHostModifierClass } from "./overlay-host";
 import { applyThemeToHost, themeTokensCss } from "../shared/theme";
+import { headerTagline, TAGLINE_SYNC_OFF } from "../shared/about-copy";
 import {
   EMPTY_ASK_HINT,
   EMPTY_ASK_TITLE,
@@ -359,11 +360,11 @@ ${shadowCss}`;
       <div class="cortex-head">
         <div class="cx-brand">
           <span class="cx-brand-link" aria-hidden="true">
-            <img class="cx-brand-mark" src="${iconUrl}" alt="Cortex mascot" width="40" height="40" />
+            <img class="cx-brand-mark" src="${iconUrl}" alt="Bobbin mascot" width="40" height="40" />
           </span>
           <div class="cx-brand-text">
             <span id="cortex-overlay-title" class="cx-brand-wordmark">Bobbin</span>
-            <span id="cortex-overlay-tagline" class="cx-brand-tagline">Private library of pages you read on this device</span>
+            <span id="cortex-overlay-tagline" class="cx-brand-tagline">${TAGLINE_SYNC_OFF}</span>
           </div>
         </div>
         <div class="cortex-head-actions">
@@ -400,8 +401,8 @@ ${shadowCss}`;
 
   const taglineEl = shell.querySelector<HTMLElement>("#cortex-overlay-tagline");
   void chrome.runtime.sendMessage({ type: "CORTEX_SYNC_LABEL" }, (resp?: { on?: boolean }) => {
-    if (chrome.runtime.lastError || !taglineEl || !resp?.on) return;
-    taglineEl.textContent = "On this device and in your Google Drive";
+    if (chrome.runtime.lastError || !taglineEl) return;
+    taglineEl.textContent = headerTagline(Boolean(resp?.on));
   });
 
   try {
@@ -1082,7 +1083,7 @@ ${shadowCss}`;
       const markImg = document.createElement("img");
       markImg.className = "cortex-chat-mark-img";
       markImg.src = iconUrl;
-      markImg.alt = "Cortex mascot";
+      markImg.alt = "Bobbin mascot";
       markImg.width = 48;
       markImg.height = 48;
       mark.append(markImg);
@@ -1922,7 +1923,7 @@ ${shadowCss}`;
               <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2 3.5h12v1.2H2zm2.2 4h7.6v1.2H4.2zM6.2 11.5h3.6V12.7H6.2z"/></svg>
             </button>
           </div>
-          <div class="cortex-hint" aria-label="How to open Cortex">
+          <div class="cortex-hint" aria-label="How to open Bobbin">
             <span class="cortex-hint-main">Local-only recall</span>
             <span class="cortex-hint-sep" aria-hidden="true">·</span>
             <span class="cortex-hint-nav">Double-tap Shift to open or close</span>
@@ -2144,7 +2145,7 @@ ${shadowCss}`;
               : "Could not reach the extension background.";
           const invalidated = /Extension context invalidated/i.test(raw);
           const msg = invalidated
-            ? "Cortex was reloaded while this tab stayed open."
+            ? "Bobbin was reloaded while this tab stayed open."
             : raw;
           const hint = invalidated
             ? "Refresh the page (F5 or reload), then open search again."

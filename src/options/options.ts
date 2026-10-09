@@ -11,6 +11,7 @@ import { getEffectiveSettings } from "../shared/managed-policy";
 import { applyManagedLockout, stripLockedFields } from "./managed-ui";
 import type { HistoryImportProgress } from "../lib/history-import";
 import { INDEXING_CONSENT_KEY } from "../shared/onboarding-constants";
+import { feedbackFormUrl } from "../shared/about-copy";
 import { RENAME_NOTICE_KEY } from "../shared/product-name";
 import { storageLocalGet, storageLocalSet } from "../shared/storage-local";
 import { requestPersistentStorage } from "../shared/persist-storage";
@@ -615,6 +616,10 @@ async function loadSettingsUi(): Promise<void> {
     const v = chrome.runtime.getManifest().version;
     const el = document.getElementById("cx-about-version");
     if (el && v) el.textContent = v;
+    const feedback = document.getElementById("cx-about-feedback");
+    if (feedback instanceof HTMLAnchorElement && v) {
+      feedback.href = feedbackFormUrl(v, navigator.userAgent);
+    }
   } catch {
     /* not in an extension context */
   }

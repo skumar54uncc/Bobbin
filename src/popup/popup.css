@@ -317,6 +317,30 @@ h1.cx-brand {
   line-height: 1.45;
 }
 
+.cx-popup-footer {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--cx-border);
+  font-size: 11px;
+  color: var(--cx-text-muted);
+  line-height: 1.45;
+}
+
+.cx-why-free {
+  display: inline-block;
+  margin-left: 0.35em;
+  color: var(--cx-accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cx-why-free:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .cx-shortcuts-note {
   opacity: 0.92;
 }

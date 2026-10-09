@@ -48,7 +48,7 @@
           <li><a class="cx-nav-link" href="#cx-sec-connect">Connect your AI</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-privacy">Privacy and data</a></li>
           <li><a class="cx-nav-link" href="#cx-sec-backup">Backup</a></li>
-          <li><a class="cx-nav-link" href="#cx-sec-about">About</a></li>
+          <li><a class="cx-nav-link" href="#cx-sec-about">About Bobbin</a></li>
         </ul>
       </nav>
 
@@ -445,9 +445,9 @@
                 Assistant Sync copies your library into a folder named Bobbin Memory in your own Google Drive. After you enable it, Bobbin updates it about every 5 minutes while you browse, and at least every 15 minutes. The Bobbin Memory sheet holds page titles, URLs, searches, LinkedIn profiles, and topics. The Pages folder holds one Google Doc per day with the text of pages you read (20 seconds on screen or scrolled 30 percent), up to 4,000 characters each, and the name, headline, location, current role, About, Experience, Education, and skills of LinkedIn profiles you open. Text of LinkedIn feed posts syncs only when you turn on Save text of LinkedIn posts I scroll past. The Google permission is drive.file: Bobbin can create and edit only the files it creates in that folder, not the rest of your Drive. When you connect an assistant to that folder, it can read the relevant rows and page text while it answers you. Sync stays off until you press Enable.
               </p>
               <p class="cx-field-hint">
-                <a href="https://skumar54uncc.github.io/Bobbin/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
+                <a href="https://skumar54uncc.github.io/Cortex/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
                 ·
-                <a href="https://skumar54uncc.github.io/Bobbin/data-deletion.html" target="_blank" rel="noopener noreferrer">How to delete this data</a>
+                <a href="https://skumar54uncc.github.io/Cortex/data-deletion.html" target="_blank" rel="noopener noreferrer">How to delete this data</a>
               </p>
               <div class="cx-actions-row">
                 <button type="button" id="cx-assistant-enable" class="cx-btn cx-btn-primary">Enable</button>
@@ -817,14 +817,50 @@
           </div>
         </section>
 
-        <!-- 7. About ---------------------------------------------------- -->
+        <!-- 7. About Bobbin ---------------------------------------------- -->
         <section class="cx-sec" id="cx-sec-about" tabindex="-1" aria-labelledby="cx-about-h">
           <div class="cx-sec-head">
-            <h2 class="cx-sec-title" id="cx-about-h">About</h2>
-            <p class="cx-sec-desc">Version, and how Bobbin handles your data.</p>
+            <h2 class="cx-sec-title" id="cx-about-h">About Bobbin</h2>
+            <p class="cx-sec-desc">Why it is free, and how Bobbin handles your data.</p>
           </div>
 
           <div class="cx-panel cx-about-panel">
+            <div class="cx-group">
+              <h3 class="cx-group-title">Free, and built to stay that way</h3>
+              <div class="cx-prose">
+                <p>
+                  Bobbin is built and maintained by one independent developer. It has
+                  no servers, no ads, no tracking, and no paid plans, and it never will.
+                  That is a design choice: your memory lives on your device and, if you
+                  turn on Assistant Sync, in your own Google Drive. Because nothing runs
+                  on servers, Bobbin costs nothing to operate, so it can stay free for
+                  everyone without charging you or selling your data.
+                </p>
+                <p>
+                  What this means for you: some things that would need servers, like
+                  live answers while your browser is closed, are not part of Bobbin. The
+                  Google Sheet updates about every 5 minutes while you browse and at
+                  least every 15 minutes. Page text goes into Google Docs in your Bobbin
+                  Memory folder, one per day. That is how your assistant stays current
+                  without any paid infrastructure.
+                </p>
+              </div>
+              <p class="cx-about-links">
+                <a href="https://skumar54uncc.github.io/Cortex/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+                <span aria-hidden="true">·</span>
+                <a href="https://github.com/skumar54uncc/Cortex/blob/main/TERMS.md" target="_blank" rel="noopener noreferrer">Terms of Use</a>
+                <span aria-hidden="true">·</span>
+                <a
+                  id="cx-about-feedback"
+                  href="https://docs.google.com/forms/d/e/1FAIpQLSeC5bLybg056jJQzpohfgSX8r1OWlgtT7LSlSeHgvbT3CqQCQ/viewform"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >Send feedback</a>
+                <span aria-hidden="true">·</span>
+                <span>Version <span id="cx-about-version">1.2.0</span></span>
+              </p>
+            </div>
+
             <div class="cx-group">
               <h3 class="cx-group-title" id="cx-shortcuts-h">Keyboard shortcut</h3>
               <p class="cx-group-desc">Open Search, Ask, or Digest while you browse.</p>
@@ -856,12 +892,8 @@
             </div>
 
             <div class="cx-group">
-              <h3 class="cx-group-title">Version and credit</h3>
+              <h3 class="cx-group-title">Credit</h3>
               <dl class="cx-meta-list">
-                <div class="cx-meta-row">
-                  <dt>Version</dt>
-                  <dd id="cx-about-version">1.2.0</dd>
-                </div>
                 <div class="cx-meta-row">
                   <dt>Built by</dt>
                   <dd>

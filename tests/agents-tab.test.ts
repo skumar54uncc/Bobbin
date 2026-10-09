@@ -32,6 +32,7 @@ describe("overlay Agents tab wiring", () => {
       sw.indexOf('type === "CORTEX_OPEN_OPTIONS"') + 800
     );
     expect(block).toContain("cx-sec-assistant");
+    expect(block).toContain("cx-sec-about");
     expect(block).toContain("options.html#");
   });
 });

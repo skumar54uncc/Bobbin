@@ -19,6 +19,9 @@ function allowed(hit: { file: string; text: string }): boolean {
   if (hit.text.startsWith("[Cortex]")) return true;
   if (hit.text === "CortexError" || hit.text === "contains-cortex") return true;
   if (hit.text.includes(RENAME_NOTICE) || hit.text === RENAME_NOTICE) return true;
+  // Public GitHub Pages and repo URLs still use the Cortex repository name.
+  if (/skumar54uncc\.github\.io\/Cortex\b/.test(hit.text)) return true;
+  if (/github\.com\/skumar54uncc\/Cortex\b/.test(hit.text)) return true;
   if (ALLOW_FILE.has(hit.file) && hit.text.includes("Cortex")) return true;
   return false;
 }
