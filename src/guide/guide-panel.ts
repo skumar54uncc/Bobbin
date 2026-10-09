@@ -338,7 +338,7 @@ function render(): void {
 
   if (a.attachHint) {
     const hint = el("p", "cx-guide-attach");
-    const attach = button("cx-guide-link", "Attach to chat");
+    const attach = button("cx-guide-link", "Ask any assistant");
     attach.addEventListener("click", () => void openAttach());
     hint.append("No Google Drive access? Use ", attach, " in the Cortex side panel instead.");
     root.append(hint);

@@ -174,7 +174,7 @@ test.describe("guided setup", () => {
     await expect(panel.locator(".cx-guide-primary")).toHaveText("Open a new chat");
   });
 
-  test("the Attach to chat link's panel opens at Ask any assistant", async ({ context, extensionId }) => {
+  test("the Ask any assistant link's panel opens at Ask any assistant", async ({ context, extensionId }) => {
     const page = await context.newPage();
     await page.setViewportSize({ width: 400, height: 900 });
     await page.goto(`chrome-extension://${extensionId}/search-shell.html?open=attach`);

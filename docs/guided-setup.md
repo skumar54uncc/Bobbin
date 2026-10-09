@@ -29,7 +29,7 @@ Guide state lives in `chrome.storage.session` under `cortex_guide`, keyed `tab:<
 - Done steps as one line each, with a checkmark. Each line is a button that reopens that step.
 - One step only: its title, one sentence, one primary button, a small "I did this" link, and a status line. From step 2 on, a small "Back" link sits above the title. The test step has Yes and No instead of "I did this"; No opens Troubleshooting.
 - A step may add a second link for the same setting (`fallback`), for example Gemini's "Or open Saved info".
-- For Other (`attachHint`): "No Google Drive access? Use Attach to chat in the Cortex side panel instead." The link sets this tab's side panel to `search-shell.html?open=attach`, which opens the Connect AI Agents tab focused on Ask any assistant ([attach-to-chat.md](attach-to-chat.md)).
+- For Other (`attachHint`): "No Google Drive access? Use Ask any assistant in the Cortex side panel instead." The link sets this tab's side panel to `search-shell.html?open=attach`, which opens the Connect AI Agents tab focused on Ask any assistant ([attach-to-chat.md](attach-to-chat.md)).
 - Troubleshooting, collapsed, then "Start over" once any step is done. Start over clears this assistant's done steps, answer and reopened step, nothing else.
 
 The primary button does the step's action:

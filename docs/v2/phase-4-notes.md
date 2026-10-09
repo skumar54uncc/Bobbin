@@ -66,6 +66,6 @@ Live corrections (after Phase 4):
 - Grok: instructions at https://grok.com/?_s=personality (live); plan "Free plan works". The pointer outlines the instruction box only when it is the one text box in the one open dialog, since its label is not known.
 - Perplexity: free plan works with "@Google Drive"; connectors at https://www.perplexity.ai/computer/connectors (live); Add files from cloud moved to Troubleshooting.
 - Back, clickable done lines, and Start over in the side panel.
-- Other: general instructions, and a link to Attach to chat.
+- Other: general instructions, and a link to Ask any assistant.
 
 Open: Muse's plan note stays "Check your plan" until confirmed.

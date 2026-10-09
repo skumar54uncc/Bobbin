@@ -296,7 +296,7 @@ describe("setup side panel", () => {
     expect(points(fake).at(-1)).toBe("point:instructions");
   });
 
-  it("Other: step 1 has no button, only I did this, and Attach to chat is offered", async () => {
+  it("Other: step 1 has no button, only I did this, and Ask any assistant is offered", async () => {
     const fake = install("other", { tabUrl: "chrome://newtab/" });
     await boot();
     expect(card()!.querySelector(".cx-guide-primary")).toBeNull();
@@ -306,8 +306,8 @@ describe("setup side panel", () => {
     expect(state(fake).done).toEqual(["connect"]);
     expect(primary().textContent).toBe("Copy instruction");
     const hint = document.querySelector(".cx-guide-attach")!;
-    expect(hint.textContent).toBe("No Google Drive access? Use Attach to chat in the Cortex side panel instead.");
-    buttonIn(hint, "Attach to chat")!.click();
+    expect(hint.textContent).toBe("No Google Drive access? Use Ask any assistant in the Cortex side panel instead.");
+    buttonIn(hint, "Ask any assistant")!.click();
     await settle();
     expect(fake.calls.find((c) => c.name === "sidePanel.setOptions")?.args).toEqual([{ tabId: 7, path: "search-shell.html?open=attach", enabled: true }]);
     expect(document.querySelector(".cx-guide-attach")).toBeTruthy();
