@@ -1477,6 +1477,23 @@
   }
 }
 
+.cortex-chat-incomplete {
+  align-self: flex-start;
+  max-width: min(88%, 36rem);
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--cx-border);
+  border-radius: 14px;
+  background: var(--cx-surface);
+}
+
+.cortex-chat-incomplete p {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--cx-text);
+}
+
 .cortex-chat-error {
   font-size: 14px;
   line-height: 1.45;

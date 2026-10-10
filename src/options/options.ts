@@ -10,6 +10,7 @@ import {
 import { getEffectiveSettings } from "../shared/managed-policy";
 import { applyManagedLockout, stripLockedFields } from "./managed-ui";
 import type { HistoryImportProgress } from "../lib/history-import";
+import { displayError } from "../lib/errors";
 import { INDEXING_CONSENT_KEY } from "../shared/onboarding-constants";
 import { feedbackFormUrl } from "../shared/about-copy";
 import { RENAME_NOTICE_KEY } from "../shared/product-name";
@@ -949,7 +950,7 @@ document.addEventListener("DOMContentLoaded", () => {
       hideDeleteConfirm();
       void refreshStats();
     } else {
-      feedback.textContent = res?.error ?? "Could not delete data.";
+      feedback.textContent = displayError(res?.error, "Could not delete data.");
       feedback.classList.add("is-error");
       feedback.hidden = false;
     }
@@ -971,8 +972,7 @@ document.addEventListener("DOMContentLoaded", () => {
       })) as { ok?: boolean; error?: string } | undefined;
       if (!res?.ok) {
         if (msg) {
-          msg.textContent =
-            res?.error?.trim() || "Could not allow indexing.";
+          msg.textContent = displayError(res?.error?.trim(), "Could not allow indexing.");
           msg.classList.add("is-error");
           msg.hidden = false;
         }

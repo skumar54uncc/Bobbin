@@ -116,6 +116,7 @@ module.exports = (env, argv) => {
         },
         { from: "managed_schema.json", to: "." },
         { from: "src/offscreen/offscreen.html", to: "." },
+        { from: "src/guide/copy-tab.html", to: "." },
         { from: "src/popup/popup.html", to: "." },
         { from: "src/popup/popup.css", to: "." },
         { from: "src/styles/fonts.css", to: "." },

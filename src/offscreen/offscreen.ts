@@ -26,7 +26,7 @@ import {
   type CortexBusOutbound,
 } from "../lib/extension-bus";
 import { isPrivilegedExtensionSender } from "../lib/message-security";
-import { COPY_TEXT_MAX, OFFSCREEN_COPY_MESSAGE, execCommandCopy } from "../guide/exec-copy";
+import { COPY_TEXT_MAX, OFFSCREEN_COPY_MESSAGE, copyInOffscreen } from "../guide/exec-copy";
 import { SEARCH_LIMITS } from "../lib/limits";
 import {
   backupGateUrls,
@@ -241,7 +241,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       return true;
     }
     const text = typeof msg.text === "string" ? msg.text.slice(0, COPY_TEXT_MAX) : "";
-    sendResponse({ ok: Boolean(text) && execCommandCopy(text) });
+    if (!text) {
+      sendResponse({ ok: false });
+      return true;
+    }
+    void copyInOffscreen(text).then(
+      (ok) => sendResponse({ ok }),
+      () => sendResponse({ ok: false })
+    );
     return true;
   }
 
@@ -616,6 +623,21 @@ const chatRuns = new ChatRunRegistry();
 cortexExtBus.onmessage = (ev: MessageEvent<CortexBusInbound>) => {
   const incoming = ev.data;
   if (!incoming?.kind) return;
+
+  if (incoming.kind === "copy-text") {
+    // Must live here, not in offscreen.html: extension_pages CSP is script-src 'self'.
+    void copyInOffscreen(incoming.text).then(
+      (ok) => {
+        const out: CortexBusOutbound = { kind: "copy-done", requestId: incoming.requestId, ok };
+        cortexExtBus.postMessage(out);
+      },
+      () => {
+        const out: CortexBusOutbound = { kind: "copy-done", requestId: incoming.requestId, ok: false };
+        cortexExtBus.postMessage(out);
+      }
+    );
+    return;
+  }
 
   if (incoming.kind === "chat-abort") {
     chatRuns.abort(incoming.tabId, incoming.requestId);

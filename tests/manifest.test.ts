@@ -90,6 +90,7 @@ describe("store listing fields (Phase 2.9)", () => {
       oauth2?: { client_id: string; scopes: string[] };
     };
     expect(raw.permissions).toContain("identity");
+    expect(raw.permissions).toContain("unlimitedStorage");
     expect(raw.host_permissions).toEqual(["http://*/*", "https://*/*"]);
     // The setup pointer runs under the existing host access; nothing extra is requested.
     expect(raw.optional_host_permissions).toBeUndefined();

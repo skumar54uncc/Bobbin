@@ -2,7 +2,7 @@
  * Ask any assistant: builds a context packet from local memory, previews it, and puts it
  * into the chat box on the page (Insert into chat) or on the clipboard (Copy). Never sends.
  */
-import { showManualCopy } from "../guide/clipboard";
+import { clipboardWriteAllowed, execCommandCopy, showManualCopy } from "../guide/clipboard";
 import { formatPacket, itemLine, packetHeader, TEMPLATES, type PacketItem, type PacketRequest } from "./packet";
 
 export type InsertReply = { ok: true } | { ok: false; reason: "nofield" | "rejected" | "blocked" };
@@ -17,7 +17,7 @@ export interface AttachDeps {
 export const ATTACH_TITLE = "Ask any assistant";
 export const ATTACH_LEAD = "Works in any chat. Bobbin finds it in your memory and puts it in the chat box; you press send.";
 
-const INSERT_ERRORS: Record<Exclude<InsertReply, { ok: true }>["reason"], string> = {
+export const INSERT_ERRORS: Record<Exclude<InsertReply, { ok: true }>["reason"], string> = {
   nofield: "Bobbin could not find a chat box. Click into the message box on the page, then try again, or use Copy.",
   rejected: "The chat box did not accept the text. Use Copy and paste it instead.",
   blocked: "Bobbin cannot write on this page. Use Copy and paste it instead.",
@@ -169,8 +169,12 @@ export function renderAttachView(container: HTMLElement, deps: AttachDeps): void
   copy.addEventListener("click", () => {
     const text = packet();
     if (!text) return;
+    root.querySelector(".cx-copy-manual")?.remove();
+    if (!clipboardWriteAllowed() && execCommandCopy(text)) {
+      status.textContent = "Copied. Paste it into any chat.";
+      return;
+    }
     void deps.copy(text).then((ok) => {
-      root.querySelector(".cx-copy-manual")?.remove();
       if (ok) {
         status.textContent = "Copied. Paste it into any chat.";
         return;

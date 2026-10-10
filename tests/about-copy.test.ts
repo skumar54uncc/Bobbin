@@ -15,9 +15,8 @@ import {
   NOT_AFFILIATED,
   PRIVACY_POLICY_URL,
   PRODUCT_TAGLINE,
+  STORE_LISTING_URL,
   STORE_SUMMARY,
-  TAGLINE_SYNC_OFF,
-  TAGLINE_SYNC_ON,
   TERMS_URL,
   WHY_FREE_LABEL,
   browserLine,
@@ -28,11 +27,10 @@ import {
 const root = join(__dirname, "..");
 
 describe("Phase 6 free and independent copy", () => {
-  it("switches the header tagline on real sync state", () => {
-    expect(headerTagline(false)).toBe(TAGLINE_SYNC_OFF);
-    expect(headerTagline(true)).toBe(TAGLINE_SYNC_ON);
-    expect(TAGLINE_SYNC_OFF).toBe("Private library of pages you read on this device");
-    expect(TAGLINE_SYNC_ON).toBe("On this device and in your Google Drive");
+  it("uses the product tagline in the overlay and popup header", () => {
+    expect(headerTagline(false)).toBe(PRODUCT_TAGLINE);
+    expect(headerTagline(true)).toBe(PRODUCT_TAGLINE);
+    expect(PRODUCT_TAGLINE).toBe("The missing memory for your AI.");
   });
 
   it("keeps the popup footer and Why it's free link", () => {
@@ -43,6 +41,7 @@ describe("Phase 6 free and independent copy", () => {
     expect(html).toContain("Please don't paste personal browsing history into feedback.");
     expect(html).toContain('href="options.html#cx-sec-about"');
     expect(html).toContain(`id="cx-tagline"`);
+    expect(html).toContain(PRODUCT_TAGLINE);
     expect(html).not.toContain("every 2 minutes");
   });
 
@@ -80,14 +79,19 @@ describe("Phase 6 free and independent copy", () => {
     expect(MANIFEST_DESCRIPTION).toBe(STORE_SUMMARY);
     expect(MANIFEST_DESCRIPTION.startsWith(PRODUCT_TAGLINE)).toBe(true);
     expect(MANIFEST_DESCRIPTION.length).toBeLessThanOrEqual(132);
+    expect(STORE_SUMMARY.length).toBe(108);
     expect(STORE_SUMMARY.length).toBeLessThanOrEqual(132);
     expect(HOMEPAGE_URL).toBe("https://skumar54uncc.github.io/Bobbin/");
+    expect(STORE_LISTING_URL).toContain("happibddmmagkgneicjkndapcpmhdbfn");
+    const listing = readFileSync(join(root, "docs/store-listing.md"), "utf8");
+    expect(listing).toContain(PRODUCT_TAGLINE);
+    expect(listing).toContain(STORE_SUMMARY);
+    expect(listing).toContain("unlimitedStorage");
   });
 
   it("uses the same taglines in the overlay", () => {
     const src = readFileSync(join(root, "src/content/overlay.ts"), "utf8");
-    expect(src).toContain("headerTagline");
-    expect(src).toContain("TAGLINE_SYNC_OFF");
+    expect(src).toContain("PRODUCT_TAGLINE");
     expect(src).not.toMatch(/alt="Cortex mascot"/);
     expect(src).not.toContain("How to open Cortex");
     expect(src).not.toContain("Cortex was reloaded");

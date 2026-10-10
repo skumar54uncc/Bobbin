@@ -1,10 +1,21 @@
 import { expect, test, articleHtml, LOREM_PARAGRAPHS } from "./fixtures";
 
+function isClipboardPolicyLog(text: string): boolean {
+  return /permissions policy|clipboard api has been blocked/i.test(text);
+}
+
 /** Host pages can send Permissions-Policy: clipboard-write=(), which blocks Clipboard API in the panel iframe. */
 test("Copy in the in-page panel succeeds when the host page blocks clipboard-write", async ({
   context,
   serviceWorker,
 }) => {
+  const policyLogs: string[] = [];
+  context.on("console", (msg) => {
+    const text = msg.text();
+    if (isClipboardPolicyLog(text)) policyLogs.push(text);
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+
   await context.route("https://copy-policy.test/**", (route) =>
     route.fulfill({
       status: 200,
@@ -13,7 +24,18 @@ test("Copy in the in-page panel succeeds when the host page blocks clipboard-wri
       body: articleHtml("Clipboard policy page", LOREM_PARAGRAPHS),
     })
   );
+  await context.route("https://clip-read.test/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: "<!doctype html><title>clip</title><textarea id='t'></textarea>",
+    })
+  );
   const page = await context.newPage();
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (isClipboardPolicyLog(text)) policyLogs.push(text);
+  });
   await page.goto("https://copy-policy.test/blocked");
   await serviceWorker.evaluate(async () => {
     const [tab] = await chrome.tabs.query({ url: "https://copy-policy.test/*" });
@@ -36,4 +58,26 @@ test("Copy in the in-page panel succeeds when the host page blocks clipboard-wri
   await frame.click(".cx-connect-copy");
   await expect(frame.locator(".cx-connect-instruction-block [role=status]")).toHaveText("Copied");
   await expect(frame.locator(".cx-copy-manual")).toHaveCount(0);
+  expect(policyLogs, policyLogs.join("\n")).toEqual([]);
+
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "https://clip-read.test" });
+  const reader = await context.newPage();
+  await reader.goto("https://clip-read.test/");
+  await reader.locator("#t").click();
+  let clip = "";
+  try {
+    clip = await reader.evaluate(async () => navigator.clipboard.readText());
+  } catch {
+    clip = "";
+  }
+  if (!clip) {
+    clip = await frame.evaluate(async () => {
+      try {
+        return await navigator.clipboard.readText();
+      } catch {
+        return "";
+      }
+    });
+  }
+  expect(clip).toBe(text);
 });

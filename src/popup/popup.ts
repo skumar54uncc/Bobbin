@@ -1,4 +1,4 @@
-import { feedbackFormUrl, headerTagline } from "../shared/about-copy";
+import { feedbackFormUrl } from "../shared/about-copy";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import type { StatsSnapshot } from "../lib/stats-snapshot-types";
 import {
@@ -174,19 +174,9 @@ async function onManualRefresh(): Promise<void> {
   }
 }
 
-function applyHeaderTagline(): void {
-  const el = document.querySelector("#cx-tagline");
-  if (!el || typeof chrome.runtime?.sendMessage !== "function") return;
-  chrome.runtime.sendMessage({ type: "CORTEX_SYNC_LABEL" }, (resp?: { on?: boolean }) => {
-    if (chrome.runtime.lastError) return;
-    el.textContent = headerTagline(Boolean(resp?.on));
-  });
-}
-
 document.addEventListener("DOMContentLoaded", () => {
   injectBrandFontFacesInto(document.head);
   void refreshPrivacyBlurb();
-  applyHeaderTagline();
   void loadPopup();
 
   qs("#cx-privacy-ack").addEventListener("click", () => {

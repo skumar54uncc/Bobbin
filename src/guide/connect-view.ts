@@ -4,7 +4,7 @@
  */
 import { ASSISTANTS, firstUrl, standingInstructionFor, troubleshootingFor, type AssistantConfig, type AssistantId } from "../config/assistants";
 import { mascotHtml } from "../content/mascot";
-import { copyText, showManualCopy } from "./clipboard";
+import { clipboardWriteAllowed, copyText, execCommandCopy, showManualCopy } from "./clipboard";
 import type { EnableResult } from "./enable-sync";
 
 export const CONNECT_TITLE = "Connect your AI to your Bobbin memory";
@@ -50,10 +50,6 @@ function button(className: string, text: string): HTMLButtonElement {
 function extUrl(path: string): string {
   const get = (globalThis as { chrome?: { runtime?: { getURL?: (p: string) => string } } }).chrome?.runtime?.getURL;
   return get ? get(path) : path;
-}
-
-function logoUrl(id: string): string {
-  return extUrl(`assistant-logos/${id}.svg`);
 }
 
 export function renderConnectView(container: HTMLElement, deps: ConnectDeps): ConnectView {
@@ -171,8 +167,12 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
       const copyNote = el("p", "cx-connect-start-note");
       copyNote.setAttribute("role", "status");
       copy.addEventListener("click", () => {
+        block.querySelector(".cx-copy-manual")?.remove();
+        if (!clipboardWriteAllowed() && execCommandCopy(ins)) {
+          copyNote.textContent = "Copied";
+          return;
+        }
         void copyText(ins).then((ok) => {
-          block.querySelector(".cx-copy-manual")?.remove();
           if (ok) {
             copyNote.textContent = "Copied";
             return;
@@ -223,14 +223,7 @@ export function renderConnectView(container: HTMLElement, deps: ConnectDeps): Co
     card.setAttribute("role", "radio");
     card.setAttribute("aria-checked", "false");
     card.dataset.assistant = a.id;
-    const row = el("span", "cx-connect-card-head");
-    const logo = el("img", "cx-connect-logo");
-    logo.src = logoUrl(a.id);
-    logo.width = 24;
-    logo.height = 24;
-    logo.alt = "";
-    row.append(logo, el("span", "cx-connect-card-name", a.name));
-    card.append(row, el("span", "cx-connect-card-plan", a.plan));
+    card.append(el("span", "cx-connect-card-name", a.name), el("span", "cx-connect-card-plan", a.plan));
     card.addEventListener("click", () => select(a.id));
     cards.set(a.id, card);
     grid.append(card);

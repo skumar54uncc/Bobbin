@@ -86,7 +86,7 @@ import {
   isPrivilegedExtensionSender,
 } from "../lib/message-security";
 import { GUIDE_KEY, GUIDE_PANEL_PATH } from "../guide/state";
-import { COPY_MESSAGE, COPY_TEXT_MAX, OFFSCREEN_COPY_MESSAGE } from "../guide/exec-copy";
+import { COPY_MESSAGE, COPY_TEXT_MAX } from "../guide/exec-copy";
 import {
   CORTEX_EXTENSION_BUS_CHANNEL,
   type CortexBusInbound,
@@ -281,10 +281,20 @@ function minCharsForUrl(url: string): number {
 let offscreenCreating: Promise<void> | null = null;
 
 const cortexBus = new BroadcastChannel(CORTEX_EXTENSION_BUS_CHANNEL);
+const pendingCopy = new Map<number, (ok: boolean) => void>();
+let copySeq = 0;
 
 cortexBus.onmessage = (ev: MessageEvent<CortexBusOutbound>) => {
   const d = ev.data;
   if (!d?.kind) return;
+  if (d.kind === "copy-done") {
+    const finish = pendingCopy.get(d.requestId);
+    if (finish) {
+      pendingCopy.delete(d.requestId);
+      finish(d.ok);
+    }
+    return;
+  }
   if (d.kind === "chat-event") {
     deliverOverlayMessage(d.tabId, {
       type: "CORTEX_CHAT_PUSH",
@@ -369,6 +379,11 @@ async function ensureOffscreen(): Promise<void> {
         },
       });
       // #endregion
+      try {
+        if (await chrome.offscreen.hasDocument?.()) return;
+      } catch {
+        /* ignore */
+      }
       throw e;
     }
   })();
@@ -378,6 +393,36 @@ async function ensureOffscreen(): Promise<void> {
   } finally {
     offscreenCreating = null;
   }
+}
+
+/** Host-framed connect-frame cannot call writeText. Offscreen CLIPBOARD copies with execCommand. */
+function copyOnceViaBus(text: string, waitMs: number): Promise<boolean | "timeout"> {
+  const requestId = ++copySeq;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingCopy.delete(requestId);
+      resolve("timeout");
+    }, waitMs);
+    pendingCopy.set(requestId, (ok) => {
+      clearTimeout(timer);
+      resolve(ok);
+    });
+    cortexBus.postMessage({ kind: "copy-text", requestId, text } satisfies CortexBusInbound);
+  });
+}
+
+async function copyThroughOffscreen(text: string): Promise<boolean> {
+  try {
+    await ensureOffscreen();
+  } catch {
+    /* Document may already exist; the bus copy still runs. */
+  }
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const result = await copyOnceViaBus(text, 400);
+    if (result === true) return true;
+    if (result === false) return false;
+  }
+  return false;
 }
 
 function storedId(value: unknown): string | null {
@@ -3410,9 +3455,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     }
     void (async () => {
       try {
-        await ensureOffscreen();
-        const res = (await chrome.runtime.sendMessage({ type: OFFSCREEN_COPY_MESSAGE, text })) as { ok?: boolean } | undefined;
-        sendResponse({ ok: res?.ok === true });
+        sendResponse({ ok: await copyThroughOffscreen(text) });
       } catch {
         sendResponse({ ok: false as const });
       }

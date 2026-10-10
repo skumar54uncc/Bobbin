@@ -1,7 +1,7 @@
 import { sendRuntimeMessage } from "../shared/extension-runtime";
-import { COPY_MESSAGE, COPY_TEXT_MAX } from "./exec-copy";
+import { COPY_MESSAGE, COPY_TEXT_MAX, execCommandCopy } from "./exec-copy";
 
-export { COPY_MESSAGE, COPY_TEXT_MAX, OFFSCREEN_COPY_MESSAGE } from "./exec-copy";
+export { COPY_MESSAGE, COPY_TEXT_MAX, OFFSCREEN_COPY_MESSAGE, execCommandCopy } from "./exec-copy";
 
 export function copyShortcutHint(): string {
   const mac = /Mac|iPhone|iPad/.test(navigator.platform) || /Mac OS X/.test(navigator.userAgent);
@@ -9,20 +9,45 @@ export function copyShortcutHint(): string {
 }
 
 /**
- * a. navigator.clipboard.writeText
- * b. the service worker copies through the offscreen document
- * Host pages can block clipboard access for iframes (Permissions-Policy).
+ * writeText in a framed extension page still logs a Permissions policy violation
+ * even when the call is in a try/catch. Skip it when this document is not top-level
+ * (connect-frame inside a web page) or when the document policy forbids clipboard-write.
+ * Side panel, options, and other top-level extension pages keep writeText.
+ */
+export function clipboardWriteAllowed(): boolean {
+  if (window.parent !== window) return false;
+  try {
+    if (window.top !== window) return false;
+  } catch {
+    return false;
+  }
+  const policy = (document as Document & { featurePolicy?: { allowsFeature?: (name: string) => boolean } })
+    .featurePolicy;
+  if (typeof policy?.allowsFeature === "function" && policy.allowsFeature("clipboard-write") === false) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Top-level extension pages: writeText, then execCommand, then the service worker.
+ * Framed connect-frame: never writeText. execCommand first (must run before any await
+ * so the click gesture is still valid), then the service worker / offscreen document.
  */
 export async function copyText(text: string): Promise<boolean> {
   const value = text.slice(0, COPY_TEXT_MAX);
   if (!value) return false;
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-      return true;
+  if (clipboardWriteAllowed()) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch {
+      /* Missing user gesture on a top-level extension page. */
     }
-  } catch {
-    /* Permissions-Policy on the host page, or a missing user gesture. */
+  } else if (execCommandCopy(value)) {
+    return true;
   }
   try {
     const res = (await sendRuntimeMessage({ type: COPY_MESSAGE, text: value })) as { ok?: boolean } | undefined;

@@ -49,7 +49,8 @@ export const BUNDLE_BUDGETS = {
   "options.js": 40 * KB,
   // v2 Phase 4 guided setup: the Connect frame in the panel, the setup side panel, the optional
   // on-page pointer (injected only into the assistant tab), and the lazy Settings section.
-  "connect-frame.js": 24 * KB,
+  // 24 KB to 33 KB so in-frame execCommand copy keeps 8 KB free (25.0 KB now).
+  "connect-frame.js": 33 * KB,
   "guide-panel.js": 26 * KB,
   // 16 KB to 24 KB so the live pointer keeps 8 KB free (15.7 KB at the Bobbin rename).
   "guide-pointer.js": 24 * KB,

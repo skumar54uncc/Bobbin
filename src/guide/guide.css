@@ -121,17 +121,19 @@
 
 .cx-connect-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 168px), 1fr));
+  gap: 12px;
 }
 
 .cx-connect-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: center;
   gap: 4px;
   min-width: 0;
-  padding: 10px 12px;
+  min-height: 72px;
+  padding: 12px 14px;
   font: inherit;
   text-align: left;
   color: var(--cx-text);
@@ -147,7 +149,6 @@
 
 .cx-connect-card.is-active {
   border-color: var(--cx-accent);
-  box-shadow: inset 0 0 0 1px var(--cx-accent);
   background: var(--cx-accent-soft);
 }
 
@@ -160,19 +161,6 @@
 
 .cx-connect-card-name {
   font-weight: 700;
-}
-
-.cx-connect-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.cx-connect-logo {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  border-radius: 6px;
 }
 
 .cx-connect-badge {

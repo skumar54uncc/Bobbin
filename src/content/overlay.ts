@@ -39,7 +39,8 @@ import { recordPanelOpen, type CoachTipId } from "../shared/ux-local";
 import { siteBadgeColors, siteInitial } from "../lib/site-badge";
 import { overlayHostModifierClass } from "./overlay-host";
 import { applyThemeToHost, themeTokensCss } from "../shared/theme";
-import { headerTagline, TAGLINE_SYNC_OFF } from "../shared/about-copy";
+import { PRODUCT_TAGLINE } from "../shared/about-copy";
+import { readAskResume, threadNeedsRetry, writeAskResume } from "./ask-resume";
 import {
   EMPTY_ASK_HINT,
   EMPTY_ASK_TITLE,
@@ -54,7 +55,7 @@ import { safeHttpHttpsHref } from "../lib/url-security";
 import { buildSourceItem, citationLink, type StoredCitation } from "./citation-cards";
 import { citationDetail, citationHref } from "../lib/kind-labels";
 import type { ChunkKind, ChunkLocator } from "../db/schema";
-import { ERROR_CODES } from "../lib/errors";
+import { displayError, ERROR_CODES } from "../lib/errors";
 
 let overlayHost: HTMLDivElement | null = null;
 let overlayShadowRoot: ShadowRoot | null = null;
@@ -364,7 +365,7 @@ ${shadowCss}`;
           </span>
           <div class="cx-brand-text">
             <span id="cortex-overlay-title" class="cx-brand-wordmark">Bobbin</span>
-            <span id="cortex-overlay-tagline" class="cx-brand-tagline">${TAGLINE_SYNC_OFF}</span>
+            <span id="cortex-overlay-tagline" class="cx-brand-tagline">${PRODUCT_TAGLINE}</span>
           </div>
         </div>
         <div class="cortex-head-actions">
@@ -398,12 +399,6 @@ ${shadowCss}`;
     </div>
   `;
   shadow.appendChild(shell);
-
-  const taglineEl = shell.querySelector<HTMLElement>("#cortex-overlay-tagline");
-  void chrome.runtime.sendMessage({ type: "CORTEX_SYNC_LABEL" }, (resp?: { on?: boolean }) => {
-    if (chrome.runtime.lastError || !taglineEl) return;
-    taglineEl.textContent = headerTagline(Boolean(resp?.on));
-  });
 
   try {
     const mountParent = overlayShellMode ? document.body : document.documentElement;
@@ -482,6 +477,8 @@ ${shadowCss}`;
   let currentMode: OverlayMode = openAttach ? "agents" : "search";
   if (openAttach) panel.setAttribute("data-mode", "agents");
   let currentConversationId: number | null = null;
+  let askDraft = "";
+  let askLoadGen = 0;
 
   let selectedHitIndex = -1;
   let searchTimer: number | undefined;
@@ -878,6 +875,7 @@ ${shadowCss}`;
         btn.append(title, when);
         btn.addEventListener("click", () => {
           currentConversationId = conv.id;
+          persistAsk();
           void loadChatConversation(conv.id, askMessagesEl!);
           renderChatSidebarList();
           askDrawerToggle?.close();
@@ -925,6 +923,7 @@ ${shadowCss}`;
     convId: number,
     messagesContainer: HTMLElement
   ): Promise<void> {
+    const gen = ++askLoadGen;
     const res = (await sendRuntimeMessage({
       type: "CORTEX_CHAT_LOAD",
       conversationId: convId,
@@ -935,6 +934,7 @@ ${shadowCss}`;
         }
       | undefined;
 
+    if (gen !== askLoadGen) return;
     if (!res?.ok || !res.messages) {
       renderChatThread(messagesContainer, []);
       return;
@@ -942,6 +942,51 @@ ${shadowCss}`;
 
     renderChatThread(messagesContainer, res.messages);
     scrollChatToBottom(messagesContainer, "smooth");
+    if (threadNeedsRetry(res.messages)) {
+      paintIncompleteAnswer(messagesContainer);
+      void waitForAssistant(convId, gen, messagesContainer);
+    }
+  }
+
+  function paintIncompleteAnswer(messagesContainer: HTMLElement): void {
+    if (messagesContainer.querySelector(".cortex-chat-incomplete")) return;
+    const box = document.createElement("div");
+    box.className = "cortex-chat-incomplete";
+    box.setAttribute("role", "status");
+    const p = document.createElement("p");
+    p.textContent = "This answer did not finish.";
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "cortex-turn-btn cortex-turn-btn--primary";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", () => {
+      const question =
+        messagesContainer.querySelector(".cortex-turn:last-child .cortex-msg--user")?.textContent ?? "";
+      if (question.trim()) void regenerateQuestion(question);
+    });
+    box.append(p, retry);
+    messagesContainer.appendChild(box);
+  }
+
+  async function waitForAssistant(
+    convId: number,
+    gen: number,
+    messagesContainer: HTMLElement
+  ): Promise<void> {
+    for (let i = 0; i < 10; i += 1) {
+      await new Promise((r) => window.setTimeout(r, 800));
+      if (gen !== askLoadGen || !messagesContainer.isConnected) return;
+      const res = (await sendRuntimeMessage({
+        type: "CORTEX_CHAT_LOAD",
+        conversationId: convId,
+      })) as { ok?: boolean; messages?: StoredChatMessage[] } | undefined;
+      if (gen !== askLoadGen || !messagesContainer.isConnected) return;
+      if (res?.ok && res.messages && !threadNeedsRetry(res.messages)) {
+        renderChatThread(messagesContainer, res.messages);
+        scrollChatToBottom(messagesContainer, "smooth");
+        return;
+      }
+    }
   }
 
   let askMessagesEl: HTMLElement | null = null;
@@ -956,6 +1001,7 @@ ${shadowCss}`;
   function openSearchWithQuery(query: string): void {
     const q = query.trim();
     if (!q) return;
+    if (currentMode === "ask") parkAskUi();
     currentMode = "search";
     panel.setAttribute("data-mode", "search");
     rebuildTabs();
@@ -969,7 +1015,25 @@ ${shadowCss}`;
     }, 0);
   }
 
+  function persistAsk(): void {
+    askDraft = askTextareaEl?.value ?? askDraft;
+    void writeAskResume({ conversationId: currentConversationId, draft: askDraft });
+  }
+
+  /** Keep the offscreen answer running. Only drop this page's listeners. */
+  function parkAskUi(): void {
+    persistAsk();
+    askLoadGen += 1;
+    if (chatController) {
+      chatController.dispose();
+      chatController = null;
+    }
+    activeStream = null;
+    askSendBtn = null;
+  }
+
   function switchMode(mode: OverlayMode): void {
+    if (currentMode === "ask" && mode !== "ask") parkAskUi();
     currentMode = mode;
     panel.setAttribute("data-mode", mode);
     rebuildTabs();
@@ -1368,7 +1432,7 @@ ${shadowCss}`;
     } else if (resp.message) {
       msg = resp.message;
     } else {
-      msg = String(resp.error ?? "Could not start chat.");
+      msg = displayError(resp.error, "Could not start chat.");
     }
     const hint =
       resp.userAction ??
@@ -1417,6 +1481,7 @@ ${shadowCss}`;
       callbacks: {
         onConversation: (id) => {
           currentConversationId = id;
+          persistAsk();
           void refreshChatSidebar();
         },
         onSources: (chunks) => {
@@ -2251,6 +2316,9 @@ ${shadowCss}`;
 
       newBtn.addEventListener("click", () => {
         currentConversationId = null;
+        askDraft = "";
+        if (askTextareaEl) askTextareaEl.value = "";
+        persistAsk();
         renderChatThread(messagesContainer, []);
         void refreshChatSidebar();
         askDrawerToggle?.close();
@@ -2330,6 +2398,9 @@ ${shadowCss}`;
       ta.maxLength = CHAT_LIMITS.MAX_QUESTION_CHARS;
       ta.setAttribute("aria-label", "Your question");
       askTextareaEl = ta;
+      ta.addEventListener("input", () => {
+        askDraft = ta.value;
+      });
       ta.addEventListener(
         "focus",
         () => chrome.runtime.sendMessage({ type: "CORTEX_CHAT_WARM" }, () => void chrome.runtime.lastError),
@@ -2385,6 +2456,8 @@ ${shadowCss}`;
         if (!question) return;
         messagesContainer.querySelector(".cortex-chat-empty")?.remove();
         ta.value = "";
+        askDraft = "";
+        persistAsk();
         handleAskSubmit(question, messagesContainer);
       };
 
@@ -2406,9 +2479,22 @@ ${shadowCss}`;
       bodyEl.appendChild(wrap);
       renderChatThread(messagesContainer, []);
       void refreshChatSidebar();
-      if (currentConversationId != null) {
-        void loadChatConversation(currentConversationId, messagesContainer);
-      }
+      void (async () => {
+        const saved = await readAskResume();
+        if (currentConversationId == null && saved.conversationId != null) {
+          currentConversationId = saved.conversationId;
+        }
+        if (!ta.value && saved.draft) {
+          askDraft = saved.draft;
+          ta.value = saved.draft;
+        } else if (askDraft && !ta.value) {
+          ta.value = askDraft;
+        }
+        if (currentConversationId != null) {
+          await loadChatConversation(currentConversationId, messagesContainer);
+          renderChatSidebarList();
+        }
+      })();
       requestAnimationFrame(() => focusAskInput(ta));
       return;
     }
@@ -2500,10 +2586,7 @@ ${shadowCss}`;
     flushPendingDeletes();
     hideUndoToast();
     stopTheme();
-    if (chatController?.isStreaming) chatController.abort();
-    chatController?.dispose();
-    chatController = null;
-    activeStream = null;
+    parkAskUi();
     askSendBtn = null;
     digestResultSink = null;
     stopLayoutObserver();

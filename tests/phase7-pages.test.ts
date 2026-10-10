@@ -9,6 +9,7 @@ import {
   HOMEPAGE_URL,
   PRIVACY_POLICY_URL,
   PRODUCT_TAGLINE,
+  STORE_LISTING_URL,
   TERMS_URL,
 } from "../src/shared/about-copy";
 
@@ -22,7 +23,9 @@ describe("Phase 7 public pages", () => {
     expect(html).toContain(BRAND_LINE);
     expect(html).toContain("Free forever. No ads. No servers.");
     expect(html).toContain("felt-wave.webp");
-    expect(html).toContain("chromewebstore.google.com");
+    expect(html).toContain(STORE_LISTING_URL);
+    expect(html).toContain("happibddmmagkgneicjkndapcpmhdbfn");
+    expect(html).not.toContain("when the listing is live");
     expect(html).toContain(CONTACT_EMAIL);
     expect(html).toContain(PRIVACY_POLICY_URL.replace(HOMEPAGE_URL, ""));
     expect(html).toContain("privacy/");

@@ -16,11 +16,9 @@ export const MANIFEST_DESCRIPTION = STORE_SUMMARY;
 export const NOT_AFFILIATED =
   "Bobbin is not affiliated with, endorsed by, or sponsored by Google, Anthropic, OpenAI, xAI, Meta, Microsoft, Perplexity, Muse, or LinkedIn. Their names are used only to describe compatibility.";
 
-export const TAGLINE_SYNC_OFF = "Private library of pages you read on this device";
-export const TAGLINE_SYNC_ON = "On this device and in your Google Drive";
-
-export function headerTagline(syncOn: boolean): string {
-  return syncOn ? TAGLINE_SYNC_ON : TAGLINE_SYNC_OFF;
+/** Overlay and popup header. Always the product tagline. */
+export function headerTagline(_syncOn?: boolean): string {
+  return PRODUCT_TAGLINE;
 }
 
 export const FOOTER_FREE = "Free forever. No ads. No servers. Your data stays yours.";
@@ -40,6 +38,9 @@ export const DATA_DELETION_URL = "https://skumar54uncc.github.io/Bobbin/data-del
 export const TERMS_URL = "https://skumar54uncc.github.io/Bobbin/terms";
 export const CONTACT_EMAIL = "shailesh.entrant@gmail.com";
 export const GITHUB_ISSUES_URL = "https://github.com/skumar54uncc/Bobbin/issues";
+/** Chrome Web Store item. The id stays valid after the Cortex to Bobbin rename. */
+export const STORE_LISTING_URL =
+  "https://chromewebstore.google.com/detail/cortex-%E2%80%94-local-second-bra/happibddmmagkgneicjkndapcpmhdbfn?authuser=0&hl=en-GB";
 export const FEEDBACK_FORM_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLSeC5bLybg056jJQzpohfgSX8r1OWlgtT7LSlSeHgvbT3CqQCQ/viewform";
 export const FEEDBACK_HINT = "Please don't paste personal browsing history into feedback.";

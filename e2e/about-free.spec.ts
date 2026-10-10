@@ -10,7 +10,7 @@ test("popup footer and About Bobbin match the free-forever copy", async ({ conte
   const popup = await context.newPage();
   await popup.setViewportSize({ width: 380, height: 720 });
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-  await expect(popup.locator("#cx-tagline")).toHaveText("Private library of pages you read on this device");
+  await expect(popup.locator("#cx-tagline")).toHaveText("The missing memory for your AI.");
   await expect(popup.locator(".cx-popup-footer")).toContainText(
     "Free forever. No ads. No servers. Your data stays yours."
   );

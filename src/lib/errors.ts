@@ -132,6 +132,16 @@ export const ERROR_MESSAGES: Record<ErrorCode, CortexErrorShape> = {
   },
 };
 
+/** Map a known error code to its user sentence. Unknown snake_case codes become `fallback`. */
+export function displayError(text: string | undefined, fallback: string): string {
+  if (!text) return fallback;
+  if (Object.prototype.hasOwnProperty.call(ERROR_MESSAGES, text)) {
+    return ERROR_MESSAGES[text as ErrorCode].userMessage;
+  }
+  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(text) && text.length <= 40) return fallback;
+  return text;
+}
+
 export function payloadFromCode(code: ErrorCode): {
   code: ErrorCode;
   message: string;

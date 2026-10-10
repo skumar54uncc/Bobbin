@@ -38,8 +38,7 @@ describe("Connect your AI view", () => {
     const names = [...host.querySelectorAll(".cx-connect-card-name")].map((n) => n.textContent);
     expect(names).toEqual(["Claude", "ChatGPT", "Gemini", "Grok", "Muse", "Perplexity", "Other"]);
     expect(host.querySelector(".cx-connect-badge")).toBeNull();
-    expect(card(host, "claude").querySelector(".cx-connect-logo")?.getAttribute("width")).toBe("24");
-    expect(card(host, "claude").querySelector(".cx-connect-logo")?.getAttribute("src")).toContain("assistant-logos/claude.svg");
+    expect(host.querySelector(".cx-connect-logo")).toBeNull();
     expect(card(host, "chatgpt").querySelector(".cx-connect-card-plan")?.textContent).toMatch(/^Needs a ChatGPT plan/);
     expect(host.querySelector(".cx-connect-guide")?.hasAttribute("hidden")).toBe(true);
   });
@@ -158,7 +157,7 @@ describe("Connect your AI view", () => {
   it("uses accordions that push content down and a grid that wraps", () => {
     const css = readFileSync(join(__dirname, "..", "src", "guide", "guide.css"), "utf8");
     expect(css).not.toMatch(/position:\s*(absolute|fixed)/);
-    expect(css).toMatch(/\.cx-connect-grid \{[^}]*grid-template-columns: repeat\(auto-fill, minmax\(min\(100%, 150px\), 1fr\)\)/);
+    expect(css).toMatch(/\.cx-connect-grid \{[^}]*grid-template-columns: repeat\(auto-fill, minmax\(min\(100%, 168px\), 1fr\)\)/);
     expect(css).not.toMatch(/overflow-x:\s*(auto|scroll)/);
     const { host } = mount();
     expect(host.querySelectorAll("details.cx-connect-trouble")).toHaveLength(1);

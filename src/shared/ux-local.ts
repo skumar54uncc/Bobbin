@@ -3,6 +3,7 @@
  * Local chrome.storage.local only. No telemetry backend.
  */
 
+import { STORE_LISTING_URL } from "./about-copy";
 import { storageLocalGet, storageLocalSet } from "./storage-local";
 
 export const UX_LOCAL_KEY = "cortex_ux_local_v1";
@@ -46,8 +47,7 @@ export const FEEDBACK_COOLDOWN_MS = 90 * 24 * 60 * 60 * 1000;
 export const INSTALLED_AT_KEY = "cortex_installed_at";
 
 /** Chrome Web Store listing. The id is stable; the slug can change. */
-export const CHROME_WEB_STORE_LISTING =
-  "https://chromewebstore.google.com/detail/happibddmmagkgneicjkndapcpmhdbfn";
+export const CHROME_WEB_STORE_LISTING = STORE_LISTING_URL;
 
 const EMPTY: UxLocalState = {
   firstSeenAt: 0,

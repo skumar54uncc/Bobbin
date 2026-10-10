@@ -1,4 +1,5 @@
 /// <reference types="chrome"/>
+import { displayError } from "../lib/errors";
 import {
   INDEXING_CONSENT_KEY,
   ONBOARDING_DONE_KEY,
@@ -58,9 +59,7 @@ async function grantConsentAndStart(): Promise<void> {
 
     if (!res?.ok) {
       setStatus(
-        res?.error?.trim()
-          ? res.error
-          : "Could not start indexing. Try again from Settings.",
+        displayError(res?.error?.trim(), "Could not start indexing. Try again from Settings."),
         true
       );
       if (startBtn) startBtn.disabled = false;
