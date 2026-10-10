@@ -106,4 +106,4 @@ See [docs/release.md](docs/release.md).
 
 ## License
 
-This repository does not include a license file yet.
+[MIT](LICENSE)
