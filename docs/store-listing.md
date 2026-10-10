@@ -14,7 +14,7 @@ Bobbin is a personal browsing memory: it remembers the pages you read so you can
 
 ## Category
 
-Productivity
+Productivity → Workflow and planning
 
 ## Title
 
@@ -24,46 +24,21 @@ Bobbin: Browsing Memory for AI
 
 The missing memory for your AI.
 
-## Short description (108 characters)
+## Short description (124 characters)
 
-The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free.
+The missing memory for your AI. Bobbin privately captures what you browse and read, so your AI assistant knows it too. Free.
 
 ## Full description
 
-The missing memory for your AI.
+Bobbin is a Chrome extension that remembers the pages you read, after you press I agree on the welcome page. You can search that library later or ask questions in ordinary language. Indexing, search, and the language model run on your computer. There is no Bobbin server, no account, and no tracking. The extension is free. There is no paid plan.
 
-Read it once. Ask your AI anytime.
+It keeps the main text of articles you read, captions from YouTube videos you watch (with a link to the moment), text from PDFs you open (with a link to the page), tables, image captions, highlights you add, and LinkedIn profiles you view. Sites such as banking, health, and email are skipped. Incognito windows are never indexed. You can pause indexing, block a site, or forget a page whenever you want.
 
-Bobbin keeps the thread of everything you read. It is a private Chrome extension that indexes pages you read, after you press I agree on the welcome page, and lets you search them or ask questions in plain language. Indexing, search, and the language model run on your device. There is no Bobbin server, no account, and no tracking. Bobbin is free forever.
+Search is available from the Bobbin panel, the side panel, or the address bar (type cx, then a space). Ask returns an answer with citations you can open. There is also a daily or weekly digest of what you read. Notes can be exported as Markdown. You can back up the library and restore it.
 
-Optional Assistant Sync copies that memory into a folder named Bobbin Memory in your own Google Drive, only after a second I agree: a spreadsheet index plus one Google Doc per day with the text of pages you read. The Google permission is drive.file (files Bobbin creates, not your whole Drive). Connect setup walks you through Claude, ChatGPT, Gemini, Grok, Muse, Perplexity, or any other assistant that can read Drive. Ask any assistant finds pages in your local memory and puts a context packet in the chat box; you press send. Optional Cloud Chat uses your own Gemini API key and sends only short text snippets, never whole pages, PDFs, or images.
+If you want an assistant you already use to see the same memory, turn on Assistant Sync. That takes a second I agree. Bobbin then writes a folder named Bobbin Memory in your own Google Drive: one spreadsheet and one Google Doc per day. The Google permission is drive.file, which means files Bobbin creates, not the rest of your Drive. Connect walks you through linking an assistant that can read Drive. Ask any assistant finds pages on this device and puts a short context packet in the chat box. You press send.
 
-What Bobbin remembers:
-- Articles and pages you read
-- YouTube videos you watch (from their captions), with links to the exact moment
-- PDFs you open, with links to the right page
-- Data tables, row by row
-- Image captions and alt text
-- Your highlights and notes
-- LinkedIn profiles you viewed
-
-What you can do:
-- Search your library from the Bobbin panel, the side panel, or the address bar (type cx and a space)
-- Ask questions and get answers with citations you can click
-- Group pages into collections and search inside one
-- Get a daily or weekly digest of what you read
-- Export your notes as Markdown, or back up and restore your library
-- Connect your AI assistant through your own Google Drive
-- Paste a context packet into any chat with Ask any assistant
-
-Privacy by design:
-- Index storage stays on your computer unless you enable Assistant Sync or Cloud Chat
-- You must agree in the product UI before indexing or history import begins
-- Sensitive sites like banking, health, and email are skipped automatically
-- Incognito windows are never indexed
-- Pause indexing, block any site, or forget a site or the last hour at any time
-- Choose how long pages are kept
-- Privacy policy and Terms of Use open inside the extension and on the homepage
+Cloud Chat stays off unless you add your own API key. If you turn it on, only short retrieved snippets are sent, not whole pages, PDFs, or images. The privacy policy and Terms of Use are in Settings and on the homepage.
 
 ## Data disclosures
 

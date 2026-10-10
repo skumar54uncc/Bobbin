@@ -1,54 +1,109 @@
-# Bobbin: Browsing Memory for AI
+# Bobbin
 
-Bobbin is a Chrome extension (Manifest V3) that remembers what you read and lets you search it and ask questions about it. Everything runs on your device: page text is extracted with Mozilla Readability, chunked, embedded with a bundled MiniLM model through Transformers.js and stored in IndexedDB. There is no backend, no analytics and no telemetry.
+![Bobbin for Chrome: The missing memory for your AI.](docs/readme/marquee-1400x560.png)
 
-- **Search**: hybrid retrieval (semantic, keyword, title, recency, engagement) with confidence badges.
-- **Ask**: answers grounded in your library with citations, on device through Chrome built-in AI, or optionally through Gemini with your own API key (only the retrieved snippets are sent).
-- **Digest**: a narrative of what you read today, yesterday or over the last 7 days.
+**The missing memory for your AI.**
 
-## Install from source
+Bobbin privately captures what you browse and read, so your AI assistant knows it too.
 
-```bash
-npm install
-npm run build
+[Chrome Web Store](https://chromewebstore.google.com/detail/happibddmmagkgneicjkndapcpmhdbfn)
+
+## What it does
+
+- Remembers readable pages you open, after you press I agree, and keeps that library on this device.
+- Lets you search what you read, ask questions with citations, and browse people and companies you looked up.
+- Optionally copies the same memory into a Google Drive folder you own, so Claude, ChatGPT, Gemini, and other assistants can read it.
+
+## How it works
+
+```mermaid
+flowchart LR
+  A[Browser capture] --> B[Local library on this device]
+  B -->|optional Assistant Sync| C[Your Google Drive sheet and Pages docs]
+  C --> D[Assistants read via their Drive connectors]
 ```
 
-Then open `chrome://extensions`, turn on Developer mode, choose Load unpacked and select the `dist` folder.
+Indexing, search, and Ask run in the extension. There is no Bobbin server. Assistant Sync is off until you enable it. When it is on, Bobbin writes a spreadsheet and one Google Doc per day into a folder named Bobbin Memory, using the `drive.file` scope (files Bobbin creates, not the rest of your Drive).
 
-The embedding model (`vendor/models/Xenova/all-MiniLM-L6-v2`, about 22 MB) and the ONNX Runtime WASM binary are part of the package. Nothing is downloaded at runtime. If the model folder is missing, run `npm run prepare-model` once before building.
+## Supported assistants
 
-## Using Bobbin
+| Assistant | Plan notes |
+| --- | --- |
+| Claude | Free plan works |
+| ChatGPT | Needs a ChatGPT plan with apps |
+| Gemini | Free plan works. Start questions with @Google Drive |
+| Grok | Free plan works |
+| Perplexity | Free plan works. Start questions with @Google Drive |
+| Muse | Check your plan |
+| Other | Any assistant that can read Google Drive files |
 
-- Browse normally. Readable pages are indexed after a short idle delay. Incognito tabs, blocklisted domains and sensitive sites (banking, health, government patterns) are skipped.
-- Open Bobbin with the toolbar icon, `Ctrl+Shift+K` (`Cmd+Shift+K` on macOS) or `Alt+Shift+C`. On pages where extensions cannot inject scripts (`chrome://` and similar) Bobbin opens in the side panel.
-- Ask questions in plain language, for example "what did I read about Kubernetes yesterday". Time phrases filter by visit date.
-- Settings (gear icon or `chrome://extensions`): pause indexing, blocklist, chat mode, Gemini key, theme (light, dark, system), history import, delete all data.
-
-## Development
-
-```bash
-npm run typecheck      # tsc --noEmit
-npm test               # vitest unit tests + eval tests
-npm run build          # production bundle into dist/
-npm run check:budget   # bundle size budgets (content.js under 45 KB)
-npm run eval           # retrieval quality against eval/corpus
-npm run e2e            # Playwright with the unpacked extension (build first)
-npm run sbom           # CycloneDX SBOM of shipped dependencies
-```
-
-CI (`.github/workflows/ci.yml`) runs the audit gate (`npm audit --omit=dev --audit-level=high`), typecheck, unit and eval tests, build, bundle budget, SBOM, Playwright e2e and the retrieval eval on every pull request.
-
-### Toolbar icons
-
-Put a square brand PNG at `icons/bobbin-brand.png` and run `npm run icons` to regenerate `icons/icon-16.png`, `icon-48.png` and `icon-128.png`.
-
-## Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for runtimes (content script, service worker, offscreen document, side panel), the data model and the retrieval pipeline. Security and privacy notes live in [SECURITY.md](SECURITY.md), [docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md) and [docs/INNERHTML_AUDIT.md](docs/INNERHTML_AUDIT.md). Release 1.2.0 work is documented under `docs/release-1.2.0/`.
+Connect walks you through linking an assistant. Ask any assistant can also put a short context packet into a chat without Drive.
 
 ## Privacy
 
-- Extracted text only. No screenshots, no keylogging.
-- Incognito tabs are never indexed.
-- Cloud chat is off by default. When enabled, only the retrieved snippets for a question are sent to Gemini with your key.
-- All data can be deleted from Settings.
+- Capture and search stay on this device.
+- Assistant Sync is optional and writes only to your own Google Drive, with `drive.file`.
+- There are no Bobbin servers and no ads.
+
+[Privacy policy](https://skumar54uncc.github.io/Bobbin/privacy) · [Terms of use](https://skumar54uncc.github.io/Bobbin/terms)
+
+## Screenshots
+
+![Ask your AI what you read](docs/readme/1-ask-your-ai-1280x800.png)
+
+![Connect an assistant](docs/readme/2-connect-1280x800.png)
+
+![Search your library](docs/readme/3-search-1280x800.png)
+
+![People and companies](docs/readme/4-people-1280x800.png)
+
+![Free, with no ads and no servers](docs/readme/5-free-forever-1280x800.png)
+
+## Development
+
+Requires Node 20.
+
+```bash
+npm ci
+npm run build
+```
+
+Then open `chrome://extensions`, turn on Developer mode, choose Load unpacked, and select the `dist` folder.
+
+```bash
+npm test               # unit tests and eval tests
+npm run typecheck
+npm run e2e            # Playwright (build first)
+npm run check:budget
+```
+
+Use `npm run build:store` only when packaging the Chrome Web Store zip. That build uses the store OAuth client and omits the unpacked `key`. After a store build, run `npm run build` again if you still load `dist` unpacked.
+
+## Project structure
+
+| Path | |
+| --- | --- |
+| `src/` | Extension source: service worker, overlay, popup, settings, Connect, sync |
+| `tests/` | Vitest unit tests |
+| `e2e/` | Playwright end-to-end tests |
+| `eval/` | Retrieval eval corpus and harness |
+| `docs/` | GitHub Pages site, policy pages, release notes |
+| `assets/` | Mascot and assistant-logo assets used by the build |
+| `icons/` | Toolbar and store icons |
+| `scripts/` | npm build and maintenance scripts |
+| `config/` | OAuth client ids for unpacked vs store builds |
+| `vendor/` | Bundled on-device embedding model |
+| `.github/` | CI workflow |
+
+## Release
+
+See [docs/release.md](docs/release.md).
+
+## Feedback
+
+- [Feedback form](https://docs.google.com/forms/d/e/1FAIpQLSeC5bLybg056jJQzpohfgSX8r1OWlgtT7LSlSeHgvbT3CqQCQ/viewform)
+- [GitHub issues](https://github.com/skumar54uncc/Bobbin/issues)
+
+## License
+
+This repository does not include a license file yet.

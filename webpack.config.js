@@ -111,6 +111,9 @@ module.exports = (env, argv) => {
           transform(content) {
             const manifest = JSON.parse(content.toString());
             manifest.oauth2.client_id = oauthClientId;
+            // Source `key` pins the unpacked id. The store item is a different
+            // id; CWS rejects a zip whose key does not match that item.
+            if (oauthTarget === "release") delete manifest.key;
             return JSON.stringify(manifest, null, 2);
           },
         },

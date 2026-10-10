@@ -2,7 +2,7 @@
 
 Do not upload until the hosted pages are live and the OAuth consent screen is In production. Do not change the manifest `key` or the published item id `happibddmmagkgneicjkndapcpmhdbfn`. Do not mint a new OAuth client.
 
-Package: `bobbin-2.0.0.zip` at the repo root (gitignored). **22,262,328 bytes**, 104 zip entries, `manifest.json` at the root, no source maps. Built with `npm run build:store` so the zip uses the Chrome Web Store OAuth client, not the unpacked `dev` client. Do not change the manifest `key` or the published item id `happibddmmagkgneicjkndapcpmhdbfn`. After a store build, run `npm run build` again if you still test unpacked (`dev` client).
+Package: `bobbin-2.0.0.zip` at the repo root (gitignored). Built with `npm run build:store` so the zip uses the Chrome Web Store OAuth client and **omits** `key` (CWS already has the item key). Source `manifest.json` keeps the unpacked `key` so Load unpacked stays `fkhaacmaaaheapelljjcmfdmifmfbboa`. Do not change that source key or the published item id `happibddmmagkgneicjkndapcpmhdbfn`. After a store build, run `npm run build` again if you still test unpacked.
 
 ## 1. Merge into main (homepage, privacy, terms)
 
@@ -38,7 +38,7 @@ Until this merge, OAuth "In production" and the store listing cannot truthfully 
 2. Privacy policy URL: https://skumar54uncc.github.io/Bobbin/privacy
 3. Paste listing text from `docs/store-listing.md`:
    - Tagline: The missing memory for your AI.
-   - Short description (108 characters): The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free.
+   - Short description: The missing memory for your AI. Bobbin privately captures what you browse and read, so your AI assistant knows it too. Free.
    - Detailed description: the Full description in that file
 4. Single purpose statement: Bobbin is a personal browsing memory: it remembers the pages you read so you can search them, and can optionally share that memory with your own AI assistant through your Google Drive.
 5. Permission justifications: copy the table in `docs/store-listing.md`. Host access is for reading pages you visit. Google Drive calls use the OAuth token, not host access.
