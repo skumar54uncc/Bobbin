@@ -8,7 +8,7 @@ export const HOMEPAGE_SECONDARY = "Read it once. Ask your AI anytime.";
 export const BRAND_LINE = "Bobbin keeps the thread of everything you read.";
 /** Chrome Web Store short description and manifest description. 132 characters max. */
 export const STORE_SUMMARY =
-  "The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free.";
+  "The missing memory for your AI. Bobbin privately captures what you browse and read, so your AI assistant knows it too. Free.";
 
 /** Manifest description: same sentence as the store short description. */
 export const MANIFEST_DESCRIPTION = STORE_SUMMARY;

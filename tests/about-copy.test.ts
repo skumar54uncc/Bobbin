@@ -79,7 +79,7 @@ describe("Phase 6 free and independent copy", () => {
     expect(MANIFEST_DESCRIPTION).toBe(STORE_SUMMARY);
     expect(MANIFEST_DESCRIPTION.startsWith(PRODUCT_TAGLINE)).toBe(true);
     expect(MANIFEST_DESCRIPTION.length).toBeLessThanOrEqual(132);
-    expect(STORE_SUMMARY.length).toBe(108);
+    expect(STORE_SUMMARY.length).toBe(124);
     expect(STORE_SUMMARY.length).toBeLessThanOrEqual(132);
     expect(HOMEPAGE_URL).toBe("https://skumar54uncc.github.io/Bobbin/");
     expect(STORE_LISTING_URL).toContain("happibddmmagkgneicjkndapcpmhdbfn");

@@ -57,7 +57,7 @@ describe("store listing fields (Phase 2.9)", () => {
     expect(manifest.name).toBe("Bobbin: Browsing Memory for AI");
     expect(manifest.short_name).toBe("Bobbin");
     expect(manifest.description).toBe(
-      "The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free."
+      "The missing memory for your AI. Bobbin privately captures what you browse and read, so your AI assistant knows it too. Free."
     );
     expect(manifest.description.startsWith("The missing memory for your AI.")).toBe(true);
   });
