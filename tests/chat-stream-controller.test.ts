@@ -74,6 +74,20 @@ describe("ChatStreamController", () => {
     expect(ctl.submit("again", 7)).toBe(true);
   });
 
+  it("progress keeps a long wait alive, and a real timeout aborts the run", () => {
+    const { ctl, cb, sent } = makeController();
+    ctl.submit("q", null);
+    const id = ctl.currentRequestId!;
+    for (let i = 0; i < 10; i += 1) {
+      vi.advanceTimersByTime(CHAT_INACTIVITY_TIMEOUT_MS - 1000);
+      ctl.handleEvent({ type: "progress", data: {} }, id);
+    }
+    expect(cb.onError).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(CHAT_INACTIVITY_TIMEOUT_MS);
+    expect(cb.onError).toHaveBeenCalledTimes(1);
+    expect(sent.at(-1)).toMatchObject({ type: "CORTEX_CHAT_ABORT", requestId: id });
+  });
+
   it("inactivity timeout is 45s and resets on every token", () => {
     const { ctl, cb } = makeController();
     expect(CHAT_INACTIVITY_TIMEOUT_MS).toBe(45_000);

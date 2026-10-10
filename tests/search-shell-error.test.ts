@@ -19,7 +19,7 @@ describe("search shell load error", () => {
     const pre = document.body.querySelector("pre");
     expect(document.body.querySelector("img")).toBeNull();
     expect(pre?.textContent).toBe(
-      'Cortex could not load.\n<img src=x onerror="window.__pwned=1">boom'
+      'Bobbin could not load.\n<img src=x onerror="window.__pwned=1">boom'
     );
   });
 

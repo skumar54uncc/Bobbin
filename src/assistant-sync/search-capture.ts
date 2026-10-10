@@ -4,8 +4,14 @@ export const SEARCH_ENGINES = [
   "DuckDuckGo",
   "YouTube",
   "LinkedIn",
+  "Amazon",
   "Google Flights",
 ] as const;
+
+/** amazon.com, amazon.co.uk, amazon.de, and the other national stores. */
+function amazonHost(h: string): boolean {
+  return /^(smile\.)?amazon\.(com|ca|com\.mx|com\.br|co\.uk|de|fr|it|es|nl|se|pl|com\.tr|ae|sa|eg|in|co\.jp|com\.au|sg)$/.test(h);
+}
 
 export type SearchEngine = (typeof SEARCH_ENGINES)[number];
 
@@ -64,6 +70,11 @@ export function parseSearchQuery(raw: string): ParsedSearch | null {
   if ((h === "linkedin.com" || h.endsWith(".linkedin.com")) && path.startsWith("/search")) {
     const query = cleanQuery(url.searchParams.get("keywords") ?? url.searchParams.get("q"));
     return query ? { engine: "LinkedIn", query } : null;
+  }
+
+  if (amazonHost(h) && (path === "/s" || path.startsWith("/s/"))) {
+    const query = cleanQuery(url.searchParams.get("k") ?? url.searchParams.get("field-keywords"));
+    return query ? { engine: "Amazon", query } : null;
   }
 
   if (googleHost(url.hostname) && path.startsWith("/search")) {

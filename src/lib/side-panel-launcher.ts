@@ -9,8 +9,12 @@ export function isSidePanelApiAvailable(): boolean {
 }
 
 export function configureSidePanelBehavior(): void {
-  if (chrome.sidePanel?.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+  const setBehavior = chrome.sidePanel?.setPanelBehavior;
+  if (!setBehavior) return;
+  // Promise form. A reload can answer "No SW" after this worker has stopped.
+  const pending = setBehavior({ openPanelOnActionClick: false }) as unknown;
+  if (pending && typeof (pending as Promise<void>).catch === "function") {
+    void (pending as Promise<void>).catch(() => undefined);
   }
 }
 

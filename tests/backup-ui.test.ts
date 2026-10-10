@@ -73,11 +73,11 @@ describe("backup UI", () => {
   });
 
   it("invalid files show the reason and no confirm step", async () => {
-    const send = vi.fn(async () => ({ ok: false, error: "This file is not a Cortex backup." }));
+    const send = vi.fn(async () => ({ ok: false, error: "This file is not a Bobbin backup." }));
     const { $ } = setup(send);
     await chooseFile($, "nope");
     expect($("#cx-restore-confirm").hidden).toBe(true);
-    expect($("#cx-restore-feedback").textContent).toBe("This file is not a Cortex backup.");
+    expect($("#cx-restore-feedback").textContent).toBe("This file is not a Bobbin backup.");
     expect($("#cx-restore-feedback").classList.contains("is-error")).toBe(true);
   });
 
@@ -98,7 +98,7 @@ describe("backup UI", () => {
     await vi.waitFor(() => expect($("#cx-restore-feedback").hidden).toBe(false));
     expect(send).toHaveBeenCalledWith({ type: "CORTEX_BACKUP_RESTORE", text: "{}", mode: "replace", confirmed: true });
     expect($("#cx-restore-feedback").textContent).toBe(
-      "Restored 119 pages. 1 page was left out by your privacy settings. Cortex is re-indexing in the background."
+      "Restored 119 pages. 1 page was left out by your privacy settings. Bobbin is re-indexing in the background."
     );
     expect($("#cx-restore-confirm").hidden).toBe(true);
   });

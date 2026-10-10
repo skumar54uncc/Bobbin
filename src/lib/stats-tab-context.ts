@@ -108,7 +108,7 @@ export async function describeTabForPopup(
   }
 
   return {
-    line: "Not saved yet. Keep this tab open briefly so Cortex can capture it.",
+    line: "Not saved yet. Keep this tab open briefly so Bobbin can capture it.",
     badge: "neutral",
   };
 }

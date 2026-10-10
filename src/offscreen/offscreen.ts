@@ -13,6 +13,7 @@ import {
 } from "../shared/embed-model";
 import { agentDebugLog } from "../lib/agent-debug-log";
 import { runChat } from "../lib/chat/chat-engine";
+import { browsePages } from "../lib/browse-pages";
 import { ChatRunRegistry } from "../lib/chat/chat-run-registry";
 import { findMostSimilarDocument } from "../lib/resurface";
 import { runImageDescriptions } from "../lib/capture/images";
@@ -25,6 +26,7 @@ import {
   type CortexBusOutbound,
 } from "../lib/extension-bus";
 import { isPrivilegedExtensionSender } from "../lib/message-security";
+import { COPY_TEXT_MAX, OFFSCREEN_COPY_MESSAGE, copyInOffscreen } from "../guide/exec-copy";
 import { SEARCH_LIMITS } from "../lib/limits";
 import {
   backupGateUrls,
@@ -117,6 +119,14 @@ async function embedQueryForSearch(text: string): Promise<number[] | null> {
 }
 
 
+/** Page embedding for Assistant Sync topics. Same model and pooling as the topic label vectors. */
+async function embedForTopics(text: string): Promise<number[] | null> {
+  const pipe = await getPipe();
+  const output = await pipe(text.replace(/\s+/g, " ").trim().slice(0, MAX_EMBED_CHARS), { pooling: "mean", normalize: true });
+  const data = output?.data as Float32Array | undefined;
+  return data?.length ? Array.from(data) : null;
+}
+
 // ------------------------------------------------- export and backup (6.7)
 
 const SERVICE_WORKER_URL = chrome.runtime.getURL("service-worker.js");
@@ -128,6 +138,16 @@ const SERVICE_WORKER_URL = chrome.runtime.getURL("service-worker.js");
  * `documentId` and its own URL while the service worker carries neither.
  * The options-page check and the rate limit have already run there.
  */
+function otherDeviceVisits(raw: unknown): { id: string; url: string; title: string; visitedAt: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    const v = item as Record<string, unknown> | null;
+    return v && typeof v.id === "string" && typeof v.url === "string" && typeof v.visitedAt === "number"
+      ? [{ id: v.id, url: v.url, title: typeof v.title === "string" ? v.title : "", visitedAt: v.visitedAt }]
+      : [];
+  });
+}
+
 function isServiceWorkerSender(sender: chrome.runtime.MessageSender): boolean {
   if (!isPrivilegedExtensionSender(sender)) return false;
   if (sender.documentId != null) return false;
@@ -188,7 +208,7 @@ async function runBackupWork(m: BackupWorkMessage): Promise<unknown> {
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { ok: false, error: "This file is not a Cortex backup (it is not valid JSON)." };
+    return { ok: false, error: "This file is not a Bobbin backup (it is not valid JSON)." };
   }
   const v = validateBackup(parsed);
   if (!v.ok) return { ok: false, error: v.error };
@@ -213,6 +233,23 @@ async function runBackupWork(m: BackupWorkMessage): Promise<unknown> {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
   if (!isPrivilegedExtensionSender(sender)) {
     return false;
+  }
+
+  if (msg?.type === OFFSCREEN_COPY_MESSAGE) {
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false });
+      return true;
+    }
+    const text = typeof msg.text === "string" ? msg.text.slice(0, COPY_TEXT_MAX) : "";
+    if (!text) {
+      sendResponse({ ok: false });
+      return true;
+    }
+    void copyInOffscreen(text).then(
+      (ok) => sendResponse({ ok }),
+      () => sendResponse({ ok: false })
+    );
+    return true;
   }
 
   if (msg?.type === BACKUP_WORK_MESSAGE) {
@@ -279,24 +316,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       return true;
     }
     const action =
-      msg.action === "enable" || msg.action === "now" || msg.action === "alarm" || msg.action === "disable"
+      msg.action === "enable" ||
+      msg.action === "now" ||
+      msg.action === "alarm" ||
+      msg.action === "disable" ||
+      msg.action === "cleanup" ||
+      msg.action === "pages"
         ? msg.action
         : "alarm";
     const token = typeof msg.token === "string" ? msg.token : "";
     const folderId = typeof msg.folderId === "string" ? msg.folderId : null;
     const fileId = typeof msg.fileId === "string" ? msg.fileId : null;
-    const backupFileId = typeof msg.backupFileId === "string" ? msg.backupFileId : null;
-    const retentionDays = typeof msg.retentionDays === "number" ? msg.retentionDays : undefined;
-    const archivesEnabled = typeof msg.archivesEnabled === "boolean" ? msg.archivesEnabled : undefined;
+    const launch = {
+      ids: { folderId, fileId },
+      retentionDays: typeof msg.retentionDays === "number" ? msg.retentionDays : undefined,
+      sheetDetail: typeof msg.sheetDetail === "string" ? msg.sheetDetail : undefined,
+      backupId: typeof msg.backupId === "string" ? msg.backupId : null,
+      choice: msg.choice === "restore" || msg.choice === "create" ? (msg.choice as "restore" | "create") : undefined,
+      cleanup: msg.cleanup === "trash" || msg.cleanup === "keep" ? (msg.cleanup as "trash" | "keep") : undefined,
+      pages: msg.pages === "undo" || msg.pages === "dismiss" ? (msg.pages as "undo" | "dismiss") : undefined,
+      otherDeviceVisits: otherDeviceVisits(msg.otherDeviceVisits),
+    };
     void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
-      .then((mod) =>
-        mod.runAssistantSyncFromChrome(action, token, {
-          ids: { folderId, fileId },
-          retentionDays,
-          archivesEnabled,
-          backupFileId,
-        })
-      )
+      .then((mod) => mod.runAssistantSyncFromChrome(action, token, launch))
       .then((result) => sendResponse(result))
       .catch((error: unknown) =>
         sendResponse({
@@ -304,6 +346,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
           error: error instanceof Error && error.message ? error.message : "Sync did not start.",
         })
       );
+    return true;
+  }
+
+  if (msg?.type === "CORTEX_LOCAL_MEMORY_CAPTURE") {
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false, error: "foreign_sender" });
+      return true;
+    }
+    const v = (msg.visit ?? {}) as Record<string, unknown>;
+    const ids = (v.ownIds ?? {}) as Record<string, unknown>;
+    const idOf = (value: unknown) => (typeof value === "string" && value ? value : null);
+    void import(/* webpackChunkName: "assistant-sync-local" */ "../assistant-sync/local-memory")
+      .then((mod) =>
+        mod.captureLocalMemory({
+          id: String(v.id ?? ""),
+          url: String(v.url ?? ""),
+          title: String(v.title ?? ""),
+          visitedAt: Number(v.visitedAt ?? 0),
+          pageText: typeof v.pageText === "string" ? v.pageText : null,
+          userDenylist: Array.isArray(v.userDenylist) ? v.userDenylist.filter((d): d is string => typeof d === "string") : [],
+          retentionDays: typeof v.retentionDays === "number" ? v.retentionDays : undefined,
+          ownIds: { fileId: idOf(ids.fileId), folderId: idOf(ids.folderId), pagesFolderId: idOf(ids.pagesFolderId) },
+        })
+      )
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch(() => sendResponse({ ok: false, error: "capture_failed" }));
     return true;
   }
 
@@ -317,14 +385,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       url?: string;
       title?: string;
       visitedAt?: number;
+      pageText?: unknown;
+      open?: unknown;
       linkedInFields?: {
         kind?: string;
         name?: string;
         headline?: string;
         company?: string;
         profileUrl?: string;
+        location?: unknown;
+        about?: unknown;
+        aboutTruncated?: unknown;
+        experience?: unknown;
+        education?: unknown;
+        schools?: unknown;
+        skills?: unknown;
+        publicView?: unknown;
+        detailsPage?: unknown;
       } | null;
+      ownIds?: { fileId?: unknown; folderId?: unknown; pagesFolderId?: unknown } | null;
     } | undefined;
+    const str = (value: unknown) => (typeof value === "string" ? value : undefined);
+    const list = (value: unknown) => (Array.isArray(value) ? (value as unknown[]) : []);
+    const idOf = (value: unknown) => (typeof value === "string" && value ? value : null);
     const fields = visit?.linkedInFields;
     const linkedInFields =
       fields &&
@@ -337,6 +420,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
             headline: typeof fields.headline === "string" ? fields.headline : undefined,
             company: typeof fields.company === "string" ? fields.company : undefined,
             profileUrl: fields.profileUrl,
+            location: str(fields.location),
+            about: str(fields.about),
+            experience: list(fields.experience).map((row) => {
+              const r = (row ?? {}) as Record<string, unknown>;
+              return { title: str(r.title), company: str(r.company), dates: str(r.dates), location: str(r.location), description: str(r.description) };
+            }),
+            education: list(fields.education).filter((row): row is string => typeof row === "string"),
+            schools: list(fields.schools).map((row) => {
+              const r = (row ?? {}) as Record<string, unknown>;
+              return { school: str(r.school), degree: str(r.degree), field: str(r.field), years: str(r.years) };
+            }),
+            skills: list(fields.skills).filter((row): row is string => typeof row === "string"),
+            aboutTruncated: fields.aboutTruncated === true,
+            publicView: fields.publicView === true,
+            detailsPage:
+              fields.detailsPage === "experience" || fields.detailsPage === "education" || fields.detailsPage === "skills"
+                ? (fields.detailsPage as "experience" | "education" | "skills")
+                : undefined,
           }
         : null;
     void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
@@ -346,11 +447,70 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
           url: String(visit?.url ?? ""),
           title: String(visit?.title ?? ""),
           visitedAt: Number(visit?.visitedAt ?? 0),
+          pageText: typeof visit?.pageText === "string" ? visit.pageText : null,
+          open: visit?.open === true,
           linkedInFields,
+          ownIds: {
+            fileId: idOf(visit?.ownIds?.fileId),
+            folderId: idOf(visit?.ownIds?.folderId),
+            pagesFolderId: idOf(visit?.ownIds?.pagesFolderId),
+          },
+        }, embedForTopics)
+      )
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false, error: "capture_failed" }));
+    return true;
+  }
+
+  if (msg?.type === "CORTEX_ASSISTANT_SYNC_POST") {
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false, error: "foreign_sender" });
+      return true;
+    }
+    const post = (msg.post ?? {}) as Record<string, unknown>;
+    const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
+    const ids = (post.ownIds ?? {}) as Record<string, unknown>;
+    const idOf = (value: unknown) => (typeof value === "string" && value ? value : null);
+    void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/runtime")
+      .then((mod) =>
+        mod.captureFeedPostFromChrome({
+          url: text(post.url, 2000),
+          visitId: text(post.visitId, 200),
+          seenAt: typeof post.seenAt === "number" && Number.isFinite(post.seenAt) ? post.seenAt : Date.now(),
+          author: text(post.author, 400),
+          text: text(post.text, 6000),
+          urn: text(post.urn, 200),
+          ownIds: { fileId: idOf(ids.fileId), folderId: idOf(ids.folderId), pagesFolderId: idOf(ids.pagesFolderId) },
         })
       )
       .then((result) => sendResponse(result))
       .catch(() => sendResponse({ ok: false, error: "capture_failed" }));
+    return true;
+  }
+
+  if (msg?.type === "CORTEX_ASSISTANT_SYNC_FINALIZE") {
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false, error: "foreign_sender" });
+      return true;
+    }
+    const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+    const ended = Array.isArray(msg.visits) ? (msg.visits as Array<Record<string, unknown>>) : [];
+    const keep = new Set(Array.isArray(msg.keep) ? (msg.keep as unknown[]).filter((id): id is string => typeof id === "string") : []);
+    const abandonedBefore = num(msg.abandonedBefore);
+    void import(/* webpackChunkName: "assistant-sync" */ "../assistant-sync/finalize")
+      .then(async (mod) => {
+        const now = Date.now();
+        let finalized = 0;
+        for (const row of ended) {
+          if (typeof row.id !== "string") continue;
+          const outcome = await mod.finalizeVisit(row.id, { activeMs: num(row.activeMs), maxScrollPct: num(row.maxScrollPct) }, now);
+          if (outcome === "final") finalized += 1;
+        }
+        if (abandonedBefore != null) finalized += await mod.finalizeAbandoned(keep, abandonedBefore, now);
+        return { ok: true as const, finalized };
+      })
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false, error: "finalize_failed" }));
     return true;
   }
 
@@ -366,6 +526,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       .then((mod) => mod.trashStoredMemoryFromChrome(token, { folderId, fileId }))
       .then((result) => sendResponse(result))
       .catch(() => sendResponse({ ok: false as const, error: "drive_trash_failed" }));
+    return true;
+  }
+
+  if (msg?.type === "CORTEX_HISTORY_EXTRACT") {
+    // The service worker has no DOMParser. It fetched the page after the privacy gate.
+    if (!isServiceWorkerSender(sender)) {
+      sendResponse({ ok: false as const });
+      return true;
+    }
+    void import(/* webpackChunkName: "history-extract" */ "../content/extract")
+      .then(({ extractPageTextFromHtml }) => {
+        const out = extractPageTextFromHtml(String(msg.html ?? ""), String(msg.url ?? ""));
+        sendResponse({ ok: true as const, title: out.title, text: out.text });
+      })
+      .catch(() => sendResponse({ ok: false as const }));
     return true;
   }
 
@@ -407,11 +582,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     void (async () => {
       try {
         const cid = (msg as { collectionId?: unknown }).collectionId;
-        const { hits, evidence } = await runAdvancedSearch(
-          q,
-          embedQueryForSearch,
-          typeof cid === "number" && Number.isFinite(cid) ? { collectionId: cid } : undefined
-        );
+        const from = Number((msg as { from?: unknown }).from);
+        const to = Number((msg as { to?: unknown }).to);
+        const exact = String((msg as { exact?: unknown }).exact ?? "").trim().slice(0, 120);
+        const site = String((msg as { site?: unknown }).site ?? "").trim().slice(0, 80);
+        if (!q.trim()) {
+          const listed = await browsePages({
+            ...(Number.isFinite(from) && Number.isFinite(to) ? { from, to } : {}),
+            ...(site ? { site } : {}),
+            ...(exact ? { exact } : {}),
+            ...(typeof cid === "number" && Number.isFinite(cid) ? { collectionId: cid } : {}),
+          });
+          sendResponse({ ok: true as const, ...listed });
+          return;
+        }
+        const { hits, evidence } = await runAdvancedSearch(q, embedQueryForSearch, {
+          ...(typeof cid === "number" && Number.isFinite(cid) ? { collectionId: cid } : {}),
+          ...(Number.isFinite(from) && Number.isFinite(to) ? { forceTimeRange: { start: from, end: to }, strictTimeRange: true } : {}),
+          ...(exact ? { requirePhrase: exact } : {}),
+          ...(site ? { site } : {}),
+        });
         sendResponse({ ok: true as const, hits, evidence });
       } catch (e: unknown) {
         sendResponse({
@@ -434,8 +624,28 @@ cortexExtBus.onmessage = (ev: MessageEvent<CortexBusInbound>) => {
   const incoming = ev.data;
   if (!incoming?.kind) return;
 
+  if (incoming.kind === "copy-text") {
+    // Must live here, not in offscreen.html: extension_pages CSP is script-src 'self'.
+    void copyInOffscreen(incoming.text).then(
+      (ok) => {
+        const out: CortexBusOutbound = { kind: "copy-done", requestId: incoming.requestId, ok };
+        cortexExtBus.postMessage(out);
+      },
+      () => {
+        const out: CortexBusOutbound = { kind: "copy-done", requestId: incoming.requestId, ok: false };
+        cortexExtBus.postMessage(out);
+      }
+    );
+    return;
+  }
+
   if (incoming.kind === "chat-abort") {
     chatRuns.abort(incoming.tabId, incoming.requestId);
+    return;
+  }
+
+  if (incoming.kind === "chat-warm") {
+    void getPipe().catch(() => undefined);
     return;
   }
 
@@ -452,6 +662,10 @@ cortexExtBus.onmessage = (ev: MessageEvent<CortexBusInbound>) => {
           embedQueryForSearch,
           { signal, ...(incoming.collectionId != null ? { collectionId: incoming.collectionId } : {}) }
         )) {
+          // A runtime message wakes the service worker; the bus alone does not.
+          if (event.type === "progress") {
+            void chrome.runtime.sendMessage({ type: "CORTEX_KEEPALIVE" }).catch(() => undefined);
+          }
           const out: CortexBusOutbound = {
             kind: "chat-event",
             tabId,

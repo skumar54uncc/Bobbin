@@ -3,16 +3,42 @@
    card sat against the browser edge. */
 
 .cx-onb-bar {
-  max-width: 720px;
+  width: min(720px, calc(100% - 48px));
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .cx-onb-main {
   width: min(720px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 36px 0 64px;
+  padding: 28px 0 64px;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 16px;
+}
+
+.cx-onb-brand {
+  align-items: center;
+}
+
+.cx-onb-page .cx-onb-brand .cx-opt-brand-mark {
+  width: 40px;
+  height: 40px;
+}
+
+.cx-onb-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cx-onb-tagline {
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .cx-onb-page .cx-opt-page-head {
@@ -21,11 +47,15 @@
   border-left: none;
 }
 
+.cx-onb-page .cx-opt-section {
+  margin: 0;
+}
+
 .cx-onb-page .cx-section-heading {
   margin: 0 0 12px;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 600;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 560;
   letter-spacing: -0.02em;
 }
 
@@ -34,8 +64,19 @@
   gap: 16px;
 }
 
+.cx-onb-mascot {
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+  display: block;
+  margin: 0 0 8px;
+}
+.cx-onb-mascot[data-k="found"] {
+  scale: 1.2;
+}
+
 .cx-onb-notice {
-  margin-bottom: var(--section-gap);
+  margin: 0;
   background: var(--accent-subtle);
   border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
 }
@@ -62,13 +103,25 @@
 }
 
 .cx-onb-step {
+  position: relative;
   display: flex;
   gap: var(--space-3);
   align-items: flex-start;
   padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
+  border: none;
+  border-radius: var(--radius-card, 16px);
+  background-color: var(--surface);
+  background-image: var(--felt-grain);
+  box-shadow: var(--shadow-felt, var(--shadow-sm));
+}
+
+.cx-onb-step::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 1.5px dashed var(--stitch, rgba(156, 59, 33, 0.35));
+  border-radius: 11px;
+  pointer-events: none;
 }
 
 .cx-onb-step-num {

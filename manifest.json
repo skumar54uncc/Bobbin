@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Cortex: Private Memory for Everything You Read",
-  "version": "1.2.0",
-  "description": "Ask anything you've read, watched or scanned. Pages, YouTube, tables and images, indexed on your device.",
+  "name": "Bobbin: Browsing Memory for AI",
+  "short_name": "Bobbin",
+  "version": "2.0.0",
+  "description": "The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free.",
   "minimum_chrome_version": "116",
   "incognito": "not_allowed",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1QjXBEZDsFrx7W4UHSNDDxw/V+C1vVFJbxe3Yvd/m8XnXG/5utNzFzVWwWtemjWZ/uc8tLG7f1lEGHIIT5zUK4vs1fb7OLNBeSEXS58JUwsnMjof2gsvSa2T1hNjXg99IfVPQELuYVJe5+Vbzf7MVzsVSwsB8SX+e7/6tFvd6UNF/pEjdsxsKQ74UB2aT36wGF0imlwZSXbJgaS0afNDLMmWnNSqw4L9uZi4YnbLC9JESyYtEIHttUn13mr3DWROuFczl4tvm/9OHZeUCuV/fM9ZLF81WGHm8u4hkVfV6HkFIElOhJj2OvRv+1fP5oME5nYOcegsQ/u+bGHatKwZiwIDAQAB",
@@ -19,7 +20,8 @@
     "notifications",
     "sidePanel",
     "contextMenus",
-    "identity"
+    "identity",
+    "unlimitedStorage"
   ],
   "oauth2": {
     "client_id": "1001602130427-c4skn7nc1rglp56h5egnchv2khlafk5v.apps.googleusercontent.com",
@@ -41,7 +43,7 @@
     "service_worker": "service-worker.js"
   },
   "action": {
-    "default_title": "Open Cortex search",
+    "default_title": "Open Bobbin search",
     "default_icon": {
       "16": "icons/icon-16.png",
       "48": "icons/icon-48.png",
@@ -77,7 +79,10 @@
     {
       "resources": [
         "icons/icon-48.png",
-        "fonts/*.woff2"
+        "fonts/*.woff2",
+        "mascot/*.webp",
+        "mascot.css",
+        "connect-frame.html"
       ],
       "matches": [
         "http://*/*",

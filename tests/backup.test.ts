@@ -136,7 +136,7 @@ describe("collectBackup", () => {
   it("writes every library store, drops embeddings, and never carries settings or the Gemini key", async () => {
     await seed();
     const backup = await collectBackup(T + 5);
-    expect(backup).toMatchObject({ format: BACKUP_FORMAT, version: BACKUP_VERSION, schemaVersion: 6, exportedAt: T + 5 });
+    expect(backup).toMatchObject({ format: BACKUP_FORMAT, version: BACKUP_VERSION, schemaVersion: 7, exportedAt: T + 5 });
     expect(Object.keys(backup.stores).sort()).toEqual([...BACKUP_STORES].sort());
     expect(backup.stores.documents).toHaveLength(2);
     expect(backup.stores.chunks).toHaveLength(4);
@@ -243,7 +243,7 @@ describe("validateBackup", () => {
     return JSON.parse(JSON.stringify(await collectBackup(T))) as CortexBackup;
   }
 
-  it("rejects files that are not a Cortex backup of this version", async () => {
+  it("rejects files that are not a Bobbin backup of this version", async () => {
     const b = await valid();
     expect(validateBackup(null).ok).toBe(false);
     expect(validateBackup({ ...b, format: "other" }).ok).toBe(false);

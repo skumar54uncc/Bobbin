@@ -5,7 +5,7 @@ import { listPeople, upsertPerson } from "../src/lib/people";
 
 /**
  * People captured before the detail existed have nothing to summarise from.
- * Cortex already indexed the profile page itself, so the summary falls back
+ * Bobbin already indexed the profile page itself, so the summary falls back
  * to what it read there. Everything stays on the device.
  */
 async function addProfileDoc(url: string, title: string, summary: string) {

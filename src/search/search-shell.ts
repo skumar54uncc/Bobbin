@@ -14,7 +14,7 @@ function bootSearchShell(): void {
     // Error text is data: set it with textContent, never as HTML.
     const pre = document.createElement("pre");
     pre.className = "cx-shell-boot-error";
-    pre.textContent = `Cortex could not load.\n${msg}`;
+    pre.textContent = `Bobbin could not load.\n${msg}`;
     document.body.replaceChildren(pre);
   }
 }

@@ -7,7 +7,7 @@ import { articleHtml } from "../fixtures";
 
 /**
  * Phase 6 upgrade test: a real 1.0.1 install, 10 indexed pages and 2 chats,
- * then 1.2.0 loaded over it from the same folder into the same profile.
+ * then the current dist (2.0.0) loaded over it from the same folder into the same profile.
  * Run on demand with a 1.0.1 build:
  *   CORTEX_UPGRADE_FROM=<path to 1.0.1 dist> npx playwright test e2e/upgrade --reporter=line
  */
@@ -92,7 +92,7 @@ async function snapshot(sw: Worker): Promise<Snapshot> {
   });
 }
 
-test("1.0.1 with 10 pages and 2 chats upgrades to 1.2.0 with data and chats intact", async () => {
+test("1.0.1 with 10 pages and 2 chats upgrades to 2.0.0 with data and chats intact", async () => {
   const extDir = mkdtempSync(join(tmpdir(), "cortex-upgrade-ext-"));
   const profile = mkdtempSync(join(tmpdir(), "cortex-upgrade-profile-"));
   cpSync(FROM!, extDir, { recursive: true });
@@ -132,12 +132,12 @@ test("1.0.1 with 10 pages and 2 chats upgrades to 1.2.0 with data and chats inta
   const before = await snapshot(sw);
   await context.close();
 
-  // ---- load 1.2.0 over it: same folder, same profile
+  // ---- load current dist over it: same folder, same profile
   rmSync(extDir, { recursive: true, force: true });
   cpSync(TO, extDir, { recursive: true });
   ({ context, sw } = await launch(extDir, profile));
-  await expect.poll(async () => (await snapshot(sw)).version, { timeout: 30_000 }).toBe("1.2.0");
-  // Use 1.2.0 first: its first database open runs the v6 migration (Dexie opens lazily).
+  await expect.poll(async () => (await snapshot(sw)).version, { timeout: 30_000 }).toBe("2.0.0");
+  // Use the current build first: its first database open runs pending Dexie migrations.
   const popup2 = await context.newPage();
   await popup2.goto(`chrome-extension://${sw.url().split("/")[2]}/popup.html`);
   const hit = await popup2.evaluate(async () => {

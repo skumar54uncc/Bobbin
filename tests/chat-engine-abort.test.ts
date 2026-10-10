@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { describe, it, expect, vi } from "vitest";
 
 vi.mock("../src/lib/search-engine", () => ({
@@ -80,5 +81,32 @@ describe("runChat abort", () => {
       (c) => (c as unknown as [number, { role: string }])[1].role
     );
     expect(roles).toEqual(["user"]);
+  });
+
+  it("sends progress while the model is quiet, then the answer", async () => {
+    vi.useFakeTimers();
+    try {
+      router.streamAnswer.mockImplementation(async function* () {
+        await new Promise((r) => setTimeout(r, 20_000));
+        yield "Rockets.";
+      });
+      const events: string[] = [];
+      const run = (async () => {
+        for await (const ev of runChat(
+          null,
+          "what about rockets?",
+          { mode: "on-device-only", cloudEnabled: false, geminiApiKey: "" },
+          async () => null
+        )) {
+          events.push(ev.type);
+        }
+      })();
+      await vi.advanceTimersByTimeAsync(21_000);
+      await run;
+      expect(events.filter((e) => e === "progress").length).toBeGreaterThanOrEqual(2);
+      expect(events.slice(-2)).toEqual(["token", "done"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

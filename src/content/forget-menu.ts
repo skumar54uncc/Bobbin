@@ -28,7 +28,7 @@ const LABELS: Record<Scope, string> = {
 function describeResult(scope: Scope, res: unknown): string {
   const r = res as { ok?: boolean; site?: string; counts?: { documents?: number } } | undefined;
   if (!r?.ok) return "Could not forget that data.";
-  if (scope === "all") return "Forgot everything Cortex had stored.";
+  if (scope === "all") return "Forgot everything Bobbin had stored.";
   const n = r.counts?.documents ?? 0;
   const what = scope === "site" ? (r.site ?? "this site") : scope === "hour" ? "the last hour" : "the last day";
   return `Forgot ${what}: ${n} page${n === 1 ? "" : "s"} removed.`;

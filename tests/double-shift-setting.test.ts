@@ -26,6 +26,7 @@ describe("doubleShiftShortcutEnabled setting", () => {
 
   it("keeps every other default untouched", () => {
     expect(DEFAULT_USER_SETTINGS.peopleMemoryEnabled).toBe(true);
+    expect(DEFAULT_USER_SETTINGS.profilePhotosEnabled).toBe(true);
     expect(DEFAULT_USER_SETTINGS.omniboxEnabled).toBe(true);
     expect(DEFAULT_USER_SETTINGS.highlightsEnabled).toBe(true);
     expect(DEFAULT_USER_SETTINGS.resurfacingEnabled).toBe(false);

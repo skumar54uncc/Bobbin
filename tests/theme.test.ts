@@ -23,8 +23,8 @@ describe("resolveTheme", () => {
 
 describe("normalizeThemeSetting", () => {
   it("defaults to system for unknown values", () => {
-    expect(normalizeThemeSetting(undefined)).toBe("system");
-    expect(normalizeThemeSetting("blue")).toBe("system");
+    expect(normalizeThemeSetting(undefined)).toBe("light");
+    expect(normalizeThemeSetting("blue")).toBe("light");
     expect(normalizeThemeSetting("dark")).toBe("dark");
     expect(normalizeThemeSetting("light")).toBe("light");
   });

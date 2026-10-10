@@ -43,26 +43,29 @@ The overlay and side panel shell support Light, Dark and System (default). The s
 
 Light accent moved from `#c72a09` to `#b8250a` so accent text also clears 4.5:1 on the header gradient background (`--cx-bg`), not only on `--cx-surface`.
 
-Measured contrast (WCAG 2.x, `contrastRatio` in `src/shared/theme.ts`):
+Measured contrast (WCAG 2.x, `contrastRatio` in `src/shared/theme.ts`), felt palette:
 
 | Theme | Foreground | Background | Ratio |
 |-------|-----------|------------|-------|
-| light | text #1c1917 | bg #e4e2dd | 13.51:1 |
-| light | text #1c1917 | surface #f7f5f0 | 16.05:1 |
-| light | text #1c1917 | surfaceInput #fffef9 | 17.32:1 |
-| light | textMuted #3f3f46 | surface #f7f5f0 | 9.59:1 |
-| light | textSubtle #52525b | surface #f7f5f0 | 7.09:1 |
-| light | link #9a3412 | surface #f7f5f0 | 6.71:1 |
-| light | accent #b8250a | surface #f7f5f0 | 5.83:1 |
-| light | accent #b8250a | bg #e4e2dd | 4.91:1 |
-| dark | text #f2efe9 | bg #141312 | 16.17:1 |
-| dark | text #f2efe9 | surface #1e1c1a | 14.80:1 |
-| dark | text #f2efe9 | surfaceInput #262321 | 13.61:1 |
-| dark | textMuted #c9c4bb | surface #1e1c1a | 9.79:1 |
-| dark | textSubtle #a8a29a | surface #1e1c1a | 6.71:1 |
-| dark | link #f4a28a | surface #1e1c1a | 8.40:1 |
-| dark | accent #ef7554 | surface #1e1c1a | 5.94:1 |
-| dark | accent #ef7554 | bg #141312 | 6.49:1 |
+| light | text #2e231d | bg #f8f1e6 | 13.62:1 |
+| light | text #2e231d | surface #f8f1e6 | 13.62:1 |
+| light | text #2e231d | surfaceInput #efe4d2 | 12.15:1 |
+| light | textMuted #6b5a4e | surface #f8f1e6 | 5.85:1 |
+| light | textSubtle #6b5a4e | surface #f8f1e6 | 5.85:1 |
+| light | link #9c3b21 | surface #f8f1e6 | 6.11:1 |
+| light | accent #9c3b21 | surface #f8f1e6 | 6.11:1 |
+| light | accent #9c3b21 | bg #f8f1e6 | 6.11:1 |
+| light | white #fffef9 | brick button #9c3b21 | 6.79:1 |
+| dark | text #f3e9dc | bg #221a15 | 14.27:1 |
+| dark | text #f3e9dc | surface #221a15 | 14.27:1 |
+| dark | text #f3e9dc | surfaceInput #2e241e | 12.61:1 |
+| dark | textMuted #bfae9e | surface #221a15 | 7.96:1 |
+| dark | textSubtle #bfae9e | surface #221a15 | 7.96:1 |
+| dark | link #e07a5c | surface #221a15 | 5.79:1 |
+| dark | accent #e07a5c | surface #221a15 | 5.79:1 |
+| dark | accent #e07a5c | bg #221a15 | 5.79:1 |
+| dark | accent #e07a5c | surfaceInput #2e241e | 5.12:1 |
+| dark | white #fffef9 | brick button #9c3b21 | 6.79:1 |
 
 Confidence badges (Strong, Good, Looser) have dedicated dark overrides at the end of `overlay.shadow.css`. The options page and toolbar popup stay light (intentional product decision). Appearance theme picks only change the overlay / side panel. Settings copy states this under Appearance.
 

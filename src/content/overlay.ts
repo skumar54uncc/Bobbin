@@ -16,6 +16,7 @@ import {
   type PendingDelete,
 } from "./chat-history";
 import { buildExamplePrompts, type RecentVisitLite } from "./example-prompts";
+import { formatReadingTime } from "../shared/reading-time-format";
 import {
   isExtensionRuntimeAlive,
   sendRuntimeMessage,
@@ -30,20 +31,21 @@ import { createStreamRenderer, type StreamRenderer } from "./stream-renderer";
 import { createFocusTrap, focusOnceAfterTransition } from "./focus-trap";
 import { createForgetMenu } from "./forget-menu";
 import { renderPeopleView, type PersonRow } from "./people-view";
-import { renderAgentsView } from "./agents-view";
+import { mascotHtml } from "./mascot";
 import { installCoachMarks, type CoachMarksController } from "./coach-marks";
 import { installFeedbackCard } from "./feedback-card";
+import { DATE_PRESETS, dayValue, matchPreset, presetDays, rangeFromDays, rangeWords, type DatePreset } from "./search-filters";
 import { recordPanelOpen, type CoachTipId } from "../shared/ux-local";
 import { siteBadgeColors, siteInitial } from "../lib/site-badge";
 import { overlayHostModifierClass } from "./overlay-host";
-import { createScopeBar, type ScopeCollection } from "./scope-bar";
 import { applyThemeToHost, themeTokensCss } from "../shared/theme";
+import { PRODUCT_TAGLINE } from "../shared/about-copy";
+import { readAskResume, threadNeedsRetry, writeAskResume } from "./ask-resume";
 import {
   EMPTY_ASK_HINT,
   EMPTY_ASK_TITLE,
   EMPTY_SEARCH_TIPS,
   EMPTY_SEARCH_TITLE,
-  emptyDigestTitle,
 } from "../shared/empty-copy";
 import { getUserSettings } from "../shared/extension-settings";
 import type { DigestRange, DigestResult } from "../lib/chat/digest-types";
@@ -53,7 +55,7 @@ import { safeHttpHttpsHref } from "../lib/url-security";
 import { buildSourceItem, citationLink, type StoredCitation } from "./citation-cards";
 import { citationDetail, citationHref } from "../lib/kind-labels";
 import type { ChunkKind, ChunkLocator } from "../db/schema";
-import { ERROR_CODES } from "../lib/errors";
+import { displayError, ERROR_CODES } from "../lib/errors";
 
 let overlayHost: HTMLDivElement | null = null;
 let overlayShadowRoot: ShadowRoot | null = null;
@@ -75,20 +77,30 @@ let digestResultSink:
     }) => void)
   | null = null;
 
+function matchSubtitle(tierLabel: string, reason: string | undefined): string {
+  const base =
+    tierLabel === "Strong match"
+      ? "Close match for the words you typed."
+      : tierLabel === "Good match"
+        ? "Partial match for the words you typed."
+        : "Possible match. The overlap is weaker.";
+  return reason ? `${base} ${reason}` : base;
+}
+
 function esc(s: string): string {
   const d = document.createElement("div");
   d.textContent = s;
   return d.innerHTML;
 }
 
-const CORTEX_SETTINGS_PHRASE = "Cortex settings";
+const CORTEX_SETTINGS_PHRASE = "Bobbin settings";
 
 /** Plain segment: optionally link the exact phrase "Cortex settings" to the options page. */
 function openExtensionOptionsFromOverlay(section?: string): void {
   const msg: { type: "CORTEX_OPEN_OPTIONS"; section?: string } = {
     type: "CORTEX_OPEN_OPTIONS",
   };
-  if (section === "cx-sec-assistant") msg.section = section;
+  if (section) msg.section = section;
   void sendRuntimeMessage(msg).catch(() => {
     /* invalidated extension / no receiver */
   });
@@ -119,7 +131,7 @@ function appendPlainWithOptionalSettingsLink(
     a.role = "link";
     a.className = linkClass;
     a.textContent = CORTEX_SETTINGS_PHRASE;
-    a.title = "Open Cortex settings";
+    a.title = "Open Bobbin settings";
     el.appendChild(a);
     p = i + CORTEX_SETTINGS_PHRASE.length;
   }
@@ -276,6 +288,11 @@ export function openCortexOverlay(opts?: OpenCortexOverlayOptions): void {
   existingRoot?.remove();
   overlayHost = null;
   overlayShadowRoot = null;
+  // Attach to chat writes here after the panel takes focus (src/attach/insert-field.ts).
+  if (!overlayShellMode) {
+    const field = document.activeElement;
+    (window as unknown as { __cortexLastField?: Element | null }).__cortexLastField = field && field !== document.body ? field : null;
+  }
 
   const previousFocus =
     document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -293,13 +310,17 @@ export function openCortexOverlay(opts?: OpenCortexOverlayOptions): void {
   });
   overlayShadowRoot = shadow;
 
-  const iconUrl = chrome.runtime.getURL("icons/icon-48.png");
+  const iconUrl = chrome.runtime.getURL("mascot/felt-head.webp");
 
   const style = document.createElement("style");
   style.textContent = `${getBrandFontFaceCss()}
 ${themeTokensCss()}
 ${shadowCss}`;
   shadow.appendChild(style);
+  const mascotLink = document.createElement("link");
+  mascotLink.rel = "stylesheet";
+  mascotLink.href = chrome.runtime.getURL("mascot.css");
+  shadow.appendChild(mascotLink);
 
   // Theme: light / dark / system (Phase 2.6). Applied before first paint from
   // the default, then refreshed once storage answers.
@@ -317,6 +338,8 @@ ${shadowCss}`;
   let stopTheme = applyTheme("system");
   /** People tab visible only while people memory is on (Phase 5.1). */
   let peopleTabEnabled = false;
+  let stopPeopleWatch: (() => void) | null = null;
+  let peopleWatchGen = 0;
   void getUserSettings()
     .then((s) => {
       if (!host.isConnected) return;
@@ -338,11 +361,11 @@ ${shadowCss}`;
       <div class="cortex-head">
         <div class="cx-brand">
           <span class="cx-brand-link" aria-hidden="true">
-            <img class="cx-brand-mark" src="${iconUrl}" alt="" width="26" height="26" />
+            <img class="cx-brand-mark" src="${iconUrl}" alt="Bobbin mascot" width="40" height="40" />
           </span>
           <div class="cx-brand-text">
-            <span id="cortex-overlay-title" class="cx-brand-wordmark">Cortex</span>
-            <span id="cortex-overlay-tagline" class="cx-brand-tagline">Private library of pages you read on this device</span>
+            <span id="cortex-overlay-title" class="cx-brand-wordmark">Bobbin</span>
+            <span id="cortex-overlay-tagline" class="cx-brand-tagline">${PRODUCT_TAGLINE}</span>
           </div>
         </div>
         <div class="cortex-head-actions">
@@ -353,22 +376,26 @@ ${shadowCss}`;
             aria-label="Privacy and settings"
             title="Privacy and settings"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-              <circle cx="12" cy="12" r="3"/>
-            </svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.5 1.5M16.9 16.9l1.5 1.5M18.4 5.6 16.9 7.1M7.1 16.9 5.6 18.4"/></svg>
           </button>
-          <button type="button" class="cortex-icon-btn cortex-x" data-act="close" aria-label="Close">
+          ${
+            // Chrome's side panel has its own close button.
+            overlayShellMode
+              ? ""
+              : `<button type="button" class="cortex-icon-btn cortex-x" data-act="close" aria-label="Close">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M18 6 6 18"/>
               <path d="m6 6 12 12"/>
             </svg>
-          </button>
+          </button>`
+          }
         </div>
       </div>
       <p id="cortex-forget-status" class="cortex-forget-status" role="status" hidden></p>
       <div class="cortex-tabs" role="tablist"></div>
+      <div class="cortex-coach-slot" hidden></div>
       <div class="cortex-body"></div>
+      <div class="cortex-feedback-slot" hidden></div>
     </div>
   `;
   shadow.appendChild(shell);
@@ -401,12 +428,21 @@ ${shadowCss}`;
     });
   };
 
-  const coachMarks: CoachMarksController = installCoachMarks(panel);
-  const feedbackCard = installFeedbackCard(panel);
+  const coachSlot = shell.querySelector<HTMLElement>(".cortex-coach-slot")!;
+  const feedbackSlot = shell.querySelector<HTMLElement>(".cortex-feedback-slot")!;
+  coachSlot.hidden = true;
+  const coachMarks: CoachMarksController = installCoachMarks(panel, {
+    onVisit: (id) => {
+      if (id === "assistSync") return;
+      if (id === currentMode) return;
+      switchMode(id);
+    },
+  });
+  const feedbackCard = installFeedbackCard(feedbackSlot);
 
   function refreshCoachMarks(): void {
     const targets: { id: CoachTipId; anchor: HTMLElement }[] = [];
-    for (const id of ["search", "ask", "people", "agents"] as const) {
+    for (const id of ["search", "ask", "digest", "people", "agents"] as const) {
       const anchor = tabBar.querySelector<HTMLElement>(`[data-coach="${id}"]`);
       if (anchor) targets.push({ id, anchor });
     }
@@ -436,35 +472,13 @@ ${shadowCss}`;
     .querySelector<HTMLElement>(".cortex-head-actions")
     ?.insertBefore(forgetMenu.root, shell.querySelector("[data-cortex-open-options]"));
 
-  /** Collection that Search and Ask are scoped to (Phase 5.4); null = all pages. */
-  let activeCollectionId: number | null = null;
-
-  const makeScopeBar = (onChange?: () => void) => {
-    const bar = createScopeBar({
-      list: async () => {
-        const res = (await sendRuntimeMessage({ type: "CORTEX_COLLECTIONS_LIST" })) as
-          | { ok?: boolean; collections?: ScopeCollection[] }
-          | undefined;
-        return res?.ok ? res.collections ?? [] : [];
-      },
-      addPage: async (collectionId) =>
-        ((await sendRuntimeMessage({ type: "CORTEX_COLLECTION_ADD_PAGE", collectionId })) as
-          | { ok?: boolean; error?: string }
-          | undefined) ?? { ok: false },
-      onChange: (id) => {
-        activeCollectionId = id;
-        onChange?.();
-      },
-      showAddPage: !overlayShellMode,
-      announce: announcePolite,
-      initial: activeCollectionId,
-    });
-    void bar.refresh();
-    return bar;
-  };
-
-  let currentMode: OverlayMode = "search";
+  // The setup guide's "Attach to chat" link opens the side panel at Ask any assistant.
+  const openAttach = overlayShellMode && new URLSearchParams(location.search).get("open") === "attach";
+  let currentMode: OverlayMode = openAttach ? "agents" : "search";
+  if (openAttach) panel.setAttribute("data-mode", "agents");
   let currentConversationId: number | null = null;
+  let askDraft = "";
+  let askLoadGen = 0;
 
   let selectedHitIndex = -1;
   let searchTimer: number | undefined;
@@ -634,9 +648,10 @@ ${shadowCss}`;
   };
 
   shell.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).closest("[data-cortex-open-options]")) {
+    const optionsBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-cortex-open-options]");
+    if (optionsBtn) {
       e.preventDefault();
-      openExtensionOptionsFromOverlay();
+      openExtensionOptionsFromOverlay(optionsBtn.getAttribute("data-options-section") || undefined);
       return;
     }
     const t = (e.target as HTMLElement).closest("[data-act]");
@@ -669,7 +684,7 @@ ${shadowCss}`;
       btn.setAttribute("aria-label", `${tab.label} tab`);
       btn.setAttribute("role", "tab");
       btn.setAttribute("aria-selected", String(currentMode === tab.id));
-      if (tab.id === "search" || tab.id === "ask" || tab.id === "people" || tab.id === "agents") {
+      if (tab.id === "search" || tab.id === "ask" || tab.id === "digest" || tab.id === "people" || tab.id === "agents") {
         btn.setAttribute("data-coach", tab.id);
       }
       btn.addEventListener("click", () => {
@@ -683,6 +698,8 @@ ${shadowCss}`;
 
   let askSidebarListEl: HTMLElement | null = null;
   let askDrawerToggle: ChatDrawerToggle | null = null;
+  let askSidebarWidth = 240;
+  let askComposerHeight = 0;
   let askSidebarFilterEl: HTMLInputElement | null = null;
   let askUndoToastEl: HTMLElement | null = null;
   let sidebarConvs: ConversationSummary[] = [];
@@ -858,6 +875,7 @@ ${shadowCss}`;
         btn.append(title, when);
         btn.addEventListener("click", () => {
           currentConversationId = conv.id;
+          persistAsk();
           void loadChatConversation(conv.id, askMessagesEl!);
           renderChatSidebarList();
           askDrawerToggle?.close();
@@ -905,6 +923,7 @@ ${shadowCss}`;
     convId: number,
     messagesContainer: HTMLElement
   ): Promise<void> {
+    const gen = ++askLoadGen;
     const res = (await sendRuntimeMessage({
       type: "CORTEX_CHAT_LOAD",
       conversationId: convId,
@@ -915,6 +934,7 @@ ${shadowCss}`;
         }
       | undefined;
 
+    if (gen !== askLoadGen) return;
     if (!res?.ok || !res.messages) {
       renderChatThread(messagesContainer, []);
       return;
@@ -922,6 +942,51 @@ ${shadowCss}`;
 
     renderChatThread(messagesContainer, res.messages);
     scrollChatToBottom(messagesContainer, "smooth");
+    if (threadNeedsRetry(res.messages)) {
+      paintIncompleteAnswer(messagesContainer);
+      void waitForAssistant(convId, gen, messagesContainer);
+    }
+  }
+
+  function paintIncompleteAnswer(messagesContainer: HTMLElement): void {
+    if (messagesContainer.querySelector(".cortex-chat-incomplete")) return;
+    const box = document.createElement("div");
+    box.className = "cortex-chat-incomplete";
+    box.setAttribute("role", "status");
+    const p = document.createElement("p");
+    p.textContent = "This answer did not finish.";
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "cortex-turn-btn cortex-turn-btn--primary";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", () => {
+      const question =
+        messagesContainer.querySelector(".cortex-turn:last-child .cortex-msg--user")?.textContent ?? "";
+      if (question.trim()) void regenerateQuestion(question);
+    });
+    box.append(p, retry);
+    messagesContainer.appendChild(box);
+  }
+
+  async function waitForAssistant(
+    convId: number,
+    gen: number,
+    messagesContainer: HTMLElement
+  ): Promise<void> {
+    for (let i = 0; i < 10; i += 1) {
+      await new Promise((r) => window.setTimeout(r, 800));
+      if (gen !== askLoadGen || !messagesContainer.isConnected) return;
+      const res = (await sendRuntimeMessage({
+        type: "CORTEX_CHAT_LOAD",
+        conversationId: convId,
+      })) as { ok?: boolean; messages?: StoredChatMessage[] } | undefined;
+      if (gen !== askLoadGen || !messagesContainer.isConnected) return;
+      if (res?.ok && res.messages && !threadNeedsRetry(res.messages)) {
+        renderChatThread(messagesContainer, res.messages);
+        scrollChatToBottom(messagesContainer, "smooth");
+        return;
+      }
+    }
   }
 
   let askMessagesEl: HTMLElement | null = null;
@@ -936,6 +1001,7 @@ ${shadowCss}`;
   function openSearchWithQuery(query: string): void {
     const q = query.trim();
     if (!q) return;
+    if (currentMode === "ask") parkAskUi();
     currentMode = "search";
     panel.setAttribute("data-mode", "search");
     rebuildTabs();
@@ -949,7 +1015,25 @@ ${shadowCss}`;
     }, 0);
   }
 
+  function persistAsk(): void {
+    askDraft = askTextareaEl?.value ?? askDraft;
+    void writeAskResume({ conversationId: currentConversationId, draft: askDraft });
+  }
+
+  /** Keep the offscreen answer running. Only drop this page's listeners. */
+  function parkAskUi(): void {
+    persistAsk();
+    askLoadGen += 1;
+    if (chatController) {
+      chatController.dispose();
+      chatController = null;
+    }
+    activeStream = null;
+    askSendBtn = null;
+  }
+
   function switchMode(mode: OverlayMode): void {
+    if (currentMode === "ask" && mode !== "ask") parkAskUi();
     currentMode = mode;
     panel.setAttribute("data-mode", mode);
     rebuildTabs();
@@ -1063,9 +1147,9 @@ ${shadowCss}`;
       const markImg = document.createElement("img");
       markImg.className = "cortex-chat-mark-img";
       markImg.src = iconUrl;
-      markImg.alt = "";
-      markImg.width = 40;
-      markImg.height = 40;
+      markImg.alt = "Bobbin mascot";
+      markImg.width = 48;
+      markImg.height = 48;
       mark.append(markImg);
       const title = document.createElement("p");
       title.className = "cortex-chat-empty-title";
@@ -1133,6 +1217,7 @@ ${shadowCss}`;
     text.className = "cortex-typing-label";
     text.textContent = label;
     waiting.append(dots, text);
+    waiting.insertAdjacentHTML("afterbegin", mascotHtml("searching", 96));
     return waiting;
   }
 
@@ -1347,14 +1432,14 @@ ${shadowCss}`;
     } else if (resp.message) {
       msg = resp.message;
     } else {
-      msg = String(resp.error ?? "Could not start chat.");
+      msg = displayError(resp.error, "Could not start chat.");
     }
     const hint =
       resp.userAction ??
       (resp.error === ERROR_CODES.QUESTION_TOO_LONG ||
       resp.code === ERROR_CODES.QUESTION_TOO_LONG
         ? undefined
-        : "Try again or open Cortex settings.");
+        : "Try again or open Bobbin settings.");
     return { message: msg, userAction: hint, recoverable: true };
   }
 
@@ -1396,13 +1481,14 @@ ${shadowCss}`;
       callbacks: {
         onConversation: (id) => {
           currentConversationId = id;
+          persistAsk();
           void refreshChatSidebar();
         },
         onSources: (chunks) => {
           if (!activeStream) return;
           activeStream.citedChunks = chunks as ChunkWithDoc[];
           setWaitingLabel(
-            chunks.length ? "Reading what it found" : "Searching your library"
+            chunks.length ? "Reviewing matching pages" : "Searching your library"
           );
         },
         onToken: (text) => {
@@ -1539,7 +1625,7 @@ ${shadowCss}`;
       citedChunks: [],
       waiting,
     };
-    ctl.submit(question, currentConversationId, { collectionId: activeCollectionId });
+    ctl.submit(question, currentConversationId);
   }
 
   function digestRangeLabel(range: DigestRange): string {
@@ -1608,11 +1694,16 @@ ${shadowCss}`;
       const li = document.createElement("li");
       li.className = "cortex-digest-site";
 
+      const head = document.createElement("div");
+      head.className = "cortex-digest-site-head";
       const lead = document.createElement("span");
       lead.className = "cortex-digest-site-lead";
-      const pages = `${group.count} ${group.count === 1 ? "page" : "pages"}`;
-      lead.textContent = `On ${group.domain} you read ${pages}: `;
-      li.appendChild(lead);
+      lead.textContent = group.domain;
+      const count = document.createElement("span");
+      count.className = "cortex-digest-site-count";
+      count.textContent = `${group.count} ${group.count === 1 ? "page" : "pages"}`;
+      head.append(lead, count);
+      li.appendChild(head);
 
       const pool = (byDomain.get(group.domain) ?? group.sourceIndexes.map((n) => sources.get(n))).filter(
         (x): x is NonNullable<typeof x> => !!x
@@ -1651,7 +1742,10 @@ ${shadowCss}`;
     if (digest.pageCount === 0) {
       const empty = document.createElement("div");
       empty.className = "cortex-digest-empty-card";
-      empty.innerHTML = `<p class="cortex-digest-empty-title">${esc(emptyDigestTitle(digestRangeLabel(digest.range as DigestRange)))}</p><p class="cortex-digest-empty-hint">${esc(digest.narrative)}</p>`;
+      empty.innerHTML = `${mascotHtml("sleepy", 96)}<p class="cortex-digest-empty-title">The digest fills as you read.</p><p class="cortex-digest-empty-hint">Pages you open show up here after Bobbin indexes them.</p><button type="button" class="cx-m-action">Show last 7 days</button>`;
+      empty.querySelector("button")?.addEventListener("click", () => {
+        bodyEl.querySelector<HTMLButtonElement>('[data-digest-range="last_7_days"]')?.click();
+      });
       wrapper.appendChild(empty);
       return wrapper;
     }
@@ -1672,7 +1766,7 @@ ${shadowCss}`;
 
     const hero = document.createElement("section");
     hero.className = "cortex-digest-hero";
-    const heroLabel = document.createElement("p");
+    const heroLabel = document.createElement("h2");
     heroLabel.className = "cortex-digest-section-label";
     heroLabel.textContent = "Your reading focus";
     const narrative = document.createElement("p");
@@ -1879,25 +1973,86 @@ ${shadowCss}`;
   function renderMode(): void {
     window.clearTimeout(searchTimer);
     selectedHitIndex = -1;
+    stopPeopleWatch?.();
+    stopPeopleWatch = null;
+    peopleWatchGen += 1;
     bodyEl.innerHTML = "";
 
     if (currentMode === "search") {
       bodyEl.innerHTML = `
-        <input type="search" class="cortex-input cortex-search-input" placeholder="Search your memory: topics, sites, phrases" autocomplete="off" aria-label="Search your saved pages" />
-        <div class="cortex-hint" aria-label="How to open Cortex">
-          <span class="cortex-hint-main">Local-only recall</span>
-          <span class="cortex-hint-sep" aria-hidden="true">·</span>
-          <span class="cortex-hint-nav">Double-tap Shift to open or close</span>
-        </div>
-        <div class="cortex-results" role="region" aria-label="Search results"></div>`;
+        <div class="cortex-search-layout">
+          <div class="cortex-search-mascot">${mascotHtml("idle", 96)}</div>
+          <div class="cortex-search-field">
+            <input type="search" class="cortex-input cortex-search-input" placeholder="Search your memory: topics, sites, phrases" autocomplete="off" aria-label="Search your saved pages" />
+            <button type="button" class="cortex-search-filters" aria-expanded="false" aria-label="Search filters" title="Exact phrase, site, and dates">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2 3.5h12v1.2H2zm2.2 4h7.6v1.2H4.2zM6.2 11.5h3.6V12.7H6.2z"/></svg>
+            </button>
+          </div>
+          <div class="cortex-hint" aria-label="How to open Bobbin">
+            <span class="cortex-hint-main">Local-only recall</span>
+            <span class="cortex-hint-sep" aria-hidden="true">·</span>
+            <span class="cortex-hint-nav">Double-tap Shift to open or close</span>
+          </div>
+          <div class="cortex-results" role="region" aria-label="Search results">
+            <form class="cortex-search-advanced" hidden novalidate>
+              <div class="cx-adv-wide cx-adv-when" role="group" aria-label="When you visited">
+                ${DATE_PRESETS.map((p) => `<button type="button" class="cortex-digest-range-btn cx-adv-chip" data-range="${p.id}" aria-pressed="false">${p.label}</button>`).join("")}
+              </div>
+              <label>From<input type="date" class="cx-adv-from" /></label>
+              <label>To<input type="date" class="cx-adv-to" /></label>
+              <p class="cx-adv-wide cx-adv-error" role="alert" hidden></p>
+              <label class="cx-adv-wide">Exact phrase<input type="search" class="cx-adv-exact" placeholder="Words in this order" autocomplete="off" /></label>
+              <label class="cx-adv-wide">Site<input type="search" class="cx-adv-site" placeholder="linkedin.com" autocomplete="off" /></label>
+              <div class="cx-adv-wide cx-adv-actions">
+                <button type="button" class="cx-adv-clear">Clear</button>
+                <button type="submit" class="cx-adv-go">Search</button>
+              </div>
+            </form>
+            <div class="cortex-results-body"></div>
+          </div>
+        </div>`;
 
       const input = bodyEl.querySelector<HTMLInputElement>(".cortex-search-input")!;
-      const results = bodyEl.querySelector<HTMLElement>(".cortex-results")!;
-      const searchScope = makeScopeBar(() => {
-        const q = input.value.trim();
-        if (q) void runSearch(q);
+      const results = bodyEl.querySelector<HTMLElement>(".cortex-results-body")!;
+      const filterBtn = bodyEl.querySelector<HTMLButtonElement>(".cortex-search-filters")!;
+      const advanced = bodyEl.querySelector<HTMLFormElement>(".cortex-search-advanced")!;
+      const exactInput = advanced.querySelector<HTMLInputElement>(".cx-adv-exact")!;
+      const siteInput = advanced.querySelector<HTMLInputElement>(".cx-adv-site")!;
+      const fromInput = advanced.querySelector<HTMLInputElement>(".cx-adv-from")!;
+      const toInput = advanced.querySelector<HTMLInputElement>(".cx-adv-to")!;
+      const rangeError = advanced.querySelector<HTMLElement>(".cx-adv-error")!;
+      const chips = [...advanced.querySelectorAll<HTMLButtonElement>(".cx-adv-chip")];
+      const hasFilters = (): boolean => Boolean(exactInput.value.trim() || siteInput.value.trim() || fromInput.value || toInput.value);
+      filterBtn.addEventListener("click", () => {
+        const open = advanced.hidden;
+        advanced.hidden = !open;
+        filterBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        filterBtn.classList.toggle("is-on", open || hasFilters());
+        if (open) (chips.find((c) => c.getAttribute("aria-pressed") === "true") ?? chips[0])?.focus();
       });
-      bodyEl.insertBefore(searchScope.root, results);
+      /** Marks the matching preset, caps both fields at today, and flags a reversed range. */
+      const syncDates = (): boolean => {
+        const today = dayValue(new Date());
+        fromInput.max = toInput.value && toInput.value < today ? toInput.value : today;
+        toInput.max = today;
+        toInput.min = fromInput.value;
+        const preset = matchPreset(fromInput.value, toInput.value);
+        for (const c of chips) {
+          const on = c.dataset.range === preset;
+          c.setAttribute("aria-pressed", String(on));
+          c.classList.toggle("cortex-digest-range-btn--active", on);
+        }
+        const check = rangeFromDays(fromInput.value, toInput.value);
+        rangeError.hidden = check.ok;
+        rangeError.textContent = check.ok ? "" : check.error;
+        for (const el of [fromInput, toInput]) el.toggleAttribute("aria-invalid", !check.ok);
+        return check.ok;
+      };
+      syncDates();
+      const searchMascot = bodyEl.querySelector<HTMLElement>(".cortex-search-mascot")!;
+      const paintSearchMascot = (state: string): void => {
+        searchMascot.innerHTML = mascotHtml(state, 96);
+      };
 
       results.innerHTML = `<div class="cortex-results-idle cortex-muted" role="status">Type to search your saved pages. Titles and passages stay local.</div>`;
 
@@ -1908,6 +2063,7 @@ ${shadowCss}`;
 
       const runSearch = async (q: string): Promise<void> => {
         selectedHitIndex = -1;
+        paintSearchMascot("searching");
         results.innerHTML = `
           <div class="cortex-loading" aria-busy="true">
             <div class="cortex-skel-row"></div>
@@ -1932,12 +2088,19 @@ ${shadowCss}`;
               scoreBreakdown: string;
               kind?: ChunkKind;
               locator?: ChunkLocator;
+              readMs?: number;
             }[];
           }>((resolve, reject) => {
+            const exact = exactInput.value.trim();
+            const site = siteInput.value.trim();
+            const dates = rangeFromDays(fromInput.value, toInput.value);
+            const range = dates.ok ? dates.range : null;
             chrome.runtime.sendMessage({
               type: "CORTEX_SEARCH",
               query: q,
-              ...(activeCollectionId != null ? { collectionId: activeCollectionId } : {}),
+              ...(exact ? { exact } : {}),
+              ...(site ? { site } : {}),
+              ...(range ? { from: range.from, to: range.to } : {}),
             }, (response) => {
               const err = chrome.runtime.lastError;
               if (err) {
@@ -1958,15 +2121,8 @@ ${shadowCss}`;
           }
 
           if (!res.hits?.length) {
-            const evidenceNote = res.evidence
-              ? `<p class="cortex-evidence-note">${esc(res.evidence)}</p>`
-              : "";
-            const tips = `
-              <div class="cortex-empty-title">${EMPTY_SEARCH_TITLE}</div>
-              <ul class="cortex-empty-tips">
-                ${EMPTY_SEARCH_TIPS.map((t) => `<li>${esc(t)}</li>`).join("")}
-              </ul>`;
-            results.innerHTML = `<div class="cortex-empty cortex-muted">${evidenceNote}${tips}</div>`;
+            paintSearchMascot("lost");
+            results.innerHTML = `<div class="cortex-empty" role="status"><p class="cortex-empty-bubble">${EMPTY_SEARCH_TITLE}</p><p class="cortex-empty-tip">${esc(res.evidence || EMPTY_SEARCH_TIPS[0])}</p></div>`;
             announcePolite("No matching pages found.");
             return;
           }
@@ -1997,12 +2153,13 @@ ${shadowCss}`;
 
               const favHtml = siteBadgeHtml(hostName, "cortex-hit-favicon");
 
-              const extra = h.matchReason
-                ? `<div class="cortex-hit-extra">${esc(h.matchReason)}</div>`
-                : "";
+              const snippet = h.snippet.replace(/\s+/g, " ").trim();
+              const clipped = snippet.length > 180 ? `${snippet.slice(0, 177)}…` : snippet;
+              const why = matchSubtitle(tier.label, h.matchReason);
 
               // Per-kind target and detail (release 1.2.0): video moment, PDF page, table rows.
               const kindDetail = citationDetail(h);
+              const read = formatReadingTime(h.readMs);
               return `
 <div class="cortex-hit-card" role="listitem">
   <a class="cortex-hit-link" href="${esc(citationHref(h, h.url) ?? "#")}" target="_blank" rel="noreferrer">
@@ -2010,23 +2167,28 @@ ${shadowCss}`;
     <span class="cortex-hit-main-col">
       <span class="cortex-hit-title">${esc(h.title)}</span>
       <span class="cortex-hit-host">${esc(hostName)}${kindDetail ? ` <span class="cortex-hit-kind">${esc(kindDetail)}</span>` : ""}</span>
-      <span class="cortex-hit-snippet">${esc(h.snippet)}</span>
+      <span class="cortex-hit-snippet">${esc(clipped)}</span>
     </span>
   </a>
   <div class="cortex-hit-footer">
     <time class="cortex-hit-time" datetime="${new Date(h.visitedAt).toISOString()}">${esc(when)}</time>
+    ${read ? `<span class="cortex-hit-read">${esc(read)}</span>` : ""}
     <span class="cortex-confidence-badge ${tier.cssClass}" title="${esc(titleAttr)}">${esc(tier.label)}</span>
   </div>
-  ${extra}
   <details class="cortex-hit-details">
     <summary class="cortex-hit-details-sum">Why this matched</summary>
-    <p class="cortex-hit-details-body">${esc(h.scoreBreakdown)}</p>
+    <p class="cortex-hit-details-body">${esc(why)}</p>
   </details>
 </div>`;
             })
             .join("");
 
-          results.innerHTML = `${evidenceBlock}<div class="cortex-hit-list" role="list" aria-label="Matching pages">${rows}</div>`;
+          paintSearchMascot("found");
+          const rangeText = rangeWords(fromInput.value, toInput.value);
+          const head = q
+            ? `In your library${rangeText ? `, visited ${rangeText}` : ""}`
+            : `${res.hits.length} page${res.hits.length === 1 ? "" : "s"} visited${rangeText ? ` ${rangeText}` : ""}, newest first`;
+          results.innerHTML = `${evidenceBlock}<div class="cortex-results-head">${esc(head)}</div><div class="cortex-hit-list" role="list" aria-label="Matching pages">${rows}</div>`;
           paintSiteBadges(results);
 
           announcePolite(
@@ -2048,7 +2210,7 @@ ${shadowCss}`;
               : "Could not reach the extension background.";
           const invalidated = /Extension context invalidated/i.test(raw);
           const msg = invalidated
-            ? "Cortex was reloaded while this tab stayed open."
+            ? "Bobbin was reloaded while this tab stayed open."
             : raw;
           const hint = invalidated
             ? "Refresh the page (F5 or reload), then open search again."
@@ -2059,19 +2221,49 @@ ${shadowCss}`;
             '<br/><span style="opacity:0.85">' +
             esc(hint) +
             "</span></div>";
+          paintSearchMascot("idle");
           announcePolite("Search error.");
         }
       };
 
-      input.addEventListener("input", () => {
+      /** An empty query with filters lists the matching pages by visit time. */
+      const queueSearch = (delayMs = 180): void => {
         window.clearTimeout(searchTimer);
-        const q = input.value.trim();
-        if (!q) {
-          results.innerHTML = `<div class="cortex-results-idle cortex-muted" role="status">Type to search your saved pages. Titles and passages stay local.</div>`;
+        filterBtn.classList.toggle("is-on", !advanced.hidden || hasFilters());
+        if (!syncDates()) {
+          paintSearchMascot("lost");
+          results.innerHTML = "";
           selectedHitIndex = -1;
           return;
         }
-        searchTimer = window.setTimeout(() => void runSearch(q), 180);
+        const q = input.value.trim();
+        if (!q && !hasFilters()) {
+          paintSearchMascot("idle");
+          results.innerHTML = `<div class="cortex-results-idle cortex-muted" role="status">Type to search your saved pages, or pick a day in filters. Titles and passages stay local.</div>`;
+          selectedHitIndex = -1;
+          return;
+        }
+        searchTimer = window.setTimeout(() => void runSearch(q), delayMs);
+      };
+      input.addEventListener("input", () => queueSearch());
+      for (const chip of chips) {
+        chip.addEventListener("click", () => {
+          const days = presetDays((chip.dataset.range ?? "any") as DatePreset);
+          fromInput.value = days.from;
+          toInput.value = days.to;
+          queueSearch(0);
+        });
+      }
+      // Dates check as they change; text filters wait for Search or Enter.
+      for (const el of [fromInput, toInput]) el.addEventListener("change", () => void syncDates());
+      advanced.addEventListener("submit", (e) => {
+        e.preventDefault();
+        queueSearch(0);
+      });
+      advanced.querySelector(".cx-adv-clear")!.addEventListener("click", () => {
+        advanced.reset();
+        queueSearch(0);
+        chips[0]?.focus();
       });
       return;
     }
@@ -2079,6 +2271,10 @@ ${shadowCss}`;
     if (currentMode === "ask") {
       const wrap = document.createElement("div");
       wrap.className = "cortex-ask-layout";
+      wrap.style.setProperty("--cx-sidebar-w", `${askSidebarWidth}px`);
+      if (askComposerHeight > 0) {
+        wrap.style.setProperty("--cx-composer-h", `${askComposerHeight}px`);
+      }
 
       const sidebar = document.createElement("aside");
       sidebar.className = "cortex-chat-sidebar";
@@ -2120,6 +2316,9 @@ ${shadowCss}`;
 
       newBtn.addEventListener("click", () => {
         currentConversationId = null;
+        askDraft = "";
+        if (askTextareaEl) askTextareaEl.value = "";
+        persistAsk();
         renderChatThread(messagesContainer, []);
         void refreshChatSidebar();
         askDrawerToggle?.close();
@@ -2128,6 +2327,51 @@ ${shadowCss}`;
       sidebar.appendChild(newBtn);
       sidebar.appendChild(filterWrap);
       sidebar.appendChild(sidebarList);
+
+      const sideGrip = document.createElement("div");
+      sideGrip.className = "cortex-chat-resizer";
+      sideGrip.setAttribute("role", "separator");
+      sideGrip.setAttribute("aria-orientation", "vertical");
+      sideGrip.setAttribute("aria-label", "Resize the chat list");
+      sideGrip.tabIndex = 0;
+      const dragSize = (
+        grip: HTMLElement,
+        axis: "x" | "y",
+        read: () => number,
+        write: (n: number) => void
+      ): void => {
+        grip.addEventListener("pointerdown", (ev) => {
+          if (axis === "x" && panel.getAttribute("data-layout") !== "wide") return;
+          ev.preventDefault();
+          grip.setPointerCapture(ev.pointerId);
+          const start = axis === "x" ? ev.clientX : ev.clientY;
+          const origin = read();
+          const move = (e: PointerEvent): void => {
+            const delta = (axis === "x" ? e.clientX : e.clientY) - start;
+            write(axis === "x" ? origin + delta : origin - delta);
+          };
+          const end = (e: PointerEvent): void => {
+            grip.removeEventListener("pointermove", move);
+            grip.removeEventListener("pointerup", end);
+            try {
+              grip.releasePointerCapture(e.pointerId);
+            } catch {
+              /* already released */
+            }
+          };
+          grip.addEventListener("pointermove", move);
+          grip.addEventListener("pointerup", end);
+        });
+      };
+      dragSize(
+        sideGrip,
+        "x",
+        () => sidebar.getBoundingClientRect().width || askSidebarWidth,
+        (n) => {
+          askSidebarWidth = Math.min(420, Math.max(180, n));
+          wrap.style.setProperty("--cx-sidebar-w", `${askSidebarWidth}px`);
+        }
+      );
 
       const main = document.createElement("div");
       main.className = "cortex-chat-main";
@@ -2154,6 +2398,14 @@ ${shadowCss}`;
       ta.maxLength = CHAT_LIMITS.MAX_QUESTION_CHARS;
       ta.setAttribute("aria-label", "Your question");
       askTextareaEl = ta;
+      ta.addEventListener("input", () => {
+        askDraft = ta.value;
+      });
+      ta.addEventListener(
+        "focus",
+        () => chrome.runtime.sendMessage({ type: "CORTEX_CHAT_WARM" }, () => void chrome.runtime.lastError),
+        { once: true }
+      );
       inputInner.addEventListener("mousedown", (e) => {
         if (e.target === ta) return;
         e.preventDefault();
@@ -2176,10 +2428,26 @@ ${shadowCss}`;
 
       composer.appendChild(inputInner);
       composer.appendChild(sendRow);
-      main.appendChild(makeScopeBar().root);
       main.appendChild(messagesContainer);
+      const composerGrip = document.createElement("div");
+      composerGrip.className = "cortex-composer-resizer";
+      composerGrip.setAttribute("role", "separator");
+      composerGrip.setAttribute("aria-orientation", "horizontal");
+      composerGrip.setAttribute("aria-label", "Resize the question box");
+      composerGrip.tabIndex = 0;
+      dragSize(
+        composerGrip,
+        "y",
+        () => ta.getBoundingClientRect().height || askComposerHeight || 44,
+        (n) => {
+          askComposerHeight = Math.min(320, Math.max(44, n));
+          wrap.style.setProperty("--cx-composer-h", `${askComposerHeight}px`);
+        }
+      );
+      main.appendChild(composerGrip);
       main.appendChild(composer);
       wrap.appendChild(sidebar);
+      wrap.appendChild(sideGrip);
       wrap.appendChild(main);
 
       const submitAsk = (): void => {
@@ -2188,6 +2456,8 @@ ${shadowCss}`;
         if (!question) return;
         messagesContainer.querySelector(".cortex-chat-empty")?.remove();
         ta.value = "";
+        askDraft = "";
+        persistAsk();
         handleAskSubmit(question, messagesContainer);
       };
 
@@ -2209,9 +2479,22 @@ ${shadowCss}`;
       bodyEl.appendChild(wrap);
       renderChatThread(messagesContainer, []);
       void refreshChatSidebar();
-      if (currentConversationId != null) {
-        void loadChatConversation(currentConversationId, messagesContainer);
-      }
+      void (async () => {
+        const saved = await readAskResume();
+        if (currentConversationId == null && saved.conversationId != null) {
+          currentConversationId = saved.conversationId;
+        }
+        if (!ta.value && saved.draft) {
+          askDraft = saved.draft;
+          ta.value = saved.draft;
+        } else if (askDraft && !ta.value) {
+          ta.value = askDraft;
+        }
+        if (currentConversationId != null) {
+          await loadChatConversation(currentConversationId, messagesContainer);
+          renderChatSidebarList();
+        }
+      })();
       requestAnimationFrame(() => focusAskInput(ta));
       return;
     }
@@ -2220,6 +2503,7 @@ ${shadowCss}`;
       const host = document.createElement("div");
       host.className = "cortex-people-host";
       bodyEl.appendChild(host);
+      const watchGen = peopleWatchGen;
       void renderPeopleView(host, {
         list: async (q) => {
           const res = (await sendRuntimeMessage({ type: "CORTEX_PEOPLE_LIST", q })) as
@@ -2234,25 +2518,28 @@ ${shadowCss}`;
           return res?.ok === true;
         },
         announce: announcePolite,
-      }).then(() => {
+      }).then((stop) => {
+        if (watchGen !== peopleWatchGen) {
+          stop();
+          return;
+        }
+        stopPeopleWatch = stop;
         host.querySelector<HTMLInputElement>(".cortex-people-filter")?.focus({ preventScroll: true });
       });
       return;
     }
 
     if (currentMode === "agents") {
-      const host = document.createElement("div");
-      host.className = "cortex-agents-host";
-      bodyEl.appendChild(host);
-      renderAgentsView(host, {
-        openAssistSyncSettings: () => openExtensionOptionsFromOverlay("cx-sec-assistant"),
-        announce: announcePolite,
-      });
-      requestAnimationFrame(() => {
-        host
-          .querySelector<HTMLButtonElement>("[data-cortex-open-assist-sync]")
-          ?.focus({ preventScroll: true });
-      });
+      // An extension frame: Start setup needs an extension click to open the side panel.
+      const agentsHost = document.createElement("div");
+      agentsHost.className = "cortex-agents-host";
+      const frame = document.createElement("iframe");
+      frame.className = "cortex-agents-frame";
+      frame.title = "Connect AI Agents";
+      const theme = host.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      frame.src = chrome.runtime.getURL(`connect-frame.html?theme=${theme}${openAttach ? "&focus=attach" : ""}`);
+      agentsHost.appendChild(frame);
+      bodyEl.appendChild(agentsHost);
       return;
     }
 
@@ -2299,10 +2586,7 @@ ${shadowCss}`;
     flushPendingDeletes();
     hideUndoToast();
     stopTheme();
-    if (chatController?.isStreaming) chatController.abort();
-    chatController?.dispose();
-    chatController = null;
-    activeStream = null;
+    parkAskUi();
     askSendBtn = null;
     digestResultSink = null;
     stopLayoutObserver();

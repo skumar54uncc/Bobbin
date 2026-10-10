@@ -1,4 +1,13 @@
-import { headerFormatRequests, SHEET_TABS, type SheetTabName, type Workbook } from "./sheet";
+import * as v from "valibot";
+import {
+  LEGACY_DRIVE_ARCHIVE_NAME,
+  LEGACY_DRIVE_JSON_BACKUP_NAME,
+  LEGACY_MEMORY_NAME,
+  MEMORY_NAME,
+  renamedPagesDoc,
+} from "../shared/product-name";
+import { addSheetRequest, updateCellsRequest } from "./flush-plan";
+import { headerFormatRequests, isProtectedDescription, MANAGED_LINE, protectTabRequest, SHEET_TABS, TAB_HEADERS } from "./sheet";
 
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
@@ -6,23 +15,96 @@ export interface DriveFileInfo {
   id: string;
   name: string;
   trashed: boolean;
+  parents?: string[];
 }
 
-export const DRIVE_JSON_BACKUP_NAME = "Cortex Memory Backup.json";
+/** Name of the Drive JSON backup that older builds wrote. Kept so the cleanup can find it. */
+export const DRIVE_JSON_BACKUP_NAME = LEGACY_DRIVE_JSON_BACKUP_NAME;
+/** Monthly archive spreadsheets older builds wrote: "Cortex Memory Archive 2026-09". */
+export const DRIVE_ARCHIVE_NAME = LEGACY_DRIVE_ARCHIVE_NAME;
+const MEMORY_SHEET_NAME = MEMORY_NAME;
+const MEMORY_FOLDER_NAME = MEMORY_NAME;
+export const SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
+export const FOLDER_MIME = "application/vnd.google-apps.folder";
+export const DOCUMENT_MIME = "application/vnd.google-apps.document";
 
+/** Which Google call failed, for the flush log. */
+export type GoogleCall =
+  | "search"
+  | "folder create"
+  | "sheet create"
+  | "batchUpdate"
+  | "read"
+  | "file check"
+  | "trash"
+  | "restore"
+  | "doc create"
+  | "doc update"
+  | "rename";
+
+/** What Google said about a failed call. Shown under Last error and kept in the flush log as error_detail. */
+export interface GoogleErrorDetail {
+  call: GoogleCall;
+  http_status: number;
+  /** Google's error.status, for example PERMISSION_DENIED. Empty when the reply had none. */
+  status: string;
+  /** Google's error.message. Empty when the reply had none. */
+  message: string;
+}
+
+/** A Google call that returned an error. The message stays `google_<http status>` so `googleStatus` reads it. */
+export class GoogleCallError extends Error {
+  constructor(readonly detail: GoogleErrorDetail) {
+    super(`google_${detail.http_status}`);
+  }
+}
+
+export function googleErrorDetail(error: unknown): GoogleErrorDetail | null {
+  return error instanceof GoogleCallError ? error.detail : null;
+}
+
+/**
+ * Every Google call Cortex makes. Sheets reads are `getSheetInfo` and `readColumns`;
+ * the only Sheets write is `batchUpdate`. Files, the spreadsheet included, are created through Drive.
+ */
 export interface DriveApi {
-  createFolder(name: string): Promise<string>;
+  createFolder(name: string, parentId?: string): Promise<string>;
+  /**
+   * One Drive multipart upload: a new file in `parentId` with the HTML as its content,
+   * converted to a Google Doc.
+   */
+  createDoc(name: string, parentId: string, html: string): Promise<string>;
+  /**
+   * One Drive media upload replacing the whole content of the Doc with the HTML.
+   * Null when the file is gone. `trashed` is Drive's own flag after the upload.
+   */
+  updateDoc(id: string, html: string): Promise<{ trashed: boolean } | null>;
+  /** Drive files.create with the spreadsheet mimeType. The new file has one default tab. */
   createSpreadsheet(name: string, parentId: string): Promise<string>;
   getFile(id: string): Promise<DriveFileInfo | null>;
+  /** files.update metadata: rename in place. Never creates a second file. */
+  renameFile(id: string, name: string): Promise<void>;
   trashFile(id: string): Promise<void>;
-  writeTab(fileId: string, tab: SheetTabName, rows: string[][]): Promise<void>;
-  appendTab(fileId: string, tab: SheetTabName, rows: string[][]): Promise<void>;
-  formatHeaders(fileId: string): Promise<void>;
-  readTab(fileId: string, tab: SheetTabName): Promise<string[][]>;
-  updateRow(fileId: string, tab: SheetTabName, rowIndex: number, values: string[]): Promise<void>;
-  deleteRows(fileId: string, tab: SheetTabName, ranges: RowRange[]): Promise<void>;
-  /** Create or replace the JSON backup file in the Cortex Memory folder. */
-  upsertJsonFile(name: string, parentId: string, body: string, existingId: string | null): Promise<string>;
+  untrashFile(id: string): Promise<void>;
+  /**
+   * One files.list. With the drive.file scope Google returns only files this
+   * app created or the user opened with it, so this never sees other files.
+   */
+  listFiles(query: string, orderBy?: "createdTime"): Promise<DriveFileInfo[]>;
+  /** One spreadsheets.batchUpdate. Google applies it atomically and counts it as one write. */
+  batchUpdate(fileId: string, requests: object[]): Promise<void>;
+  /** One spreadsheets.get for tab titles, ids, and which tabs carry Cortex's edit warning. One read. */
+  getSheetInfo(fileId: string): Promise<SheetInfo>;
+  /** One values.batchGet. One read. Returns one row list per range, in order. */
+  readColumns(fileId: string, ranges: string[]): Promise<string[][][]>;
+}
+
+export interface SheetInfo {
+  sheetIds: Record<string, number>;
+  /** Tabs that already have the warning-only protection Cortex adds. */
+  protectedIds: number[];
+  /** Every tab in sheet order. */
+  tabs: { sheetId: number; title: string }[];
 }
 
 export interface RowRange {
@@ -47,73 +129,170 @@ export async function inspectMemory(api: DriveApi, ids: StoredMemoryIds): Promis
   return "ready";
 }
 
-/** Explicit create. Used on first enable and on re-enable after a delete. Not used by a timer. */
-export async function createMemoryFile(
-  api: DriveApi,
-  title: string,
-  folderName = "Cortex Memory"
-): Promise<StoredMemoryIds> {
-  const folderId = await api.createFolder(folderName);
+/** About rows written at setup, before the first flush replaces them with coverage and counts. */
+export const SETUP_ABOUT: string[][] = [[MEMORY_NAME], [MANAGED_LINE]];
+
+/**
+ * The one batchUpdate that turns a new Drive spreadsheet into Cortex Memory: the
+ * default tab becomes About, the six data tabs are added, then headers, About,
+ * bold frozen header rows, and the edit warning on every tab.
+ */
+export function setupRequests(defaultSheetId: number, about: string[][] = SETUP_ABOUT): object[] {
+  const ids: number[] = [defaultSheetId];
+  for (let next = 0; ids.length < SHEET_TABS.length; next++) if (next !== defaultSheetId) ids.push(next);
+  const requests: object[] = [
+    {
+      updateSheetProperties: {
+        properties: { sheetId: defaultSheetId, title: "About", index: 0 },
+        fields: "title,index",
+      },
+    },
+  ];
+  SHEET_TABS.forEach((tab, index) => {
+    if (tab !== "About") requests.push(addSheetRequest(ids[index]!, tab, index));
+  });
+  SHEET_TABS.forEach((tab, index) => {
+    requests.push(updateCellsRequest(ids[index]!, 0, tab === "About" ? about : [[...TAB_HEADERS[tab]]]));
+  });
+  requests.push(...headerFormatRequests(ids), ...ids.map((id) => protectTabRequest(id)));
+  return requests;
+}
+
+/**
+ * Sets up a spreadsheet that has no About tab yet: one read for the default tab's
+ * id, then one batchUpdate. A sheet that already has About is left alone.
+ */
+export async function setupMemorySheet(api: DriveApi, fileId: string, about?: string[][]): Promise<boolean> {
+  const info = await api.getSheetInfo(fileId);
+  if (info.sheetIds.About != null) return false;
+  const first = info.tabs[0];
+  // Only a fresh file (its single default tab) is set up here. Missing tabs on any other file are re-added by the flush.
+  if (!first || info.tabs.length !== 1 || (SHEET_TABS as readonly string[]).includes(first.title)) return false;
+  await api.batchUpdate(fileId, setupRequests(first.sheetId, about));
+  return true;
+}
+
+/** The oldest memory folder this app made, outside the trash. Prefers Bobbin Memory, then Cortex Memory. */
+export async function findMemoryFolder(api: DriveApi): Promise<string | null> {
+  const folders = await api.listFiles(
+    `(name = ${q(MEMORY_FOLDER_NAME)} or name = ${q(LEGACY_MEMORY_NAME)}) and mimeType = ${q(FOLDER_MIME)} and trashed = false`,
+    "createdTime"
+  );
+  return folders.find((f) => f.name === MEMORY_FOLDER_NAME)?.id ?? folders[0]?.id ?? null;
+}
+
+/**
+ * Explicit create. Used on first enable and on re-enable after a delete. Not used by a timer.
+ * Reuses a Cortex Memory folder left by an earlier attempt, so there is never a second folder.
+ */
+export async function createMemoryFile(api: DriveApi, title: string, about?: string[][]): Promise<StoredMemoryIds> {
+  const existingFolder = await findMemoryFolder(api);
+  const folderId = existingFolder ?? (await api.createFolder(MEMORY_FOLDER_NAME));
+  if (existingFolder) await renameIfLegacy(api, folderId, MEMORY_FOLDER_NAME, LEGACY_MEMORY_NAME);
   const fileId = await api.createSpreadsheet(title, folderId);
-  await api.formatHeaders(fileId);
+  await setupMemorySheet(api, fileId, about);
   return { folderId, fileId };
 }
 
-export async function writeWorkbook(api: DriveApi, fileId: string, workbook: Workbook): Promise<void> {
-  for (const tab of workbook.tabs) {
-    await api.writeTab(fileId, tab.title, tab.rows);
-  }
-}
-
-/**
- * Append data rows whose id is not already in `synced`.
- * Header rows are not appended. The caller stores the returned keys.
- */
-export function rowsToAppend(tab: SheetTabName, rows: string[][], synced: ReadonlySet<string>): string[][] {
-  const header = tab === "Daily" ? "date" : "id";
-  const fresh: string[][] = [];
-  for (const row of rows) {
-    const id = row[0] ?? "";
-    if (!id || id === header) continue;
-    if (synced.has(syncedKey(tab, id))) continue;
-    fresh.push(row);
-  }
-  return fresh;
-}
-
-export function syncedKey(tab: SheetTabName, id: string): string {
+export function syncedKey(tab: string, id: string): string {
   return `${tab}:${id}`;
 }
 
-export async function appendNewRows(
-  api: DriveApi,
-  fileId: string,
-  tab: SheetTabName,
-  rows: string[][],
-  synced: ReadonlySet<string>
-): Promise<string[]> {
-  const fresh = rowsToAppend(tab, rows, synced);
-  if (fresh.length) await api.appendTab(fileId, tab, fresh);
-  return fresh.map((row) => syncedKey(tab, row[0] ?? ""));
+/** Quotes a value for a Drive query string. */
+function q(value: string): string {
+  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
-/** User asked to turn sync on again. Creates a new folder when the old one is gone or trashed. */
-export async function reenableMemory(api: DriveApi, previous: StoredMemoryIds): Promise<StoredMemoryIds> {
-  const status = await inspectMemory(api, previous);
-  if (status === "ready" && previous.folderId && previous.fileId) return previous;
-  return createMemoryFile(api, "Cortex Memory");
+/** The Bobbin or Cortex Memory sheet this app made earlier, if Drive still has it outside the trash. */
+export async function findMemoryFile(api: DriveApi): Promise<StoredMemoryIds | null> {
+  const files = await api.listFiles(
+    `(name = ${q(MEMORY_SHEET_NAME)} or name = ${q(LEGACY_MEMORY_NAME)}) and mimeType = ${q(SPREADSHEET_MIME)} and trashed = false`,
+    "createdTime"
+  );
+  const file = files.find((f) => f.name === MEMORY_SHEET_NAME) ?? files[0];
+  if (!file) return null;
+  // A sheet with no parent folder stands in as its own folder; trashMemory handles that.
+  return { fileId: file.id, folderId: file.parents?.[0] ?? file.id };
+}
+
+async function renameIfLegacy(api: DriveApi, id: string | null | undefined, want: string, legacy: string): Promise<void> {
+  if (!id) return;
+  const info = await api.getFile(id);
+  if (info && !info.trashed && info.name === legacy) await api.renameFile(id, want);
 }
 
 /**
- * Timer path. Refuses to create a replacement file.
- * The caller must ask the user when the status is missing or trashed.
+ * Renames the stored folder, sheet, and day docs in place by id. Never creates a second file.
+ * Called on Enable and on flush so existing Drive files pick up the Bobbin names.
  */
-export async function syncIfReady(
+export async function renameMemoryToProduct(api: DriveApi, ids: StoredMemoryIds, pagesFolderId?: string | null): Promise<void> {
+  await renameIfLegacy(api, ids.folderId, MEMORY_FOLDER_NAME, LEGACY_MEMORY_NAME);
+  await renameIfLegacy(api, ids.fileId, MEMORY_SHEET_NAME, LEGACY_MEMORY_NAME);
+  if (!pagesFolderId) return;
+  const files = await api.listFiles(`${q(pagesFolderId)} in parents and trashed = false`);
+  for (const file of files) {
+    const next = renamedPagesDoc(file.name);
+    if (next) await api.renameFile(file.id, next);
+  }
+}
+
+/** Restore from trash, or create a new sheet after the old one was deleted. Only ever from a click. */
+export type MemoryChoice = "restore" | "create";
+export type ResolvedMemory = { ids: StoredMemoryIds; created: boolean } | { confirm: "missing" | "trashed" };
+
+/**
+ * Enable. Uses the stored sheet when it is there, or the sheet this app made
+ * earlier. Asks before restoring a trashed sheet or replacing a deleted one,
+ * so there is never a second Cortex Memory file.
+ */
+export async function resolveMemory(
   api: DriveApi,
-  ids: StoredMemoryIds
-): Promise<{ status: DriveMemoryStatus; ids: StoredMemoryIds }> {
-  const status = await inspectMemory(api, ids);
-  return { status, ids };
+  previous: StoredMemoryIds,
+  choice?: MemoryChoice,
+  about?: string[][]
+): Promise<ResolvedMemory> {
+  const status = await inspectMemory(api, previous);
+  if (status === "ready") {
+    await renameMemoryToProduct(api, previous);
+    return { ids: previous, created: false };
+  }
+  if (status === "absent") {
+    const found = await findMemoryFile(api);
+    if (found) {
+      // An earlier Enable may have created the file and stopped before setting it up.
+      await setupMemorySheet(api, found.fileId!, about);
+      await renameMemoryToProduct(api, found);
+      return { ids: found, created: false };
+    }
+    return { ids: await createMemoryFile(api, MEMORY_SHEET_NAME, about), created: true };
+  }
+  if (status === "trashed") {
+    if (choice !== "restore") return { confirm: "trashed" };
+    for (const id of new Set([previous.fileId, previous.folderId])) {
+      if (id && (await api.getFile(id))?.trashed) await api.untrashFile(id);
+    }
+    const after = await inspectMemory(api, previous);
+    return after === "ready" ? { ids: previous, created: false } : { confirm: "missing" };
+  }
+  if (choice !== "create") return { confirm: "missing" };
+  const folder = previous.folderId ? await api.getFile(previous.folderId) : null;
+  if (folder && !folder.trashed && folder.id !== previous.fileId) {
+    const fileId = await api.createSpreadsheet(MEMORY_SHEET_NAME, folder.id);
+    await setupMemorySheet(api, fileId, about);
+    return { ids: { folderId: folder.id, fileId }, created: true };
+  }
+  return { ids: await createMemoryFile(api, MEMORY_SHEET_NAME, about), created: true };
+}
+
+/** JSON backups and monthly archives older builds left in the Cortex Memory folder. */
+export async function findLegacyFiles(api: DriveApi, folderId: string, backupId?: string | null): Promise<DriveFileInfo[]> {
+  const inFolder = await api.listFiles(`${q(folderId)} in parents and trashed = false`);
+  const found = inFolder.filter((file) => file.name === DRIVE_JSON_BACKUP_NAME || DRIVE_ARCHIVE_NAME.test(file.name));
+  if (backupId && !found.some((file) => file.id === backupId)) {
+    const backup = await api.getFile(backupId);
+    if (backup && !backup.trashed) found.push(backup);
+  }
+  return found.map(({ id, name, trashed }) => ({ id, name, trashed }));
 }
 
 export async function trashMemory(api: DriveApi, ids: StoredMemoryIds): Promise<void> {
@@ -123,10 +302,57 @@ export async function trashMemory(api: DriveApi, ids: StoredMemoryIds): Promise<
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
-async function readJson(res: Response): Promise<Record<string, unknown>> {
-  if (res.status === 404) return {};
-  if (!res.ok) throw new Error(`google_${res.status}`);
-  return (await res.json()) as Record<string, unknown>;
+const IdResponse = v.object({ id: v.string() });
+const FileResponse = v.object({
+  id: v.string(),
+  name: v.optional(v.string(), ""),
+  trashed: v.optional(v.boolean(), false),
+  parents: v.optional(v.array(v.string())),
+});
+const FileList = v.object({ files: v.optional(v.array(FileResponse), []) });
+const GoogleErrorBody = v.object({
+  error: v.object({
+    status: v.optional(v.string(), ""),
+    message: v.optional(v.string(), ""),
+  }),
+});
+const SheetsList = v.object({
+  sheets: v.optional(
+    v.array(
+      v.object({
+        properties: v.object({ sheetId: v.number(), title: v.string() }),
+        protectedRanges: v.optional(v.array(v.object({ description: v.optional(v.string(), "") })), []),
+      })
+    ),
+    []
+  ),
+});
+const Cell = v.union([v.string(), v.number(), v.boolean(), v.null()]);
+const ValueRanges = v.object({
+  valueRanges: v.optional(v.array(v.object({ values: v.optional(v.array(v.array(Cell)), []) })), []),
+});
+
+/** Google's error body: `{"error":{"code":403,"message":"...","status":"PERMISSION_DENIED"}}`. */
+async function callError(res: Response, call: GoogleCall): Promise<GoogleCallError> {
+  const body = v.safeParse(GoogleErrorBody, await res.json().catch(() => null));
+  return new GoogleCallError({
+    call,
+    http_status: res.status,
+    status: body.success ? body.output.error.status.slice(0, 64) : "",
+    message: body.success ? body.output.error.message.slice(0, 300) : "",
+  });
+}
+
+async function ensureOk(res: Response, call: GoogleCall): Promise<void> {
+  if (!res.ok) throw await callError(res, call);
+}
+
+/** Parses a Google response body. A shape Cortex does not expect is an error, never a guess. */
+async function parsed<T extends v.GenericSchema>(res: Response, schema: T, call: GoogleCall): Promise<v.InferOutput<T>> {
+  await ensureOk(res, call);
+  const out = v.safeParse(schema, await res.json().catch(() => null));
+  if (!out.success) throw new Error("google_bad_response");
+  return out.output;
 }
 
 /** Sheets and Drive calls. Constructed in the offscreen document, never in the service worker. */
@@ -152,34 +378,55 @@ export class FetchDriveApi implements DriveApi {
     });
   }
 
-  async createFolder(name: string): Promise<string> {
-    const res = await this.send("https://www.googleapis.com/drive/v3/files", {
+  async createFolder(name: string, parentId?: string): Promise<string> {
+    const res = await this.send("https://www.googleapis.com/drive/v3/files?fields=id", {
       method: "POST",
-      body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder" }),
+      body: JSON.stringify({ name, mimeType: FOLDER_MIME, ...(parentId ? { parents: [parentId] } : {}) }),
     });
-    const json = await readJson(res);
-    const id = json.id;
-    if (typeof id !== "string") throw new Error("drive_folder_failed");
-    return id;
+    return (await parsed(res, IdResponse, "folder create")).id;
   }
 
-  async createSpreadsheet(name: string, parentId: string): Promise<string> {
-    const res = await this.send("https://sheets.googleapis.com/v4/spreadsheets", {
+  /** files.create, uploadType=multipart: JSON metadata with the Docs mimeType, then the HTML. */
+  async createDoc(name: string, parentId: string, html: string): Promise<string> {
+    const boundary = `cortex-${Math.random().toString(36).slice(2)}`;
+    const body = [
+      `--${boundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify({ name, mimeType: DOCUMENT_MIME, parents: [parentId] }),
+      `--${boundary}`,
+      "Content-Type: text/html; charset=UTF-8",
+      "",
+      html,
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+    const res = await this.send("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
       method: "POST",
-      body: JSON.stringify({
-        properties: { title: name },
-        sheets: SHEET_TABS.map((title, index) => ({ properties: { title, index, sheetId: index } })),
-      }),
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+      body,
     });
-    const json = await readJson(res);
-    const id = (json.spreadsheetId as string | undefined) ?? (json.id as string | undefined);
-    if (typeof id !== "string") throw new Error("drive_sheet_failed");
-    const moved = await this.send(
-      `https://www.googleapis.com/drive/v3/files/${id}?addParents=${encodeURIComponent(parentId)}`,
-      { method: "PATCH", body: JSON.stringify({}) }
+    return (await parsed(res, IdResponse, "doc create")).id;
+  }
+
+  /** files.update, uploadType=media: the HTML replaces the Doc's content. */
+  async updateDoc(id: string, html: string): Promise<{ trashed: boolean } | null> {
+    const res = await this.send(
+      `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,trashed`,
+      { method: "PATCH", headers: { "Content-Type": "text/html; charset=UTF-8" }, body: html }
     );
-    if (!moved.ok) throw new Error(`google_${moved.status}`);
-    return id;
+    if (res.status === 404) return null;
+    const file = await parsed(res, FileResponse, "doc update");
+    return { trashed: file.trashed };
+  }
+
+  /** Drive files.create. Sheets spreadsheets.create returned 403 PERMISSION_DENIED with the drive.file scope in live testing. */
+  async createSpreadsheet(name: string, parentId: string): Promise<string> {
+    const res = await this.send("https://www.googleapis.com/drive/v3/files?fields=id", {
+      method: "POST",
+      body: JSON.stringify({ name, mimeType: SPREADSHEET_MIME, parents: [parentId] }),
+    });
+    return (await parsed(res, IdResponse, "sheet create")).id;
   }
 
   async getFile(id: string): Promise<DriveFileInfo | null> {
@@ -188,9 +435,16 @@ export class FetchDriveApi implements DriveApi {
       { method: "GET" }
     );
     if (res.status === 404) return null;
-    const json = await readJson(res);
-    if (typeof json.id !== "string") return null;
-    return { id: json.id, name: String(json.name ?? ""), trashed: json.trashed === true };
+    const file = await parsed(res, FileResponse, "file check");
+    return { id: file.id, name: file.name, trashed: file.trashed };
+  }
+
+  async renameFile(id: string, name: string): Promise<void> {
+    const res = await this.send(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,name`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+    await ensureOk(res, "rename");
   }
 
   async trashFile(id: string): Promise<void> {
@@ -198,150 +452,70 @@ export class FetchDriveApi implements DriveApi {
       method: "PATCH",
       body: JSON.stringify({ trashed: true }),
     });
-    if (!res.ok) throw new Error(`google_${res.status}`);
+    await ensureOk(res, "trash");
   }
 
-  async writeTab(fileId: string, tab: SheetTabName, rows: string[][]): Promise<void> {
-    const range = encodeURIComponent(`${tab}!A1`);
-    const res = await this.send(
-      `https://sheets.googleapis.com/v4/spreadsheets/${fileId}/values/${range}?valueInputOption=RAW`,
-      { method: "PUT", body: JSON.stringify({ values: rows }) }
-    );
-    if (!res.ok) throw new Error(`google_${res.status}`);
-  }
-
-  async appendTab(fileId: string, tab: SheetTabName, rows: string[][]): Promise<void> {
-    const range = encodeURIComponent(`${tab}!A1`);
-    const res = await this.send(
-      `https://sheets.googleapis.com/v4/spreadsheets/${fileId}/values/${range}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
-      { method: "POST", body: JSON.stringify({ values: rows }) }
-    );
-    if (!res.ok) throw new Error(`google_${res.status}`);
-  }
-
-  async formatHeaders(fileId: string): Promise<void> {
-    const res = await this.send(`https://sheets.googleapis.com/v4/spreadsheets/${fileId}:batchUpdate`, {
-      method: "POST",
-      body: JSON.stringify({ requests: headerFormatRequests() }),
+  async untrashFile(id: string): Promise<void> {
+    const res = await this.send(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ trashed: false }),
     });
-    if (!res.ok) throw new Error(`google_${res.status}`);
+    await ensureOk(res, "restore");
   }
 
-  async readTab(fileId: string, tab: SheetTabName): Promise<string[][]> {
-    const range = encodeURIComponent(tab);
+  async listFiles(query: string, orderBy?: "createdTime"): Promise<DriveFileInfo[]> {
+    const order = orderBy ? `&orderBy=${orderBy}` : "";
+    const params = `q=${encodeURIComponent(query)}&fields=${encodeURIComponent("files(id,name,trashed,parents)")}&pageSize=100&spaces=drive${order}`;
+    const res = await this.send(`https://www.googleapis.com/drive/v3/files?${params}`, { method: "GET" });
+    return (await parsed(res, FileList, "search")).files.map((file) => ({
+      id: file.id,
+      name: file.name,
+      trashed: file.trashed,
+      parents: file.parents,
+    }));
+  }
+
+  async batchUpdate(fileId: string, requests: object[]): Promise<void> {
+    if (!requests.length) return;
     const res = await this.send(
-      `https://sheets.googleapis.com/v4/spreadsheets/${fileId}/values/${range}?valueRenderOption=FORMATTED_VALUE`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(fileId)}:batchUpdate`,
+      { method: "POST", body: JSON.stringify({ requests }) }
+    );
+    await ensureOk(res, "batchUpdate");
+  }
+
+  async getSheetInfo(fileId: string): Promise<SheetInfo> {
+    const fields = encodeURIComponent("sheets(properties(sheetId,title),protectedRanges(description))");
+    const res = await this.send(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(fileId)}?fields=${fields}`, {
+      method: "GET",
+    });
+    const sheetIds: Record<string, number> = {};
+    const protectedIds: number[] = [];
+    const tabs: SheetInfo["tabs"] = [];
+    for (const sheet of (await parsed(res, SheetsList, "read")).sheets) {
+      sheetIds[sheet.properties.title] = sheet.properties.sheetId;
+      tabs.push({ sheetId: sheet.properties.sheetId, title: sheet.properties.title });
+      if (sheet.protectedRanges.some((range) => isProtectedDescription(range.description))) protectedIds.push(sheet.properties.sheetId);
+    }
+    return { sheetIds, protectedIds, tabs };
+  }
+
+  async readColumns(fileId: string, ranges: string[]): Promise<string[][][]> {
+    if (!ranges.length) return [];
+    const query = ranges.map((range) => `ranges=${encodeURIComponent(range)}`).join("&");
+    const res = await this.send(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(fileId)}/values:batchGet?${query}&valueRenderOption=FORMATTED_VALUE`,
       { method: "GET" }
     );
-    if (res.status === 400 || res.status === 404) return [];
-    const json = await readJson(res);
-    if (!Array.isArray(json.values)) return [];
-    return json.values.map((row) =>
-      Array.isArray(row) ? row.map((cell) => (cell == null ? "" : String(cell))) : []
+    const body = await parsed(res, ValueRanges, "read");
+    return ranges.map((_, i) =>
+      (body.valueRanges[i]?.values ?? []).map((row) => row.map((cell) => (cell == null ? "" : String(cell))))
     );
-  }
-
-  async updateRow(fileId: string, tab: SheetTabName, rowIndex: number, values: string[]): Promise<void> {
-    const range = encodeURIComponent(`${tab}!A${rowIndex}`);
-    const res = await this.send(
-      `https://sheets.googleapis.com/v4/spreadsheets/${fileId}/values/${range}?valueInputOption=RAW`,
-      { method: "PUT", body: JSON.stringify({ values: [values] }) }
-    );
-    if (!res.ok) throw new Error(`google_${res.status}`);
-  }
-
-  async deleteRows(fileId: string, tab: SheetTabName, ranges: RowRange[]): Promise<void> {
-    if (!ranges.length) return;
-    const sheetId = SHEET_TABS.indexOf(tab);
-    const ordered = [...ranges].sort((a, b) => b.startIndex - a.startIndex);
-    const res = await this.send(`https://sheets.googleapis.com/v4/spreadsheets/${fileId}:batchUpdate`, {
-      method: "POST",
-      body: JSON.stringify({
-        requests: ordered.map((range) => ({
-          deleteDimension: {
-            range: {
-              sheetId,
-              dimension: "ROWS",
-              startIndex: range.startIndex,
-              endIndex: range.endIndex,
-            },
-          },
-        })),
-      }),
-    });
-    if (!res.ok) throw new Error(`google_${res.status}`);
-  }
-
-  async upsertJsonFile(name: string, parentId: string, body: string, existingId: string | null): Promise<string> {
-    if (existingId) {
-      const existing = await this.getFile(existingId);
-      if (existing && !existing.trashed) {
-        const res = await this.fetchImpl(
-          `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingId)}?uploadType=media`,
-          {
-            method: "PATCH",
-            headers: {
-              Authorization: `Bearer ${this.token}`,
-              "Content-Type": "application/json",
-            },
-            body,
-          }
-        );
-        if (!res.ok) throw new Error(`google_${res.status}`);
-        return existingId;
-      }
-    }
-    const meta = JSON.stringify({
-      name,
-      parents: [parentId],
-      mimeType: "application/json",
-    });
-    const boundary = "cortex_backup_boundary";
-    const multipart =
-      `--${boundary}\r\n` +
-      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
-      `${meta}\r\n` +
-      `--${boundary}\r\n` +
-      `Content-Type: application/json\r\n\r\n` +
-      `${body}\r\n` +
-      `--${boundary}--`;
-    const res = await this.fetchImpl(
-      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          "Content-Type": `multipart/related; boundary=${boundary}`,
-        },
-        body: multipart,
-      }
-    );
-    const json = await readJson(res);
-    const id = json.id;
-    if (typeof id !== "string") throw new Error("drive_backup_failed");
-    return id;
   }
 }
-
 
 export function googleStatus(error: unknown): number | null {
   const message = error instanceof Error ? error.message : "";
   const match = /^google_(\d+)$/.exec(message);
   return match ? Number(match[1]) : null;
-}
-
-export async function getDriveToken(
-  identity: {
-    getAuthToken: (details: { interactive: boolean }, callback: (token?: string) => void) => void;
-  },
-  lastError: () => { message?: string } | undefined,
-  interactive: boolean
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    identity.getAuthToken({ interactive }, (token) => {
-      const err = lastError();
-      if (err?.message || !token) reject(new Error(err?.message || "drive_auth_failed"));
-      else resolve(token);
-    });
-  });
 }

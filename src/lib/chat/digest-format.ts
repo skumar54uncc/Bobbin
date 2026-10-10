@@ -1,7 +1,7 @@
 /** Second-person digest copy for the Digest tab (post-LLM normalize). */
 export function personalizeDigestNarrative(raw: string): string {
   let s = raw.trim().replace(/\s+/g, " ");
-  if (!s) return "Your reading activity will appear here once Cortex has indexed pages.";
+  if (!s) return "Your reading activity will appear here once Bobbin has indexed pages.";
 
   if (/^the user(?:'s)?\s+/i.test(s)) {
     s = s.replace(/^the user's\s+/i, "Your ");

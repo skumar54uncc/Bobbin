@@ -17,6 +17,7 @@ import {
 import { CortexError } from "../errors";
 import type { ChatSettings } from "./types";
 import { answerPeopleQuery, parsePeopleQuery } from "../people";
+import { smalltalkReply } from "./smalltalk";
 import { buildRecallAnswer, loadRecallPages, parseRecallQuery } from "./recall";
 import { db } from "../../db/schema";
 export interface ChatStreamEvent {
@@ -27,7 +28,9 @@ export interface ChatStreamEvent {
     | "token"
     | "done"
     | "error"
-    | "aborted";
+    | "aborted"
+    /** Still working: keeps the panel's inactivity timer and the service worker alive. */
+    | "progress";
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any;
 }
@@ -41,6 +44,47 @@ export interface RunChatOptions {
 
 function isAbortError(e: unknown): boolean {
   return e instanceof Error && e.name === "AbortError";
+}
+
+/** Silence longer than this yields a progress event. Chrome stops an idle service worker after 30s. */
+export const CHAT_PULSE_MS = 8000;
+
+/** Awaits `work`, yielding a progress event for every quiet stretch. The result lands in `box`. */
+async function* waitWithPulse<T>(work: Promise<T>, box: { value?: T }): AsyncGenerator<ChatStreamEvent> {
+  let settled = false;
+  const done = work.then((v) => {
+    settled = true;
+    box.value = v;
+  });
+  while (!settled) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = new Promise<"tick">((resolve) => {
+      timer = setTimeout(() => resolve("tick"), CHAT_PULSE_MS);
+    });
+    try {
+      if ((await Promise.race([done.then(() => "done" as const), tick])) === "tick") {
+        yield { type: "progress", data: {} };
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  await done;
+}
+
+/** The model's tokens, with null for every quiet stretch while it thinks. */
+async function* pulsedTokens(source: AsyncIterable<string>): AsyncGenerator<string | null> {
+  const it = source[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const box: { value?: IteratorResult<string> } = {};
+      for await (const _ of waitWithPulse(it.next(), box)) yield null;
+      if (!box.value || box.value.done) return;
+      yield box.value.value;
+    }
+  } finally {
+    void it.return?.(undefined)?.catch?.(() => undefined);
+  }
 }
 
 /** Best passage per page, plus other passages on those pages that share the question. */
@@ -74,6 +118,21 @@ export async function* runChat(
     if (convId == null) {
       convId = await createConversation(question);
       yield { type: "conversation", data: { id: convId } };
+    }
+
+    const greeting = smalltalkReply(question);
+    if (greeting) {
+      await addMessageToConversation(convId, { role: "user", content: question, timestamp: Date.now() });
+      yield { type: "sources", data: { chunks: [] } };
+      yield { type: "token", data: greeting };
+      await addMessageToConversation(convId, {
+        role: "assistant",
+        content: greeting,
+        timestamp: Date.now(),
+        citedChunks: [],
+      });
+      yield { type: "done", data: { provider: "local" } };
+      return;
     }
 
     // People questions ("who did I view from X") come from the people store,
@@ -150,17 +209,23 @@ export async function* runChat(
       parsed.rawQuery.trim() ||
       parsed.rawQuery;
 
-    const searchResults = await runAdvancedSearch(qtext, embedQuery, {
-      maxHits: 20,
-      forceTimeRange,
-      includeChunks: true,
-      ...(opts.collectionId != null ? { collectionId: opts.collectionId } : {}),
-    });
+    yield { type: "route", data: { provider: "nano", reason: "searching" } };
 
-    const rawChunks = await expandRetrievedPages(
-      searchResults.chunks ?? [],
-      question
+    const searched: { value?: Awaited<ReturnType<typeof runAdvancedSearch>> } = {};
+    yield* waitWithPulse(
+      runAdvancedSearch(qtext, embedQuery, {
+        maxHits: 20,
+        forceTimeRange,
+        includeChunks: true,
+        ...(opts.collectionId != null ? { collectionId: opts.collectionId } : {}),
+      }),
+      searched
     );
+    const searchResults = searched.value!;
+
+    const expanded: { value?: ChunkWithDoc[] } = {};
+    yield* waitWithPulse(expandRetrievedPages(searchResults.chunks ?? [], question), expanded);
+    const rawChunks = expanded.value ?? [];
 
     if (rawChunks.length === 0) {
       yield {
@@ -170,7 +235,7 @@ export async function* runChat(
             ? `I didn't find that in your library for ${parsed.timeRange.label}.`
             : "I didn't find that in your library.",
           userAction: searchResults.abstained
-            ? "Try different words, or read the page again so Cortex can index it."
+            ? "Try different words, or read the page again so Bobbin can index it."
             : undefined,
           recoverable: true,
         },
@@ -179,7 +244,8 @@ export async function* runChat(
     }
 
     const NANO_MAX = 18_000;
-    const CLOUD_MAX = 200_000;
+    // Enough for the twenty best passages. A larger prompt only delays the first word.
+    const CLOUD_MAX = 60_000;
     const maxChars =
       settings.cloudEnabled && settings.geminiApiKey ? CLOUD_MAX : NANO_MAX;
 
@@ -214,14 +280,18 @@ export async function* runChat(
     });
 
     let fullAnswer = "";
-    for await (const token of streamAnswer(
+    for await (const token of pulsedTokens(streamAnswer(
       prompt,
       CHAT_SYSTEM_PROMPT,
       route,
       settings,
       { signal }
-    )) {
+    ))) {
       if (signal?.aborted) break;
+      if (token === null) {
+        yield { type: "progress", data: {} };
+        continue;
+      }
       fullAnswer += token;
       yield { type: "token", data: token };
       if (signal?.aborted) break;
@@ -229,6 +299,17 @@ export async function* runChat(
 
     if (signal?.aborted) {
       yield { type: "aborted", data: { provider: route.provider } };
+      return;
+    }
+
+    if (!fullAnswer.trim()) {
+      yield {
+        type: "error",
+        data: {
+          message: "Bobbin did not get an answer. Try again.",
+          recoverable: true,
+        },
+      };
       return;
     }
 

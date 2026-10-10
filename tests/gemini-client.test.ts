@@ -98,6 +98,49 @@ describe("geminiStream", () => {
   });
 });
 
+describe("geminiStream complete answers", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps every text part and skips thought parts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            'data: {"candidates":[{"content":{"parts":[{"text":"notes","thought":true},{"text":"Kanika Kumar is a B.S. "},{"text":"student at UNC Charlotte."}]}}]}',
+            { status: 200, headers: { "Content-Type": "text/event-stream" } }
+          )
+      )
+    );
+    const chunks: string[] = [];
+    for await (const chunk of geminiStream("hi", { apiKey: "k" })) chunks.push(chunk);
+    expect(chunks.join("")).toBe("Kanika Kumar is a B.S. student at UNC Charlotte.");
+  });
+
+  it("asks the same model to continue when the answer hits the output limit", async () => {
+    const bodies: { contents: { role: string; parts: { text: string }[] }[] }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        const first = bodies.length === 1;
+        const event = first
+          ? '{"candidates":[{"content":{"parts":[{"text":"Kanika Kumar is a B.S."}]},"finishReason":"MAX_TOKENS"}]}'
+          : '{"candidates":[{"content":{"parts":[{"text":" student."}]},"finishReason":"STOP"}]}';
+        return new Response(`data: ${event}\n\n`, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      })
+    );
+    const chunks: string[] = [];
+    for await (const chunk of geminiStream("who is Kanika?", { apiKey: "k" })) chunks.push(chunk);
+    expect(chunks.join("")).toBe("Kanika Kumar is a B.S. student.");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]!.contents.map((c) => c.role)).toEqual(["user", "model", "user"]);
+    expect(bodies[1]!.contents[1]!.parts[0]!.text).toBe("Kanika Kumar is a B.S.");
+  });
+});
+
 describe("geminiStream abort", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { agentDebugLog } from "../src/lib/agent-debug-log";
 
 describe("pass4 security gates", () => {
@@ -41,7 +41,29 @@ describe("pass4 security gates", () => {
       source.indexOf('type === "CORTEX_ASSISTANT_SYNC"'),
       source.indexOf('type === "CORTEX_OPEN_OPTIONS"')
     );
-    expect(syncGate).toContain('action === "enable" && !isOptionsPageSender(sender)');
+    expect(syncGate).toContain('action === "enable" && !isOptionsPageSender(sender) && !isGuidePanelSender(sender) && !frameEnable');
+    // The Connect frame may send Enable and nothing else past the general gate.
+    expect(syncGate).toContain('const frameEnable = parsed?.action === "enable" && isConnectFrameSender(sender);');
+    expect(syncGate).toContain('action === "pages" && !isOptionsPageSender(sender)');
+    // Status alone is open to Bobbin pages such as the Connect frame; content scripts are not extension pages.
+    expect(syncGate).toContain('parsed?.action === "status" && isExtensionPageSender(sender)');
+  });
+
+  it("recognizes the Connect frame by its extension URL, never a web page or content script", async () => {
+    vi.stubGlobal("chrome", { runtime: { id: "cortex", getURL: (p: string) => `chrome-extension://cortex/${p}` } });
+    const { isConnectFrameSender } = await import("../src/lib/message-security");
+    const tab = { id: 3 } as chrome.tabs.Tab;
+    expect(isConnectFrameSender({ id: "cortex", tab, url: "chrome-extension://cortex/connect-frame.html?theme=dark" })).toBe(true);
+    // A content script in the same tab reports the page's URL.
+    expect(isConnectFrameSender({ id: "cortex", tab, url: "https://example.com/connect-frame.html" })).toBe(false);
+    expect(isConnectFrameSender({ id: "other", tab, url: "chrome-extension://cortex/connect-frame.html" })).toBe(false);
+    expect(isConnectFrameSender({ id: "cortex", url: "chrome-extension://cortex/options.html" })).toBe(false);
+    // use_dynamic_url: getURL names the dynamic id, the frame still reports the extension id.
+    vi.stubGlobal("chrome", { runtime: { id: "cortex", getURL: (p: string) => `chrome-extension://aaf0d472-dynamic/${p}` } });
+    expect(isConnectFrameSender({ id: "cortex", tab, url: "chrome-extension://cortex/connect-frame.html" })).toBe(true);
+    expect(isConnectFrameSender({ id: "cortex", tab, url: "chrome-extension://aaf0d472-dynamic/connect-frame.html" })).toBe(true);
+    expect(isConnectFrameSender({ id: "cortex", tab, url: "chrome-extension://elsewhere/connect-frame.html" })).toBe(false);
+    vi.unstubAllGlobals();
   });
 
   it("user settings normalize without spreading raw objects", () => {

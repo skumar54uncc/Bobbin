@@ -4,8 +4,6 @@ import {
   dismissCoachTip,
   FEEDBACK_COOLDOWN_MS,
   FEEDBACK_MIN_DAYS,
-  FEEDBACK_MIN_OPENS,
-  FEEDBACK_MIN_PAGES,
   loadUxLocalState,
   nextCoachTip,
   parseUxLocalState,
@@ -23,27 +21,32 @@ describe("ux-local feedback gate", () => {
     );
   });
 
-  it("requires tenure or meaningful use", () => {
+  it("stays hidden until 10 days after install", () => {
     const base: UxLocalState = {
       firstSeenAt: Date.parse("2026-09-01T12:00:00Z"),
-      panelOpenCount: 1,
+      panelOpenCount: 20,
       coachDismissed: {},
     };
-    const now = Date.parse("2026-09-03T12:00:00Z"); // 2 days
-    expect(
-      shouldShowFeedback({ state: base, pageCount: 100, now })
-    ).toBe(false);
-
-    expect(
-      shouldShowFeedback({
-        state: { ...base, panelOpenCount: FEEDBACK_MIN_OPENS },
-        pageCount: FEEDBACK_MIN_PAGES,
-        now,
-      })
-    ).toBe(true);
+    const now = Date.parse("2026-09-03T12:00:00Z");
+    expect(shouldShowFeedback({ state: base, now })).toBe(false);
 
     const later = base.firstSeenAt + FEEDBACK_MIN_DAYS * 24 * 60 * 60 * 1000 + 1000;
-    expect(shouldShowFeedback({ state: base, pageCount: 0, now: later })).toBe(true);
+    expect(shouldShowFeedback({ state: base, now: later })).toBe(true);
+    const installed = Date.parse("2026-09-20T12:00:00Z");
+    expect(
+      shouldShowFeedback({
+        state: base,
+        installedAt: installed,
+        now: installed + 9 * 24 * 60 * 60 * 1000,
+      })
+    ).toBe(false);
+    expect(
+      shouldShowFeedback({
+        state: base,
+        installedAt: installed,
+        now: installed + FEEDBACK_MIN_DAYS * 24 * 60 * 60 * 1000 + 1000,
+      })
+    ).toBe(true);
   });
 
   it("stays quiet after dismiss or submit for the cooldown", () => {
@@ -54,14 +57,13 @@ describe("ux-local feedback gate", () => {
       coachDismissed: {},
       feedbackDismissedAt: now - 1000,
     };
-    expect(shouldShowFeedback({ state, pageCount: 50, now })).toBe(false);
+    expect(shouldShowFeedback({ state, now })).toBe(false);
     expect(
       shouldShowFeedback({
         state: {
           ...state,
           feedbackDismissedAt: now - FEEDBACK_COOLDOWN_MS - 1,
         },
-        pageCount: 50,
         now,
       })
     ).toBe(true);

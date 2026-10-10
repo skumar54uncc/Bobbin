@@ -5,7 +5,14 @@
  * changes the user's browser fonts and needs an extra permission.
  */
 export function getBrandFontFaceCss(): string {
-  return "";
+  const getURL = chrome.runtime?.getURL?.bind(chrome.runtime);
+  if (!getURL) return "";
+  const face = (family: string, weight: string, file: string): string =>
+    `@font-face{font-family:${family};font-weight:${weight};font-display:swap;src:url("${getURL(file)}") format("woff2")}`;
+  return (
+    face("Nunito", "200 1000", "fonts/nunito-latin.woff2") +
+    face("Fraunces", "100 900", "fonts/fraunces-latin.woff2")
+  );
 }
 
 /** Popup / options / onboarding pages (document head). */

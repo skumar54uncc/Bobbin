@@ -81,6 +81,7 @@ describe("nameFromProfileUrl", () => {
     expect(nameFromProfileUrl("https://www.linkedin.com/in/laxman-kumar-12345/")).toBe("Laxman Kumar");
     expect(nameFromProfileUrl("https://linkedin.com/in/AdaField/")).toBe("Adafield");
     expect(nameFromProfileUrl("https://www.linkedin.com/company/ridgeline-freight/")).toBe("Ridgeline Freight");
+    expect(nameFromProfileUrl("https://www.linkedin.com/company/7-eleven/")).toBe("7 Eleven");
   });
 
   it("returns nothing when the slug cannot carry a name", () => {

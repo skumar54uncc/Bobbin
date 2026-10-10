@@ -24,7 +24,17 @@ module.exports = (env, argv) => {
 
   return {
   entry: {
-    "service-worker": "./src/background/service-worker.ts",
+    /**
+     * Chrome MV3 service workers cannot load async chunks. The default
+     * loader touches `document` ("document is not defined" on install).
+     * importScripts() is rejected after the worker activates, and import()
+     * is disallowed on ServiceWorkerGlobalScope. Inline every dynamic
+     * import into this entry. Page bundles still split their own chunks.
+     */
+    "service-worker": {
+      import: "./src/background/service-worker.ts",
+      asyncChunks: false,
+    },
     content: "./src/content/main.ts",
     overlay: "./src/content/overlay-entry.ts",
     extract: "./src/content/extract-entry.ts",
@@ -35,6 +45,9 @@ module.exports = (env, argv) => {
     options: "./src/options/options.ts",
     onboarding: "./src/onboarding/onboarding.ts",
     "search-shell": "./src/search/search-shell.ts",
+    "connect-frame": "./src/guide/connect-frame.ts",
+    "guide-panel": "./src/guide/guide-panel.ts",
+    "guide-pointer": "./src/guide/guide-pointer.ts",
   },
   output: {
     path: path.resolve(__dirname, e2eAudit ? "dist-e2e" : "dist"),
@@ -103,17 +116,29 @@ module.exports = (env, argv) => {
         },
         { from: "managed_schema.json", to: "." },
         { from: "src/offscreen/offscreen.html", to: "." },
+        { from: "src/guide/copy-tab.html", to: "." },
         { from: "src/popup/popup.html", to: "." },
         { from: "src/popup/popup.css", to: "." },
+        { from: "src/styles/fonts.css", to: "." },
+        { from: "src/styles/tokens.css", to: "." },
         { from: "src/styles/cortex-theme.css", to: "." },
         { from: "src/styles/cx-buttons.css", to: "." },
+        { from: "src/styles/mascot.css", to: "mascot.css" },
         { from: "src/options/options.html", to: "." },
         { from: "src/options/options.css", to: "." },
         { from: "src/onboarding/onboarding.html", to: "." },
         { from: "src/onboarding/onboarding.css", to: "." },
         { from: "src/search/search-shell.html", to: "." },
         { from: "src/search/search-shell.css", to: "." },
+        { from: "src/guide/connect-frame.html", to: "." },
+        { from: "src/guide/guide-panel.html", to: "." },
+        { from: "src/guide/guide.css", to: "." },
+        { from: "src/legal/privacy.html", to: "legal/privacy.html" },
+        { from: "src/legal/terms.html", to: "legal/terms.html" },
+        { from: "src/legal/site.css", to: "legal/site.css" },
         { from: "icons", to: "icons", noErrorOnMissing: true },
+        { from: "assets/mascot", to: "mascot", noErrorOnMissing: true },
+        { from: "assets/assistant-logos", to: "assistant-logos" },
         { from: "fonts", to: "fonts", noErrorOnMissing: true },
         { from: "vendor/models", to: "models", noErrorOnMissing: true },
         /** pdfjs-dist worker, loaded by the offscreen document only when a PDF is read. */

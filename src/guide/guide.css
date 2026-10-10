@@ -1,0 +1,666 @@
+/**
+ * Connect your AI (Settings, the panel frame) and the setup side panel.
+ * Uses tokens.css, cortex-theme.css, and cx-buttons.css. Everything wraps: no sideways scroll.
+ */
+
+.cx-connect,
+.cx-guide {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--cx-text);
+}
+
+.cx-connect *,
+.cx-guide * {
+  box-sizing: border-box;
+}
+
+.cx-connect {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cx-connect-head,
+.cx-guide-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.cx-connect-mascot,
+.cx-guide-mascot {
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.cx-connect-mascot .cx-m {
+  width: 72px;
+  height: 72px;
+}
+
+.cx-guide-mascot .cx-m {
+  width: 56px;
+  height: 56px;
+}
+
+.cx-connect-title,
+.cx-guide-title {
+  margin: 0 0 4px;
+  font: var(--cx-ts-title);
+  color: var(--cx-text);
+}
+
+.cx-connect-lead,
+.cx-guide-progress {
+  margin: 0;
+  color: var(--cx-text-muted);
+}
+
+.cx-connect-h {
+  margin: 0;
+  font: var(--cx-ts-small);
+  font-family: var(--cx-font-body);
+  font-weight: 700;
+  color: var(--cx-text);
+}
+
+.cx-connect-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--cx-border);
+  border-radius: var(--radius-card, 16px);
+  background: var(--cx-surface-raised);
+}
+
+.cx-connect-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--cx-text-muted);
+}
+
+.cx-connect-status[data-state="on"] .cx-connect-dot {
+  background: var(--sage, #6e8b6b);
+}
+
+.cx-connect-status[data-state="problem"] .cx-connect-dot {
+  background: var(--cx-warning);
+}
+
+.cx-connect-status-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.cx-connect-status-line {
+  margin: 2px 0 0;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text-muted);
+}
+
+.cx-connect-status-line:empty {
+  display: none;
+}
+
+.cx-connect-status[hidden],
+.cx-connect-status-action[hidden] {
+  display: none;
+}
+
+.cx-connect-status-action {
+  margin-top: 10px;
+}
+
+.cx-connect-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 168px), 1fr));
+  gap: 12px;
+}
+
+.cx-connect-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 72px;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--cx-text);
+  background: var(--cx-surface-raised);
+  border: 1px solid var(--cx-border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.cx-connect-card:hover {
+  background: var(--cx-accent-soft);
+}
+
+.cx-connect-card.is-active {
+  border-color: var(--cx-accent);
+  background: var(--cx-accent-soft);
+}
+
+.cx-connect-card:focus-visible,
+.cx-guide summary:focus-visible,
+.cx-connect summary:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+}
+
+.cx-connect-card-name {
+  font-weight: 700;
+}
+
+.cx-connect-badge {
+  padding: 2px 8px;
+  font: var(--cx-ts-caption);
+  color: #fff;
+  background: var(--brick, #9c3b21);
+  border-radius: 8px;
+}
+
+.cx-connect-card-plan {
+  font: var(--cx-ts-caption);
+  font-weight: 400;
+  color: var(--cx-text-muted);
+}
+
+.cx-connect-guide,
+.cx-guide-sync {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--cx-border);
+  border-radius: var(--radius-card, 16px);
+  background: var(--cx-surface-raised);
+}
+
+.cx-connect-guide[hidden] {
+  display: none;
+}
+
+.cx-connect-tip {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--cx-accent-soft);
+  font-weight: 600;
+}
+
+.cx-connect-steps,
+.cx-guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.cx-guide-steps {
+  padding-left: 0;
+  list-style: none;
+}
+
+.cx-connect-step,
+.cx-guide-step {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.cx-guide-step {
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--cx-accent);
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--cx-accent);
+  background: var(--cx-surface-raised);
+}
+
+.cx-guide-step-title {
+  margin: 0;
+  font: var(--cx-ts-small);
+  font-family: var(--cx-font-body);
+  font-weight: 700;
+  color: var(--cx-text);
+}
+
+.cx-connect-step-text,
+.cx-guide-text,
+.cx-guide-ask {
+  margin: 0;
+}
+
+.cx-guide-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cx-connect-step-path,
+.cx-guide-hint,
+.cx-guide-plan,
+.cx-connect-start-note,
+.cx-connect-copied,
+.cx-guide-feedback {
+  margin: 0;
+  font: var(--cx-ts-caption);
+  font-weight: 400;
+  color: var(--cx-text-muted);
+}
+
+.cx-connect-copied:empty,
+.cx-guide-feedback:empty {
+  display: none;
+}
+
+.cx-guide-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: var(--cx-ts-caption);
+}
+
+.cx-guide-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.cx-guide-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--cx-text-muted);
+}
+
+.cx-guide-dot.is-done {
+  border-color: var(--brick, #9c3b21);
+  background: var(--brick, #9c3b21);
+}
+
+.cx-guide-dot.is-current {
+  border-color: var(--brick, #9c3b21);
+  box-shadow: 0 0 0 2px var(--cx-accent-soft);
+}
+
+.cx-guide-done {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--cx-text-muted);
+}
+
+.cx-guide-done-item {
+  padding: 2px 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.cx-guide-done-item:hover,
+.cx-guide-done-item[aria-current="step"] {
+  color: var(--cx-text);
+  text-decoration: underline;
+}
+
+.cx-guide-done-item:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+}
+
+.cx-guide-back {
+  align-self: flex-start;
+}
+
+.cx-guide-fallback,
+.cx-guide-start-over {
+  align-self: flex-start;
+}
+
+.cx-guide-attach {
+  margin: 0;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text-muted);
+}
+
+.cx-guide-check-mark {
+  display: inline-block;
+  width: 1.2em;
+  font-weight: 700;
+  color: var(--sage, #6e8b6b);
+}
+
+.cx-guide-link {
+  padding: 0;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text-muted);
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.cx-guide-link:hover {
+  color: var(--cx-text);
+}
+
+.cx-guide-link:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+}
+
+.cx-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cx-guide-success {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--cx-success-soft);
+  font-weight: 700;
+}
+
+.cx-connect-preview,
+.cx-connect-trouble {
+  width: 100%;
+  padding: 0 14px;
+  border: 1px solid var(--cx-border);
+  border-radius: 12px;
+  background: var(--cx-surface-raised);
+}
+
+.cx-connect-preview summary,
+.cx-connect-trouble summary {
+  padding: 10px 0;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cx-connect-step-title {
+  font-weight: 700;
+}
+
+.cx-connect-step-text {
+  margin: 0;
+  font: var(--cx-ts-caption);
+  font-weight: 400;
+}
+
+.cx-connect-instruction-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.cx-connect-instruction {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 8.5rem;
+  margin: 0 0 12px;
+  padding: 10px;
+  font: 12px/1.5 var(--cx-font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: 8px;
+  resize: vertical;
+}
+
+.cx-copy-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.cx-copy-manual-hint {
+  margin: 0;
+  font: var(--cx-ts-caption);
+}
+
+.cx-copy-manual-box {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 6rem;
+  margin: 0;
+  padding: 10px;
+  font: 12px/1.5 var(--cx-font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: 8px;
+  resize: vertical;
+}
+
+.cx-connect-trouble-list {
+  margin: 0 0 12px;
+  padding-left: 1.2rem;
+}
+
+.cx-connect-trouble-list li {
+  margin: 0 0 6px;
+}
+
+:root[data-theme="dark"] {
+  --cx-surface-raised: var(--oat);
+  --cx-surface: var(--cream);
+}
+
+/* The setup side panel page. */
+.cx-guide-page {
+  margin: 0;
+  overflow-x: hidden;
+}
+
+.cx-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* The panel frame page. */
+.cx-connect-page {
+  margin: 0;
+  overflow-x: hidden;
+}
+
+.cx-connect-page .cx-connect {
+  padding: 18px;
+}
+
+/* Ask any assistant (Attach to chat), below Connect in the panel frame. */
+.cx-attach {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 18px 18px;
+  padding: 14px;
+  color: var(--cx-text);
+  overflow-wrap: anywhere;
+  border: 1px solid var(--cx-border);
+  border-radius: var(--radius-card, 16px);
+  background: var(--cx-surface-raised);
+}
+
+.cx-attach * {
+  box-sizing: border-box;
+}
+
+.cx-attach .cx-connect-lead {
+  font: var(--cx-ts-caption);
+}
+
+.cx-attach-form {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cx-attach-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--cx-text);
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: 10px;
+}
+
+.cx-attach-input:focus-visible,
+.cx-attach-chip:focus-visible,
+.cx-attach-remove:focus-visible,
+.cx-attach-toggle input:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+}
+
+.cx-attach-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cx-attach-chip {
+  padding: 4px 10px;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text);
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.cx-attach-chip:hover {
+  background: var(--cx-accent-soft);
+}
+
+.cx-attach-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cx-attach-preview[hidden] {
+  display: none;
+}
+
+.cx-attach-header {
+  margin: 0;
+  font-weight: 700;
+}
+
+.cx-attach-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.cx-attach-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 8px;
+  padding: 6px 8px;
+  font: var(--cx-ts-caption);
+  background: var(--cx-surface);
+  border-radius: 8px;
+}
+
+.cx-attach-line {
+  flex: 1;
+  min-width: 0;
+}
+
+.cx-attach-remove {
+  padding: 0;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text-muted);
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.cx-attach-excerpt {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--cx-text-muted);
+}
+
+.cx-attach-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: var(--cx-ts-caption);
+  cursor: pointer;
+}
+
+.cx-attach-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--brick, #9c3b21);
+}
+
+.cx-attach-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cx-attach-status {
+  margin: 0;
+  font: var(--cx-ts-caption);
+  color: var(--cx-text-muted);
+}
+
+.cx-attach-status:empty {
+  display: none;
+}
+
+@media (max-width: 360px) {
+  .cx-connect-mascot .cx-m {
+    width: 56px;
+    height: 56px;
+  }
+}

@@ -1,7 +1,7 @@
 import type { ChunkWithDoc } from "../search-engine";
 import { citationHref, snippetLabel } from "../kind-labels";
 
-export const CHAT_SYSTEM_PROMPT = `You are Cortex, a personal browser memory assistant.
+export const CHAT_SYSTEM_PROMPT = `You are Bobbin, a personal browser memory assistant.
 
 You answer questions using ONLY the sources provided. Each source is content from a
 webpage the user actually visited.

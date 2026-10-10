@@ -1,0 +1,57 @@
+/**
+ * Felt palette for the Cortex redesign.
+ * Light is the default. Dark follows the system, unless a surface sets
+ * data-theme="light" or data-theme="dark". Popup, welcome, and settings
+ * stay on data-theme="light". The panel theme follows Appearance.
+ */
+
+:root {
+  --felt: #cd5f3e;
+  --brick: #9c3b21;
+  --cream: #f8f1e6;
+  --oat: #efe4d2;
+  --thread: #fff9ef;
+  --ink: #2e231d;
+  --ink-soft: #6b5a4e;
+  --sage: #6e8b6b;
+  --stitch: rgba(156, 59, 33, 0.35);
+
+  --radius-input: 10px;
+  --radius-card: 16px;
+  --radius-pill: 999px;
+  --space: 4px;
+
+  --shadow-felt: 0 1px 0 rgba(0, 0, 0, 0.04), 0 6px 16px rgba(46, 35, 29, 0.08);
+  --shadow-pressed: inset 0 2px 4px rgba(46, 35, 29, 0.18);
+
+  --font-display: "Fraunces", serif;
+  --font-body: "Nunito", sans-serif;
+  --ts-12: 12px;
+  --ts-14: 14px;
+  --ts-16: 16px;
+  --ts-20: 20px;
+  --ts-26: 26px;
+  --ts-34: 34px;
+  --leading-body: 1.55;
+
+  /* Felt grain at about 3.5% so cream and oat stay quiet. */
+  --felt-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.18 0 0 0 0 0.13 0 0 0 0 0.1 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="dark"] {
+  --cream: #221a15;
+  --oat: #2e241e;
+  --ink: #f3e9dc;
+  --ink-soft: #bfae9e;
+  --stitch: rgba(243, 233, 220, 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --cream: #221a15;
+    --oat: #2e241e;
+    --ink: #f3e9dc;
+    --ink-soft: #bfae9e;
+    --stitch: rgba(243, 233, 220, 0.25);
+  }
+}

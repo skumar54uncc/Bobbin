@@ -8,8 +8,9 @@ import type { ChatStreamEvent } from "../lib/chat/chat-engine";
  * - A second submit while streaming is rejected.
  * - Every event carries the requestId it belongs to; late events from an
  *   earlier request (or after abort/done) are ignored.
- * - An inactivity timer (45s) is reset by every token so long answers on a
- *   slow model do not time out, while a hung stream still surfaces an error.
+ * - An inactivity timer (45s) is reset by conversation, sources, route,
+ *   progress, and token events. The engine sends progress every few seconds
+ *   while it works, so only a dead run times out, and that run is aborted.
  * - abort() sends CORTEX_CHAT_ABORT so the offscreen document can cancel the
  *   Nano session or the Gemini fetch.
  */
@@ -98,12 +99,16 @@ export class ChatStreamController {
     const cb = this.opts.callbacks;
     switch (ev.type) {
       case "conversation":
+        this.armTimer();
         cb.onConversation((ev.data as { id: number }).id);
         return;
       case "sources":
+        this.armTimer();
         cb.onSources(((ev.data as { chunks?: unknown[] }).chunks ?? []) as unknown[]);
         return;
       case "route":
+      case "progress":
+        this.armTimer();
         return;
       case "token":
         this.armTimer();
@@ -146,9 +151,12 @@ export class ChatStreamController {
     this.timer = setTimeout(() => {
       this.timer = null;
       if (this._state !== "streaming") return;
+      const requestId = this._requestId;
       this.finish("error");
+      // Stop the run so a late answer does not appear on the next open.
+      this.opts.send({ type: "CORTEX_CHAT_ABORT", requestId, shell: this.opts.shell });
       this.opts.callbacks.onError({
-        message: "No response from Cortex.",
+        message: "No response from Bobbin.",
         userAction: "Try again. If it keeps happening, reload the extension.",
         recoverable: true,
       });

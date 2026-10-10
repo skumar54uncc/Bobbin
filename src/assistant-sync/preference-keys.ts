@@ -1,5 +1,13 @@
 export const ASSISTANT_SYNC_RETENTION_KEY = "cortex_assistant_sync_retention_days";
-export const ASSISTANT_SYNC_ARCHIVES_KEY = "cortex_assistant_sync_archives";
+/** "standard" or "compact". */
+export const ASSISTANT_SYNC_SHEET_DETAIL_KEY = "cortex_assistant_sync_sheet_detail";
 export const ASSISTANT_SYNC_FOLDER_ID = "cortex_assistant_sync_folder_id";
 export const ASSISTANT_SYNC_FILE_ID = "cortex_assistant_sync_file_id";
+/** Id of the Drive JSON backup older builds wrote. Read only by the Drive cleanup. */
 export const ASSISTANT_SYNC_BACKUP_FILE_ID = "cortex_assistant_sync_backup_file_id";
+/** Mirror of syncEnabled that content scripts can read, so tabs measure dwell only while sync is on. */
+export const ASSISTANT_SYNC_ON_KEY = "cortex_assistant_sync_on";
+/** Drive id of Cortex Memory/Pages, so its pages are never captured. */
+export const ASSISTANT_SYNC_PAGES_FOLDER_ID = "cortex_assistant_sync_pages_folder_id";
+/** "Save text of LinkedIn posts I scroll past". Off unless the user turns it on. Content scripts read it. */
+export const ASSISTANT_SYNC_FEED_POSTS_KEY = "cortex_assistant_sync_feed_posts";

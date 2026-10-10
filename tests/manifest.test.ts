@@ -10,6 +10,7 @@ interface WarEntry {
 interface Manifest {
   manifest_version: number;
   name: string;
+  short_name: string;
   description: string;
   version: string;
   permissions: string[];
@@ -39,7 +40,9 @@ describe("manifest.json", () => {
     expect(manifest.web_accessible_resources).toHaveLength(1);
     const [entry] = manifest.web_accessible_resources;
     expect(entry.use_dynamic_url).toBe(true);
-    expect([...entry.resources].sort()).toEqual(["fonts/*.woff2", "icons/icon-48.png"]);
+    // The overlay links mascot.css and draws mascot/*.webp inside its shadow root on the page.
+    // connect-frame.html is the Connect AI Agents tab: an extension frame inside the closed shadow root.
+    expect([...entry.resources].sort()).toEqual(["connect-frame.html", "fonts/*.woff2", "icons/icon-48.png", "mascot.css", "mascot/*.webp"]);
     expect(entry.matches).toEqual(["http://*/*", "https://*/*"]);
   });
 
@@ -51,10 +54,12 @@ describe("manifest.json", () => {
 
 describe("store listing fields (Phase 2.9)", () => {
   it("uses the release name and description", () => {
-    expect(manifest.name).toBe("Cortex: Private Memory for Everything You Read");
+    expect(manifest.name).toBe("Bobbin: Browsing Memory for AI");
+    expect(manifest.short_name).toBe("Bobbin");
     expect(manifest.description).toBe(
-      "Ask anything you've read, watched or scanned. Pages, YouTube, tables and images, indexed on your device."
+      "The missing memory for your AI. Bobbin remembers pages you read for Claude, ChatGPT, Gemini, and Grok. Free."
     );
+    expect(manifest.description.startsWith("The missing memory for your AI.")).toBe(true);
   });
 
   it("keeps name within 75 and description within 132 characters", () => {
@@ -85,7 +90,9 @@ describe("store listing fields (Phase 2.9)", () => {
       oauth2?: { client_id: string; scopes: string[] };
     };
     expect(raw.permissions).toContain("identity");
+    expect(raw.permissions).toContain("unlimitedStorage");
     expect(raw.host_permissions).toEqual(["http://*/*", "https://*/*"]);
+    // The setup pointer runs under the existing host access; nothing extra is requested.
     expect(raw.optional_host_permissions).toBeUndefined();
     expect(raw.oauth2?.scopes).toEqual(["https://www.googleapis.com/auth/drive.file"]);
     expect(raw.oauth2?.client_id).toBe(

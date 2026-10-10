@@ -17,6 +17,9 @@ export type CortexBusInbound =
       settings: ChatSettings;
     }
   | { kind: "chat-abort"; tabId: number; requestId: number }
+  /** Load the embedding model ahead of the first question. */
+  | { kind: "chat-warm" }
+  | { kind: "copy-text"; requestId: number; text: string }
   | {
       kind: "digest-run";
       tabId: number;
@@ -27,5 +30,6 @@ export type CortexBusInbound =
 
 export type CortexBusOutbound =
   | { kind: "chat-event"; tabId: number; requestId: number; event: ChatStreamEvent }
+  | { kind: "copy-done"; requestId: number; ok: boolean }
   | { kind: "digest-done"; tabId: number; result: DigestResult }
   | { kind: "digest-error"; tabId: number; message: string };

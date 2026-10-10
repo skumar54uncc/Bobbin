@@ -11,6 +11,8 @@ export const PAGE_TYPES = [
   "Feed",
   "App",
   "Utility",
+  "LinkedIn profile",
+  "LinkedIn details",
   "Other",
 ] as const;
 
@@ -79,6 +81,24 @@ function isRepo(hostname: string, path: string): boolean {
   return true;
 }
 
+/** /in/<slug>/ is a profile; /in/<slug>/details/... is one of its full lists (experience, education, skills). */
+function linkedInPersonType(hostname: string, path: string): PageType | null {
+  if (!isHost(hostname, ["linkedin.com"])) return null;
+  if (/^\/in\/[^/]+\/details\//.test(path)) return "LinkedIn details";
+  if (/^\/in\/[^/]+\/?$/.test(path)) return "LinkedIn profile";
+  return null;
+}
+
+/** The stored type, except LinkedIn person pages, which rows saved before they had their own types read as Other. */
+export function visitPageType(stored: PageType, url: string): PageType {
+  try {
+    const parsed = new URL(url);
+    return linkedInPersonType(parsed.hostname, parsed.pathname.toLowerCase()) ?? stored;
+  } catch {
+    return stored;
+  }
+}
+
 /** Rule based page type from the URL. Unknown pages are Other. */
 export function pageTypeForUrl(raw: string): PageType {
   let url: URL;
@@ -89,6 +109,8 @@ export function pageTypeForUrl(raw: string): PageType {
   }
   const h = url.hostname;
   const path = url.pathname.toLowerCase();
+  const linkedIn = linkedInPersonType(h, path);
+  if (linkedIn) return linkedIn;
   const newsPath = path === "/news" || path.startsWith("/news/");
 
   if (host(h) === "youtu.be" && path.length > 1) return "Video";

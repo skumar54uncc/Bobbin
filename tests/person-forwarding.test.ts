@@ -10,10 +10,10 @@ describe("sanitizePersonDetail", () => {
   it("keeps the detail a profile page carried, trimmed and capped", () => {
     const out = sanitizePersonDetail({
       location: "  Indian Trail,   North Carolina  ",
-      about: "x".repeat(2_000),
+      about: "x".repeat(4_000),
       roleTitle: "Co-founder",
       pastRoles: Array.from({ length: 9 }, (_, i) => ({ title: `Role ${i}`, company: `Co ${i}` })),
-      education: ["Appalachian State University, BSBA", "UNC Charlotte", "Extra school", "Fourth school"],
+      education: ["Appalachian State University, BSBA", "UNC Charlotte", "Extra school", "Fourth school", "Fifth school", "Sixth school"],
       connectionDegree: "1st",
       connectionCount: 317,
       industry: "Software",
@@ -22,10 +22,10 @@ describe("sanitizePersonDetail", () => {
     });
 
     expect(out.location).toBe("Indian Trail, North Carolina");
-    expect(out.about!.length).toBeLessThanOrEqual(600);
+    expect(out.about!.length).toBeLessThanOrEqual(3_000);
     expect(out.roleTitle).toBe("Co-founder");
     expect(out.pastRoles).toHaveLength(5);
-    expect(out.education).toHaveLength(3);
+    expect(out.education).toHaveLength(5);
     expect(out.connectionDegree).toBe("1st");
     expect(out.connectionCount).toBe(317);
     expect(out.industry).toBe("Software");

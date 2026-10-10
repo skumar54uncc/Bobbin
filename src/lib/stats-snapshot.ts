@@ -73,6 +73,7 @@ export async function computeFreshSnapshot(
       title: v.title,
       visitedAt: v.visitedAt,
       hostname: v.hostname,
+      ...(v.readMs ? { readMs: v.readMs } : {}),
     })),
   };
 

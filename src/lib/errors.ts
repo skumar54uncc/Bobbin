@@ -36,14 +36,14 @@ export const ERROR_MESSAGES: Record<ErrorCode, CortexErrorShape> = {
     userMessage:
       "On-device AI is not available in this browser profile.",
     userAction:
-      "Enable Cloud Chat in Cortex settings, or use a Chrome build with built-in AI.",
+      "Enable Cloud Chat in Bobbin settings, or use a Chrome build with built-in AI.",
     recoverable: true,
   },
   [ERROR_CODES.CLOUD_NOT_CONFIGURED]: {
     code: ERROR_CODES.CLOUD_NOT_CONFIGURED,
     userMessage: "Cloud Chat is not set up.",
     userAction:
-      "Open Cortex settings and add your Gemini API key from Google AI Studio.",
+      "Open Bobbin settings and add your Gemini API key from Google AI Studio.",
     recoverable: true,
   },
   [ERROR_CODES.CLOUD_API_KEY_INVALID]: {
@@ -90,8 +90,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, CortexErrorShape> = {
   },
   [ERROR_CODES.STORAGE_FULL]: {
     code: ERROR_CODES.STORAGE_FULL,
-    userMessage: "Cortex storage limit reached.",
-    userAction: "Clear old data from Cortex settings.",
+    userMessage: "Bobbin storage limit reached.",
+    userAction: "Clear old data from Bobbin settings.",
     recoverable: true,
   },
   [ERROR_CODES.RATE_LIMITED]: {
@@ -131,6 +131,16 @@ export const ERROR_MESSAGES: Record<ErrorCode, CortexErrorShape> = {
     recoverable: true,
   },
 };
+
+/** Map a known error code to its user sentence. Unknown snake_case codes become `fallback`. */
+export function displayError(text: string | undefined, fallback: string): string {
+  if (!text) return fallback;
+  if (Object.prototype.hasOwnProperty.call(ERROR_MESSAGES, text)) {
+    return ERROR_MESSAGES[text as ErrorCode].userMessage;
+  }
+  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(text) && text.length <= 40) return fallback;
+  return text;
+}
 
 export function payloadFromCode(code: ErrorCode): {
   code: ErrorCode;

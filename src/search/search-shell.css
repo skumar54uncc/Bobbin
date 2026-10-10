@@ -3,14 +3,14 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #e4e2dd;
-  color: #1c1917;
+  background: #f8f1e6;
+  color: #2e231d;
 }
 
 html[data-theme="dark"],
 html[data-theme="dark"] body {
-  background: #141312;
-  color: #f2efe9;
+  background: #221a15;
+  color: #f3e9dc;
   color-scheme: dark;
 }
 
@@ -18,8 +18,8 @@ html[data-theme="dark"] body {
 @media (prefers-color-scheme: dark) {
   html:not([data-theme="light"]),
   html:not([data-theme="light"]) body {
-    background: #141312;
-    color: #f2efe9;
+    background: #221a15;
+    color: #f3e9dc;
     color-scheme: dark;
   }
 }
@@ -42,11 +42,11 @@ html[data-theme="dark"] body {
 }
 
 html[data-theme="dark"] .cx-shell-boot-error {
-  color: #f2efe9;
+  color: #f3e9dc;
 }
 
 @media (prefers-color-scheme: dark) {
   html:not([data-theme="light"]) .cx-shell-boot-error {
-    color: #f2efe9;
+    color: #f3e9dc;
   }
 }

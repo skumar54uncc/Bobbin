@@ -1,6 +1,6 @@
 {
-  "overlay.brand": "Cortex",
-  "overlay.tagline": "Private library of pages you read on this device.",
+  "overlay.brand": "Bobbin",
+  "overlay.tagline": "Private library of pages you read on this device",
   "ask.placeholder": "Ask about pages you have read",
   "ask.sendHint": "Enter to send · Shift+Enter new line",
   "errors.rate_limited": "Too many requests. Slow down for a minute."

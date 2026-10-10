@@ -199,10 +199,10 @@ export type ValidateResult =
 export function validateBackup(raw: unknown): ValidateResult {
   try {
     const top = obj(raw, "backup");
-    if (top.format !== BACKUP_FORMAT) throw new Invalid("This file is not a Cortex backup.");
-    if (top.version !== BACKUP_VERSION) throw new Invalid("This backup was made by a different Cortex version.");
+    if (top.format !== BACKUP_FORMAT) throw new Invalid("This file is not a Bobbin backup.");
+    if (top.version !== BACKUP_VERSION) throw new Invalid("This backup was made by a different Bobbin version.");
     const schemaVersion = id(top, "schemaVersion", "backup");
-    if (schemaVersion > CORTEX_DB_SCHEMA_VERSION) throw new Invalid("This backup is newer than this Cortex. Update Cortex first.");
+    if (schemaVersion > CORTEX_DB_SCHEMA_VERSION) throw new Invalid("This backup is newer than this Bobbin. Update Bobbin first.");
     const exportedAt = num(top, "exportedAt", "backup");
     const s = obj(top.stores, "stores");
 
@@ -214,6 +214,7 @@ export function validateBackup(raw: unknown): ValidateResult {
       if (docIds.has(docId)) throw new Invalid(`${w}: duplicate id`);
       docIds.add(docId);
       const chunkingVersion = optNum(o, "chunkingVersion", w);
+      const readMs = optNum(o, "readMs", w);
       return {
         id: docId,
         url: url(o, "url", w),
@@ -224,6 +225,7 @@ export function validateBackup(raw: unknown): ValidateResult {
         visitCount: optNum(o, "visitCount", w) ?? 1,
         importanceScore: optNum(o, "importanceScore", w) ?? 0,
         ...(chunkingVersion !== undefined ? { chunkingVersion } : {}),
+        ...(readMs !== undefined ? { readMs } : {}),
       };
     });
 
@@ -251,12 +253,14 @@ export function validateBackup(raw: unknown): ValidateResult {
     const visitLog = rows(s, "visitLog").map((r, n) => {
       const w = `visitLog[${n}]`;
       const o = obj(r, w);
+      const readMs = optNum(o, "readMs", w);
       return {
         url: url(o, "url", w),
         title: str(o, "title", w),
         hostname: str(o, "hostname", w),
         visitedAt: num(o, "visitedAt", w),
         textLength: optNum(o, "textLength", w) ?? 0,
+        ...(readMs !== undefined ? { readMs } : {}),
       };
     });
 
@@ -364,7 +368,7 @@ export function validateBackup(raw: unknown): ValidateResult {
     return { ok: true, backup, counts };
   } catch (e) {
     if (e instanceof Invalid) return { ok: false, error: e.message };
-    return { ok: false, error: "This file could not be read as a Cortex backup." };
+    return { ok: false, error: "This file could not be read as a Bobbin backup." };
   }
 }
 
@@ -538,7 +542,9 @@ export async function restoreBackup(backup: CortexBackup, opts: RestoreOptions):
       for (const p of s.people) {
         if (!allowed.get(p.profileUrl)) continue;
         if (await db.people.where("profileUrl").equals(p.profileUrl).first()) continue;
-        await db.people.add(p);
+        // Backups from before local photos carry a LinkedIn photo URL. It is not kept.
+        const { photoUrl: _photoUrl, ...row } = p as typeof p & { photoUrl?: unknown };
+        await db.people.add(row);
         added.people += 1;
       }
 

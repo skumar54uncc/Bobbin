@@ -14,11 +14,30 @@ import {
   ASSISTANT_SYNC_ALARM,
   ASSISTANT_SYNC_ALARM_PERIOD_MIN,
   ASSISTANT_SYNC_SOON_ALARM,
-  ASSISTANT_SYNC_SOON_DELAY_MIN,
+  countUnsyncedVisits,
+  listSyncWarnings,
   readSyncEngineState,
   setDriveFolderTrashHandler,
   writeSyncEngineState,
 } from "../assistant-sync/db";
+import { listMemoryPageTexts, listMemorySearches } from "../assistant-sync/local-memory-read";
+import {
+  plannedFlushAt,
+  syncStatusLine,
+  VERIFY_EVERY_MS,
+  type FlushReason,
+} from "../assistant-sync/schedule";
+import {
+  AssistantSyncMessageSchema,
+  DwellAllowedMessageSchema,
+  DwellMessageSchema,
+  FeedPostMessageSchema,
+  type FeedPostMessage,
+  parseMessage,
+  SyncWorkReplySchema,
+  type DwellMessage,
+  type SyncWorkReply,
+} from "../assistant-sync/messages";
 import {
   applyRetention,
   forgetAll,
@@ -48,17 +67,26 @@ import {
 } from "../shared/shell-routing";
 import { storageLocalGet, storageLocalSet } from "../shared/storage-local";
 import {
-  ASSISTANT_SYNC_ARCHIVES_KEY,
   ASSISTANT_SYNC_BACKUP_FILE_ID,
+  ASSISTANT_SYNC_FEED_POSTS_KEY,
   ASSISTANT_SYNC_FILE_ID,
   ASSISTANT_SYNC_FOLDER_ID,
+  ASSISTANT_SYNC_ON_KEY,
+  ASSISTANT_SYNC_PAGES_FOLDER_ID,
   ASSISTANT_SYNC_RETENTION_KEY,
+  ASSISTANT_SYNC_SHEET_DETAIL_KEY,
 } from "../assistant-sync/preference-keys";
 import {
+  dwellReportPageOk,
   indexPayloadUrlMatchesTab,
   isOptionsPageSender,
+  isGuidePanelSender,
+  isConnectFrameSender,
+  isExtensionPageSender,
   isPrivilegedExtensionSender,
 } from "../lib/message-security";
+import { GUIDE_KEY, GUIDE_PANEL_PATH } from "../guide/state";
+import { COPY_MESSAGE, COPY_TEXT_MAX } from "../guide/exec-copy";
 import {
   CORTEX_EXTENSION_BUS_CHANNEL,
   type CortexBusInbound,
@@ -103,8 +131,16 @@ import {
 import { openCortexSearchForTab } from "../lib/open-cortex-search";
 import { openOverlayOnTab } from "../lib/overlay-injector";
 import { requestExtraction } from "../lib/extract-injector";
-import { canonicalLinkedInUrl, sanitizePersonDetail, type LinkedInEntity } from "../lib/capture/linkedin";
+import { canonicalLinkedInUrl, sameLinkedInProfile, sanitizePersonDetail, type LinkedInEntity } from "../lib/capture/linkedin";
 import { deletePerson, listPeople, upsertPerson } from "../lib/people";
+import { MAX_PACKET_CHARS } from "../attach/packet";
+import { buildPacketItems, parsePacketRequest, type PacketDeps } from "../attach/packet-items";
+import { insertIntoField, type InsertResult } from "../attach/insert-field";
+import { cacheProfilePhoto, getProfilePhoto, profilesWithPhotos } from "../lib/profile-photos";
+import { applyDwellReport, readingTimeFor, type DwellLedger } from "../lib/reading-time";
+import { FLUSH_LOG_KEY, appendFlushLog, flushLogEntry } from "../assistant-sync/flush-log";
+import { canonicalizeUrl, samePage } from "../assistant-sync/canonical-url";
+import { isChallengePage } from "../assistant-sync/challenge";
 import { resolveEnteredUrl, toSuggestions } from "../lib/omnibox";
 import { saveHighlight } from "../lib/highlights";
 import { sanitizeExtraChunks, sanitizeImageInputs, type ImageInput } from "../lib/capture/extra-chunks";
@@ -212,16 +248,22 @@ async function maybeRecordPerson(person: unknown, pageUrl: string): Promise<bool
   const cap = (v: unknown, n: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
   const name = cap(p.name, 120);
   if (!name) return false;
-  await upsertPerson({
+  // Location, about, roles, education and company detail (validated here
+  // because the payload comes from the page).
+  const detail = sanitizePersonDetail(person);
+  const id = await upsertPerson({
     kind: p.kind,
     name,
     headline: cap(p.headline, 220),
     company: cap(p.company, 120),
     profileUrl: canonical,
-    // Location, about, roles, education and company detail (validated here
-    // because the payload comes from the page).
-    ...sanitizePersonDetail(person),
+    ...detail,
   });
+  // The user is on this profile now, so this is the only moment Cortex asks LinkedIn for the photo.
+  if (id != null && settings.profilePhotosEnabled && detail.photoUrl) {
+    void cacheProfilePhoto(canonical, detail.photoUrl, { logo: p.kind === "company" }).catch(() => undefined);
+  }
+  void chrome.storage?.session?.set({ cortexPeopleTick: Date.now() }).catch(() => undefined);
   return true;
 }
 
@@ -239,10 +281,20 @@ function minCharsForUrl(url: string): number {
 let offscreenCreating: Promise<void> | null = null;
 
 const cortexBus = new BroadcastChannel(CORTEX_EXTENSION_BUS_CHANNEL);
+const pendingCopy = new Map<number, (ok: boolean) => void>();
+let copySeq = 0;
 
 cortexBus.onmessage = (ev: MessageEvent<CortexBusOutbound>) => {
   const d = ev.data;
   if (!d?.kind) return;
+  if (d.kind === "copy-done") {
+    const finish = pendingCopy.get(d.requestId);
+    if (finish) {
+      pendingCopy.delete(d.requestId);
+      finish(d.ok);
+    }
+    return;
+  }
   if (d.kind === "chat-event") {
     deliverOverlayMessage(d.tabId, {
       type: "CORTEX_CHAT_PUSH",
@@ -300,9 +352,13 @@ async function ensureOffscreen(): Promise<void> {
 
       await chrome.offscreen.createDocument({
         url: chrome.runtime.getURL("offscreen.html"),
-        reasons: [chrome.offscreen.Reason.WORKERS],
+        reasons: [
+          chrome.offscreen.Reason.WORKERS,
+          chrome.offscreen.Reason.DOM_PARSER,
+          "CLIPBOARD" as chrome.offscreen.Reason,
+        ],
         justification:
-          "Compute local MiniLM embeddings (Transformers.js) for Cortex.",
+          "Compute local MiniLM embeddings (Transformers.js), read imported history pages, and copy text when a host page blocks the clipboard in the in-page panel.",
       });
       // #region agent log
       agentDebugLog({
@@ -323,6 +379,11 @@ async function ensureOffscreen(): Promise<void> {
         },
       });
       // #endregion
+      try {
+        if (await chrome.offscreen.hasDocument?.()) return;
+      } catch {
+        /* ignore */
+      }
       throw e;
     }
   })();
@@ -334,6 +395,36 @@ async function ensureOffscreen(): Promise<void> {
   }
 }
 
+/** Host-framed connect-frame cannot call writeText. Offscreen CLIPBOARD copies with execCommand. */
+function copyOnceViaBus(text: string, waitMs: number): Promise<boolean | "timeout"> {
+  const requestId = ++copySeq;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingCopy.delete(requestId);
+      resolve("timeout");
+    }, waitMs);
+    pendingCopy.set(requestId, (ok) => {
+      clearTimeout(timer);
+      resolve(ok);
+    });
+    cortexBus.postMessage({ kind: "copy-text", requestId, text } satisfies CortexBusInbound);
+  });
+}
+
+async function copyThroughOffscreen(text: string): Promise<boolean> {
+  try {
+    await ensureOffscreen();
+  } catch {
+    /* Document may already exist; the bus copy still runs. */
+  }
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const result = await copyOnceViaBus(text, 400);
+    if (result === true) return true;
+    if (result === false) return false;
+  }
+  return false;
+}
+
 function storedId(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -342,36 +433,40 @@ function storedId(value: unknown): string | null {
 async function readAssistantSyncLaunch(): Promise<{
   folderId: string | null;
   fileId: string | null;
-  backupFileId: string | null;
   retentionDays?: number;
-  archivesEnabled?: boolean;
+  sheetDetail?: string;
+  backupId: string | null;
+  pagesFolderId: string | null;
 }> {
   const stored = await storageLocalGet([
     ASSISTANT_SYNC_FOLDER_ID,
     ASSISTANT_SYNC_FILE_ID,
-    ASSISTANT_SYNC_BACKUP_FILE_ID,
+    ASSISTANT_SYNC_PAGES_FOLDER_ID,
     ASSISTANT_SYNC_RETENTION_KEY,
-    ASSISTANT_SYNC_ARCHIVES_KEY,
+    ASSISTANT_SYNC_SHEET_DETAIL_KEY,
+    ASSISTANT_SYNC_BACKUP_FILE_ID,
   ]);
   const retention = stored[ASSISTANT_SYNC_RETENTION_KEY];
-  const archives = stored[ASSISTANT_SYNC_ARCHIVES_KEY];
+  const detail = stored[ASSISTANT_SYNC_SHEET_DETAIL_KEY];
   return {
     folderId: storedId(stored[ASSISTANT_SYNC_FOLDER_ID]),
     fileId: storedId(stored[ASSISTANT_SYNC_FILE_ID]),
-    backupFileId: storedId(stored[ASSISTANT_SYNC_BACKUP_FILE_ID]),
     retentionDays: typeof retention === "number" ? retention : undefined,
-    archivesEnabled: typeof archives === "boolean" ? archives : undefined,
+    sheetDetail: typeof detail === "string" ? detail : undefined,
+    backupId: storedId(stored[ASSISTANT_SYNC_BACKUP_FILE_ID]),
+    pagesFolderId: storedId(stored[ASSISTANT_SYNC_PAGES_FOLDER_ID]),
   };
 }
 
-async function writeAssistantSyncIds(
-  ids: { folderId?: string | null; fileId?: string | null; backupFileId?: string | null } | undefined
-): Promise<void> {
+type SyncWorkAction = "alarm" | "now" | "enable" | "disable" | "cleanup" | "pages";
+/** The user's answer to a question Settings asked: restore or create the sheet, the old files cleanup, or removed Pages docs. */
+type SyncWorkAnswer = { choice?: "restore" | "create"; cleanup?: "trash" | "keep"; pages?: "undo" | "dismiss" };
+
+async function writeAssistantSyncIds(ids: { folderId?: string | null; fileId?: string | null } | undefined): Promise<void> {
   if (!ids) return;
   const patch: Record<string, string | null> = {};
   if ("folderId" in ids) patch[ASSISTANT_SYNC_FOLDER_ID] = ids.folderId ?? null;
   if ("fileId" in ids) patch[ASSISTANT_SYNC_FILE_ID] = ids.fileId ?? null;
-  if ("backupFileId" in ids) patch[ASSISTANT_SYNC_BACKUP_FILE_ID] = ids.backupFileId ?? null;
   if (Object.keys(patch).length === 0) return;
   await storageLocalSet(patch);
 }
@@ -382,7 +477,7 @@ async function silentDriveToken(): Promise<string> {
     chrome.identity.getAuthToken({ interactive: false }, (token) => {
       const err = chrome.runtime.lastError;
       if (err?.message || !token) {
-        reject(new Error(err?.message || "Sign in to Google is needed before Cortex can sync."));
+        reject(new Error(err?.message || "Sign in to Google is needed before Bobbin can sync."));
         return;
       }
       resolve(token);
@@ -390,124 +485,504 @@ async function silentDriveToken(): Promise<string> {
   });
 }
 
+function sendToOffscreen<T>(message: Record<string, unknown>): Promise<T | { ok: false; error: string }> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (result) => {
+      if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message ?? "offscreen_unreachable" });
+      else resolve(result as T);
+    });
+  });
+}
+
+const OTHER_DEVICE_CURSOR_KEY = "cortex_assist_other_device_since";
+/** The first pass looks back this far for pages Chrome synced from other devices. */
+const OTHER_DEVICE_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+const OTHER_DEVICE_PAGES_PER_PASS = 500;
+const OTHER_DEVICE_VISITS_PER_PASS = 300;
+
+interface OtherDeviceVisit {
+  id: string;
+  url: string;
+  title: string;
+  visitedAt: number;
+}
+
+/**
+ * Visits chrome.history marks isLocal false: Chrome synced them from the user's other signed-in
+ * devices. Title, URL, and time only. A missing isLocal (older Chrome) counts as this device.
+ */
+async function collectOtherDeviceVisits(now: number): Promise<{ visits: OtherDeviceVisit[]; until: number }> {
+  const stored = await storageLocalGet([OTHER_DEVICE_CURSOR_KEY]);
+  const cursor = stored[OTHER_DEVICE_CURSOR_KEY];
+  const since = typeof cursor === "number" ? cursor : now - OTHER_DEVICE_LOOKBACK_MS;
+  const items = await chrome.history.search({ text: "", startTime: since, endTime: now, maxResults: OTHER_DEVICE_PAGES_PER_PASS });
+  const found: OtherDeviceVisit[] = [];
+  for (const item of items) {
+    if (!item.url) continue;
+    // isLocal is Chrome 115+; the installed @types/chrome predates it.
+    const visits = (await chrome.history.getVisits({ url: item.url })) as (chrome.history.VisitItem & { isLocal?: boolean })[];
+    for (const visit of visits) {
+      if (visit.isLocal !== false) continue;
+      const at = visit.visitTime ?? 0;
+      if (at <= since || at > now) continue;
+      found.push({ id: `other:${visit.visitId}`, url: item.url, title: item.title ?? "", visitedAt: at });
+    }
+  }
+  found.sort((a, b) => a.visitedAt - b.visitedAt);
+  const kept: OtherDeviceVisit[] = [];
+  const allowed = new Map<string, boolean>();
+  for (const visit of found) {
+    if (kept.length >= OTHER_DEVICE_VISITS_PER_PASS) break;
+    let ok = allowed.get(visit.url);
+    if (ok === undefined) {
+      ok = !(await shouldSkipIndexing(visit.url, {})).skip;
+      allowed.set(visit.url, ok);
+    }
+    if (ok) kept.push(visit);
+  }
+  const capped = kept.length >= OTHER_DEVICE_VISITS_PER_PASS;
+  return { visits: kept, until: capped ? kept[kept.length - 1]!.visitedAt : now };
+}
+
+async function sendSyncWork(action: SyncWorkAction, token: string, answer: SyncWorkAnswer = {}): Promise<SyncWorkReply> {
+  const launch = await readAssistantSyncLaunch();
+  const other =
+    action === "alarm" || action === "now"
+      ? await collectOtherDeviceVisits(Date.now()).catch(() => null)
+      : null;
+  await ensureOffscreen();
+  const raw = await sendToOffscreen<unknown>({
+    type: "CORTEX_ASSISTANT_SYNC_WORK",
+    action,
+    token,
+    folderId: launch.folderId,
+    fileId: launch.fileId,
+    retentionDays: launch.retentionDays,
+    sheetDetail: launch.sheetDetail,
+    backupId: launch.backupId,
+    otherDeviceVisits: other?.visits ?? [],
+    ...answer,
+  });
+  const reply = parseMessage(SyncWorkReplySchema, raw) ?? { ok: false, error: "Sync did not start." };
+  if (reply.ids) await writeAssistantSyncIds(reply.ids);
+  if (reply.pagesFolderId && reply.pagesFolderId !== launch.pagesFolderId) {
+    await storageLocalSet({ [ASSISTANT_SYNC_PAGES_FOLDER_ID]: reply.pagesFolderId });
+  }
+  if (other && reply.otherDeviceStored) await storageLocalSet({ [OTHER_DEVICE_CURSOR_KEY]: other.until });
+  if (action !== "disable" && action !== "cleanup" && action !== "pages" && !reply.confirm) void recordFlush(action, reply);
+  return reply;
+}
+
+let flushLogChain: Promise<unknown> = Promise.resolve();
+
+function recordFlush(action: "alarm" | "now" | "enable", reply: SyncWorkReply): Promise<unknown> {
+  const entry = flushLogEntry(action, reply, Date.now());
+  devLog.info("[Cortex] sync pass", entry);
+  flushLogChain = flushLogChain
+    .then(async () => {
+      const stored = await chrome.storage.local.get(FLUSH_LOG_KEY);
+      await chrome.storage.local.set({ [FLUSH_LOG_KEY]: appendFlushLog(stored[FLUSH_LOG_KEY], entry) });
+    })
+    .catch(() => undefined);
+  return flushLogChain;
+}
+
+function dropCachedToken(token: string): Promise<void> {
+  return new Promise((resolve) => chrome.identity.removeCachedAuthToken({ token }, () => resolve()));
+}
+
+async function markAuthNeeded(): Promise<void> {
+  const state = await readSyncEngineState();
+  await writeSyncEngineState({ ...state, authNeeded: true });
+}
+
+/** Mirror of the sync switch in local storage, kept for readers outside the offscreen database. */
+function mirrorSyncOn(on: boolean): void {
+  void storageLocalSet({ [ASSISTANT_SYNC_ON_KEY]: on }).catch(() => undefined);
+}
+
+/** Tabs measure attention only where capture would run: never incognito, paused, blocked, or sensitive. */
+async function dwellAllowed(url: string, sender: chrome.runtime.MessageSender): Promise<boolean> {
+  if (!indexPayloadUrlMatchesTab(url, sender)) return false;
+  return passesIndexGate(url, sender);
+}
+
+async function passesIndexGate(url: string, sender: chrome.runtime.MessageSender): Promise<boolean> {
+  const gate = await shouldSkipIndexing(url, sender).catch(() => ({ skip: true as const }));
+  return !gate.skip;
+}
+
+/** The page each tab was last cleared to measure, so its final report still counts after the address moves on. */
+const DWELL_PAGES_KEY = "cortex_dwell_pages";
+
+async function rememberDwellPage(tabId: number, url: string): Promise<void> {
+  const stored = await chrome.storage.session.get(DWELL_PAGES_KEY);
+  const pages = (stored[DWELL_PAGES_KEY] ?? {}) as Record<string, string>;
+  pages[tabId] = url;
+  await chrome.storage.session.set({ [DWELL_PAGES_KEY]: pages });
+}
+
+async function dwellReportAllowed(tabId: number, report: DwellMessage, sender: chrome.runtime.MessageSender): Promise<boolean> {
+  const stored = await chrome.storage.session.get(DWELL_PAGES_KEY);
+  const measured = ((stored[DWELL_PAGES_KEY] ?? {}) as Record<string, string>)[tabId];
+  if (!dwellReportPageOk(report, sender.tab?.url, measured)) return false;
+  return passesIndexGate(report.url, sender);
+}
+
+const LOCAL_DWELL_KEY = "cortex_local_dwell";
+let localDwellChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Reports are handled one at a time in arrival order, so a final report never
+ * lands before an earlier one and no time is counted twice. The new part of
+ * each report goes to the page's reading time; session storage survives worker restarts.
+ */
+function handleDwellReport(tabId: number, report: DwellMessage, sender: chrome.runtime.MessageSender): void {
+  localDwellChain = localDwellChain
+    .then(async () => {
+      if (!(await dwellReportAllowed(tabId, report, sender))) return;
+      onDwellReport(tabId, report);
+      const stored = await chrome.storage.session.get(LOCAL_DWELL_KEY);
+      const ledger = (stored[LOCAL_DWELL_KEY] ?? {}) as DwellLedger;
+      if (await applyDwellReport(ledger, tabId, report)) onIndexCommitted();
+      await chrome.storage.session.set({ [LOCAL_DWELL_KEY]: ledger });
+    })
+    .catch(() => undefined);
+}
+
+function forgetLocalDwell(tabId: number): void {
+  localDwellChain = localDwellChain
+    .then(async () => {
+      const stored = await chrome.storage.session.get(LOCAL_DWELL_KEY);
+      const map = (stored[LOCAL_DWELL_KEY] ?? {}) as DwellLedger;
+      const pages = ((await chrome.storage.session.get(DWELL_PAGES_KEY))[DWELL_PAGES_KEY] ?? {}) as Record<string, string>;
+      delete pages[tabId];
+      await chrome.storage.session.set({ [DWELL_PAGES_KEY]: pages });
+      if (!(tabId in map)) return;
+      delete map[tabId];
+      await chrome.storage.session.set({ [LOCAL_DWELL_KEY]: map });
+    })
+    .catch(() => undefined);
+}
+
+/**
+ * One pass in the offscreen document. On a 401 the cached token is dropped and the
+ * pass runs once more with a fresh silent token; a second refusal pauses sync until
+ * the user reconnects from Settings.
+ */
 async function forwardAssistantSync(
-  action: "alarm" | "now" | "enable" | "disable",
-  tokenFromPage?: string
-): Promise<unknown> {
+  action: SyncWorkAction,
+  tokenFromPage?: string,
+  answer: SyncWorkAnswer = {}
+): Promise<SyncWorkReply> {
   try {
     if (action === "disable") {
-      await ensureOffscreen();
-      const launch = await readAssistantSyncLaunch();
-      const response = await new Promise<
-        | {
-            ok?: boolean;
-            error?: string;
-            ids?: { folderId?: string | null; fileId?: string | null };
-            backupFileId?: string | null;
-          }
-        | undefined
-      >((resolve) => {
-        chrome.runtime.sendMessage(
-          {
-            type: "CORTEX_ASSISTANT_SYNC_WORK",
-            action: "disable",
-            token: "",
-            folderId: launch.folderId,
-            fileId: launch.fileId,
-            backupFileId: launch.backupFileId,
-          },
-          (result) => {
-            if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
-            else resolve(result as typeof response);
-          }
-        );
-      });
-      return response ?? { ok: true, status: "disabled" };
+      const reply = await sendSyncWork("disable", "");
+      mirrorSyncOn(false);
+      await chrome.alarms.clear(ASSISTANT_SYNC_SOON_ALARM);
+      return reply.ok === false ? reply : { ok: true, status: "disabled" };
     }
-    const token = action === "enable" ? tokenFromPage : await silentDriveToken();
-    if (!token) throw new Error("Sign in to Google is needed before Cortex can sync.");
-    const launch = await readAssistantSyncLaunch();
-    await ensureOffscreen();
-    const response = await new Promise<
-      | {
-          ok?: boolean;
-          error?: string;
-          ids?: { folderId?: string | null; fileId?: string | null };
-          backupFileId?: string | null;
-        }
-      | undefined
-    >((resolve) => {
-      chrome.runtime.sendMessage(
-        {
-          type: "CORTEX_ASSISTANT_SYNC_WORK",
-          action,
-          token,
-          folderId: launch.folderId,
-          fileId: launch.fileId,
-          backupFileId: launch.backupFileId,
-          retentionDays: launch.retentionDays,
-          archivesEnabled: launch.archivesEnabled,
-        },
-        (result) => {
-          if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
-          else resolve(result as typeof response);
-        }
-      );
-    });
-    if (response?.ids || "backupFileId" in (response ?? {})) {
-      await writeAssistantSyncIds({
-        ...(response?.ids ? { folderId: response.ids.folderId, fileId: response.ids.fileId } : {}),
-        ...(response && "backupFileId" in response ? { backupFileId: response.backupFileId ?? null } : {}),
-      });
+    if (action === "cleanup" && answer.cleanup !== "trash") return sendSyncWork("cleanup", "", answer);
+    if (action === "pages" && answer.pages !== "undo") return sendSyncWork("pages", "", answer);
+    let token = action === "enable" ? tokenFromPage : await silentDriveToken().catch(() => "");
+    if (!token) {
+      if (action !== "enable" && action !== "cleanup" && action !== "pages") await markAuthNeeded();
+      return { ok: false, status: "auth", error: "Sign in to Google is needed before Bobbin can sync." };
     }
-    return response;
+    if (action === "enable") mirrorSyncOn(true);
+    let reply = await sendSyncWork(action, token, answer);
+    if (reply.authFailed) {
+      await dropCachedToken(token);
+      token = await silentDriveToken().catch(() => "");
+      reply = token ? await sendSyncWork(action, token, answer) : reply;
+      if (reply.authFailed || !token) await markAuthNeeded();
+    }
+    if (reply.confirm) mirrorSyncOn((await readSyncEngineState()).syncEnabled);
+    if (reply.retryAt) await scheduleFlushAlarm(reply.retryAt);
+    return reply;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Sign in to Google is needed before Cortex can sync.";
+    const message = error instanceof Error ? error.message : "Sync did not start.";
     const state = await readSyncEngineState();
     await writeSyncEngineState({ ...state, lastError: message });
     return { ok: false, error: message };
   }
 }
 
-async function runAssistantSyncAlarm(): Promise<void> {
+/** Moves the one-shot flush alarm earlier, never later. */
+async function scheduleFlushAlarm(at: number): Promise<number> {
+  const existing = await chrome.alarms.get(ASSISTANT_SYNC_SOON_ALARM);
+  if (existing && existing.scheduledTime <= at && existing.scheduledTime > Date.now()) return existing.scheduledTime;
+  await chrome.alarms.create(ASSISTANT_SYNC_SOON_ALARM, { when: Math.max(at, Date.now() + 1_000) });
+  return at;
+}
+
+/** Sets the next flush for a reason. Returns its time, or null while sync cannot run. */
+async function planAssistantFlush(reason: FlushReason): Promise<number | null> {
   const state = await readSyncEngineState();
-  if (!state.syncEnabled) return;
-  await forwardAssistantSync("alarm");
+  const at = plannedFlushAt(state, reason, Date.now());
+  if (at == null) return null;
+  return scheduleFlushAlarm(at);
 }
 
-function scheduleAssistantSyncSoon(): void {
-  chrome.alarms.create(ASSISTANT_SYNC_SOON_ALARM, { delayInMinutes: ASSISTANT_SYNC_SOON_DELAY_MIN });
+let assistantSyncRunning: Promise<SyncWorkReply> | null = null;
+
+/** One pass at a time. A second caller shares the pass already running. */
+function runAssistantSyncPass(action: "alarm" | "now"): Promise<SyncWorkReply> {
+  if (assistantSyncRunning) return assistantSyncRunning;
+  assistantSyncRunning = (async () => {
+    const state = await readSyncEngineState();
+    if (!state.syncEnabled) return { ok: false, status: "disabled" };
+    if (state.authNeeded) return { ok: false, status: "auth" };
+    return forwardAssistantSync(action);
+  })().finally(() => {
+    assistantSyncRunning = null;
+  });
+  return assistantSyncRunning;
 }
 
-function captureAssistantSyncVisit(visit: {
+const OPEN_VISITS_KEY = "cortex_assist_open_visits";
+/** A tab that has not reported for this long is treated as left. */
+const OPEN_VISIT_STALE_MS = 60 * 60_000;
+
+interface OpenVisit {
+  id: string;
+  url: string;
+  /** The tab's address when the visit opened. A LinkedIn payload can name the profile by another URL. */
+  tabUrl?: string;
+  activeMs: number | null;
+  maxScrollPct: number | null;
+  seenAt: number;
+}
+
+let openVisitsChain: Promise<unknown> = Promise.resolve();
+
+/** Serialized read-modify-write of the open visit map in session storage. */
+function withOpenVisits<T>(edit: (visits: Record<string, OpenVisit>) => T): Promise<T> {
+  const run = openVisitsChain.then(async () => {
+    const stored = await chrome.storage.session.get(OPEN_VISITS_KEY);
+    const visits = (stored[OPEN_VISITS_KEY] ?? {}) as Record<string, OpenVisit>;
+    const out = edit(visits);
+    await chrome.storage.session.set({ [OPEN_VISITS_KEY]: visits });
+    return out;
+  });
+  openVisitsChain = run.catch(() => undefined);
+  return run;
+}
+
+/** Ends visits in the offscreen database, then plans an activity flush when any row became final. */
+async function finalizeVisits(ended: OpenVisit[], abandonedBefore?: number, keep: string[] = []): Promise<void> {
+  if (!ended.length && abandonedBefore == null) return;
+  await ensureOffscreen();
+  const reply = await sendToOffscreen<{ ok?: boolean; finalized?: number }>({
+    type: "CORTEX_ASSISTANT_SYNC_FINALIZE",
+    visits: ended.map(({ id, activeMs, maxScrollPct }) => ({ id, activeMs, maxScrollPct })),
+    keep,
+    ...(abandonedBefore != null ? { abandonedBefore } : {}),
+  });
+  if ("finalized" in reply && (reply.finalized ?? 0) > 0) await planAssistantFlush("activity");
+}
+
+function endTabVisit(tabId: number): void {
+  void withOpenVisits((visits) => {
+    const visit = visits[tabId];
+    delete visits[tabId];
+    return visit;
+  })
+    .then((visit) => (visit ? finalizeVisits([visit]) : undefined))
+    .catch(() => undefined);
+}
+
+/** Safety alarm housekeeping: ends visits whose tab is gone or silent, and rows left open by a restart. */
+async function finalizeStaleVisits(): Promise<void> {
+  const tabs = new Set((await chrome.tabs.query({})).map((tab) => String(tab.id)));
+  const now = Date.now();
+  const { ended, keep } = await withOpenVisits((visits) => {
+    const out: OpenVisit[] = [];
+    for (const [tabId, visit] of Object.entries(visits)) {
+      if (tabs.has(tabId) && now - visit.seenAt < OPEN_VISIT_STALE_MS) continue;
+      out.push(visit);
+      delete visits[tabId];
+    }
+    return { ended: out, keep: Object.values(visits).map((visit) => visit.id) };
+  });
+  await finalizeVisits(ended, now - OPEN_VISIT_STALE_MS, keep);
+}
+
+function onDwellReport(tabId: number, report: { url: string; activeMs: number; maxScrollPct: number; final: boolean }): void {
+  void withOpenVisits((visits) => {
+    const visit = visits[tabId];
+    if (!visit || !(samePage(visit.url, report.url) || (visit.tabUrl && samePage(visit.tabUrl, report.url)))) return null;
+    visit.activeMs = Math.max(visit.activeMs ?? 0, report.activeMs);
+    visit.maxScrollPct = Math.max(visit.maxScrollPct ?? 0, report.maxScrollPct);
+    visit.seenAt = Date.now();
+    if (!report.final) return null;
+    delete visits[tabId];
+    return visit;
+  })
+    .then((visit) => (visit ? finalizeVisits([visit]) : undefined))
+    .catch(() => undefined);
+}
+
+/**
+ * Stores the page as an open visit. A tab keeps one visit id per page, so re-indexing
+ * the same page (LinkedIn capture retries, SPA re-reads) updates one row. Moving to a
+ * new page ends the previous visit.
+ */
+async function captureAssistantSyncVisit(visit: {
   id: string;
   url: string;
   title: string;
   visitedAt: number;
-  linkedInFields?: {
-    kind: "person" | "company";
-    name: string;
-    headline?: string;
-    company?: string;
-    profileUrl: string;
-  } | null;
+  tabId?: number;
+  tabUrl?: string;
+  pageText?: string;
+  linkedInFields?: Record<string, unknown> | null;
 }): Promise<void> {
-  return readSyncEngineState()
-    .then((state) => {
-      if (!state.syncEnabled) return false;
-      return ensureOffscreen().then(
-        () =>
-          new Promise<boolean>((resolve) => {
-            chrome.runtime.sendMessage({ type: "CORTEX_ASSISTANT_SYNC_CAPTURE", visit }, () => {
-              chrome.runtime.lastError;
-              resolve(true);
-            });
-          })
-      );
-    })
-    .then((captured) => {
-      if (captured && visit.linkedInFields) scheduleAssistantSyncSoon();
+  const state = await readSyncEngineState();
+  if (!state.syncEnabled) return;
+  const { tabId, tabUrl, ...rest } = visit;
+  const launch = await readAssistantSyncLaunch();
+  const ownIds = { fileId: launch.fileId, folderId: launch.folderId, pagesFolderId: launch.pagesFolderId };
+  let row: Record<string, unknown> = { ...rest, ownIds, open: false };
+  let previous: OpenVisit | undefined;
+  if (tabId != null) {
+    // A hash or a dropped query key is the same page, not a new visit.
+    const page = canonicalizeUrl(visit.url) ?? visit.url;
+    const id = await withOpenVisits((visits) => {
+      const current = visits[tabId];
+      if (current && (canonicalizeUrl(current.url) ?? current.url) === page) {
+        current.seenAt = Date.now();
+        return current.id;
+      }
+      previous = current;
+      visits[tabId] = {
+        id: visit.id,
+        url: visit.url,
+        ...(tabUrl && tabUrl !== visit.url ? { tabUrl } : {}),
+        activeMs: null,
+        maxScrollPct: null,
+        seenAt: Date.now(),
+      };
+      return visit.id;
     });
+    row = { ...rest, ownIds, id, open: true };
+  }
+  await ensureOffscreen();
+  await sendToOffscreen({ type: "CORTEX_ASSISTANT_SYNC_CAPTURE", visit: row });
+  if (previous) await finalizeVisits([previous]);
+  else if (tabId == null) await planAssistantFlush("activity");
+}
+
+/** Ask any assistant's local record: searches and page text, with sync on or off. Never synced. */
+async function captureLocalMemoryVisit(visit: { id: string; url: string; title: string; visitedAt: number; pageText?: string }): Promise<void> {
+  const state = await readSyncEngineState();
+  const launch = await readAssistantSyncLaunch();
+  await ensureOffscreen();
+  await sendToOffscreen({
+    type: "CORTEX_LOCAL_MEMORY_CAPTURE",
+    visit: {
+      ...visit,
+      userDenylist: state.userDenylist,
+      retentionDays: state.retentionDays,
+      ownIds: { fileId: launch.fileId, folderId: launch.folderId, pagesFolderId: launch.pagesFolderId },
+    },
+  });
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  setTimeout(() => {
+    endTabVisit(tabId);
+    forgetLocalDwell(tabId);
+  }, FINAL_REPORT_GRACE_MS);
+});
+
+/** Page text sent with a visit. The read part is picked from it when the visit ends. */
+const ASSISTANT_SYNC_DRAFT_CHARS = 24_000;
+
+/**
+ * A feed post that stayed on screen 2 seconds. Only with "Save text of LinkedIn posts I scroll past"
+ * on, sync on, and the page passing the same gate as indexing (pause, block list, sensitive sites).
+ */
+async function captureFeedPost(post: FeedPostMessage, sender: chrome.runtime.MessageSender): Promise<void> {
+  const tabId = sender.tab?.id;
+  if (tabId == null) return;
+  const stored = await storageLocalGet([ASSISTANT_SYNC_FEED_POSTS_KEY, ASSISTANT_SYNC_ON_KEY]);
+  if (stored[ASSISTANT_SYNC_FEED_POSTS_KEY] !== true || stored[ASSISTANT_SYNC_ON_KEY] !== true) return;
+  if (!(await dwellAllowed(post.url, sender))) return;
+  const launch = await readAssistantSyncLaunch();
+  const visitId = await withOpenVisits((visits) => {
+    const visit = visits[tabId];
+    return visit && samePage(visit.url, post.url) ? visit.id : "";
+  });
+  await ensureOffscreen();
+  await sendToOffscreen({
+    type: "CORTEX_ASSISTANT_SYNC_POST",
+    post: {
+      url: post.url,
+      visitId,
+      seenAt: post.seenAt,
+      author: post.author,
+      text: post.text,
+      urn: post.urn,
+      ownIds: { fileId: launch.fileId, folderId: launch.folderId, pagesFolderId: launch.pagesFolderId },
+    },
+  });
+  await planAssistantFlush("activity");
+}
+
+/** The page's own final dwell report usually lands within this window after the URL changes. */
+const FINAL_REPORT_GRACE_MS = 1_500;
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url) return;
+  setTimeout(() => {
+    // Compare with the tab's address now, not the one in this event: a tab that moves twice inside
+    // the grace window (about:blank then the page, a redirect) already has a visit for the new page.
+    void chrome.tabs
+      .get(tabId)
+      .then((tab) => tab.url ?? "", () => "")
+      .then((now) => {
+        const page = (url: string) => canonicalizeUrl(url) ?? url.split("#")[0] ?? url;
+        return withOpenVisits((visits) => {
+          const visit = visits[tabId];
+          if (!visit || (now && (page(visit.url) === page(now) || (visit.tabUrl && page(visit.tabUrl) === page(now))))) return null;
+          delete visits[tabId];
+          return visit;
+        });
+      })
+      .then((visit) => (visit ? finalizeVisits([visit]) : undefined))
+      .catch(() => undefined);
+  }, FINAL_REPORT_GRACE_MS);
+});
+
+/** Browser start: session storage is empty, so every open row ends. The sheet is checked once a day. */
+async function startAssistantSync(): Promise<void> {
+  const state = await readSyncEngineState();
+  mirrorSyncOn(state.syncEnabled);
+  if (!state.syncEnabled) return;
+  if (state.layout && Date.now() - state.layout.verifiedAt >= VERIFY_EVERY_MS) {
+    await writeSyncEngineState({ ...state, verifyNext: true });
+  }
+  await finalizeVisits([], Date.now());
+  await planAssistantFlush("startup");
+}
+
+async function assistantSyncStatus(): Promise<Record<string, unknown>> {
+  const [state, pendingPages, alarm] = await Promise.all([
+    readSyncEngineState(),
+    countUnsyncedVisits(),
+    chrome.alarms.get(ASSISTANT_SYNC_SOON_ALARM),
+  ]);
+  const now = Date.now();
+  const { layout: _layout, ...publicState } = state;
+  return {
+    ok: true,
+    state: publicState,
+    pendingPages,
+    statusLine: syncStatusLine(state, pendingPages, now),
+    nextFlushAt: alarm?.scheduledTime ?? null,
+    syncNowAt: state.lastFlushAt + 60_000,
+  };
 }
 
 setDriveFolderTrashHandler(async () => {
@@ -530,6 +1005,7 @@ setDriveFolderTrashHandler(async () => {
       [ASSISTANT_SYNC_FOLDER_ID]: null,
       [ASSISTANT_SYNC_FILE_ID]: null,
       [ASSISTANT_SYNC_BACKUP_FILE_ID]: null,
+      [ASSISTANT_SYNC_PAGES_FOLDER_ID]: null,
     });
   }
 });
@@ -758,7 +1234,7 @@ async function maybeResurface(tabId: number, documentId: number, url: string): P
 
 async function commitIndexPayload(
   p: IndexPayload,
-  opts: { tabId?: number; extraChunks?: NewChunk[]; imageInputs?: ImageInput[]; replaceKinds?: ChunkKind[] } = {}
+  opts: { tabId?: number; tabUrl?: string; extraChunks?: NewChunk[]; imageInputs?: ImageInput[]; replaceKinds?: ChunkKind[] } = {}
 ): Promise<{
   id: number;
   chunks: number;
@@ -816,6 +1292,7 @@ async function commitIndexPayload(
     visitedAt: p.visitedAt,
     textLength: p.text.length,
   });
+  const detail = p.person ? sanitizePersonDetail(p.person) : null;
   const linkedInFields =
     p.person && (p.person.kind === "person" || p.person.kind === "company") && p.person.name.trim()
       ? {
@@ -824,6 +1301,20 @@ async function commitIndexPayload(
           headline: p.person.headline,
           company: p.person.company,
           profileUrl: p.person.profileUrl,
+          // Labeled profile fields for the Pages doc. Never the photo, contact info, or messages.
+          ...(p.person.kind === "person"
+            ? {
+                location: detail?.location,
+                about: detail?.about,
+                aboutTruncated: detail?.aboutTruncated === true,
+                experience: detail?.experience ?? [],
+                education: detail?.education ?? [],
+                schools: detail?.schools ?? [],
+                skills: detail?.skills ?? [],
+                publicView: detail?.publicView === true,
+                detailsPage: detail?.detailsPage,
+              }
+            : {}),
         }
       : null;
   void captureAssistantSyncVisit({
@@ -831,11 +1322,35 @@ async function commitIndexPayload(
     url: p.url,
     title: p.title,
     visitedAt: p.visitedAt,
+    tabId: opts.tabId ?? undefined,
+    tabUrl: opts.tabUrl,
+    pageText: p.text.slice(0, ASSISTANT_SYNC_DRAFT_CHARS),
     linkedInFields,
-  });
+  }).catch(() => undefined);
+  void captureLocalMemoryVisit({
+    id: `doc:${docId}:${p.visitedAt}`,
+    url: p.url,
+    title: p.title,
+    visitedAt: p.visitedAt,
+    pageText: p.text.slice(0, ASSISTANT_SYNC_DRAFT_CHARS),
+  }).catch(() => undefined);
 
   onIndexCommitted();
   return { id: docId, chunks: chunkIds.length };
+}
+
+/** Readable text of a fetched history page. The offscreen document parses it; the worker has no DOM. */
+async function extractHistoryHtmlViaOffscreen(html: string, url: string): Promise<{ title: string; text: string } | null> {
+  await ensureOffscreen();
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: "CORTEX_HISTORY_EXTRACT", html, url },
+      (r: { ok?: boolean; title?: unknown; text?: unknown } | undefined) => {
+        if (chrome.runtime.lastError || !r?.ok) resolve(null);
+        else resolve({ title: String(r.title ?? ""), text: String(r.text ?? "") });
+      }
+    );
+  });
 }
 
 let historyImportAbortRequested = false;
@@ -906,11 +1421,8 @@ async function runHistoryImportJob(
         }
 
         const html = await fetchHtmlForHistory(item.url);
-        if (html) {
-          const { extractPageTextFromHtml } = await import(
-            /* webpackChunkName: "history-extract" */ "../content/extract"
-          );
-          const rawExtract = extractPageTextFromHtml(html, item.url);
+        const rawExtract = html ? await extractHistoryHtmlViaOffscreen(html, item.url) : null;
+        if (rawExtract) {
           const titleRed = redactPII(rawExtract.title);
           const textRed = redactPII(rawExtract.text);
           extractedTitle = titleRed.redacted;
@@ -999,7 +1511,10 @@ async function runHistoryImportJob(
 }
 
 /** Runs BM25 + hybrid retrieval inside the offscreen document (stable lifetime). */
-function searchViaOffscreen(query: string, collectionId?: number): Promise<
+function searchViaOffscreen(
+  query: string,
+  opts?: { collectionId?: number; from?: number; to?: number; exact?: string; site?: string }
+): Promise<
   | { ok: true; hits: SearchHitDTO[]; evidence?: string }
   | { ok: false; error: string }
 > {
@@ -1007,7 +1522,14 @@ function searchViaOffscreen(query: string, collectionId?: number): Promise<
     void ensureOffscreen()
       .then(() => {
         chrome.runtime.sendMessage(
-          { type: "CORTEX_SEARCH_RUN", query, ...(collectionId != null ? { collectionId } : {}) },
+          {
+            type: "CORTEX_SEARCH_RUN",
+            query,
+            ...(opts?.collectionId != null ? { collectionId: opts.collectionId } : {}),
+            ...(opts?.from != null && opts.to != null ? { from: opts.from, to: opts.to } : {}),
+            ...(opts?.exact ? { exact: opts.exact } : {}),
+            ...(opts?.site ? { site: opts.site } : {}),
+          },
           (
             res:
               | {
@@ -1050,6 +1572,16 @@ function searchViaOffscreen(query: string, collectionId?: number): Promise<
       });
   });
 }
+
+const packetDeps: PacketDeps = {
+  searchPages: async (query, from, to) => {
+    const res = await searchViaOffscreen(query, { from, to });
+    return res.ok ? res.hits : [];
+  },
+  listPeople: (from, to) => listPeople({ since: from, until: to, limit: 200 }),
+  listSearches: listMemorySearches,
+  pageTexts: listMemoryPageTexts,
+};
 
 async function shouldSkipIndexing(
   urlStr: string,
@@ -1196,9 +1728,17 @@ async function openCortexSearchFromShortcut(): Promise<void> {
   });
 }
 
-configureSidePanelBehavior();
+addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  const message = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
+  // Chrome answers in-flight extension API calls with this after the worker stops.
+  if (message === "No SW") event.preventDefault();
+});
+
 installActiveTabCacheListeners();
-enableGlobalSidePanel();
+// Side panel setup waits for onInstalled / onStartup. Calling it while this
+// script is still evaluating rejects with "No SW" because Chrome has not
+// registered the worker yet.
 
 /** Toolbar icon — open search immediately (no stats popup). */
 function openCortexSearchFromToolbarClick(tab: chrome.tabs.Tab): void {
@@ -1396,11 +1936,31 @@ async function warmContentScriptOnTab(tabId: number, url: string): Promise<void>
   }
 }
 
+/**
+ * Tabs whose side panel shows the setup guide. The restricted-page handlers below would
+ * otherwise point a new tab's panel back at search. Session storage keeps them across restarts.
+ */
+const guideTabs = new Set<number>();
+void chrome.storage.session
+  .get(GUIDE_KEY)
+  .then((got) => {
+    for (const key of Object.keys((got[GUIDE_KEY] as Record<string, unknown> | undefined) ?? {})) {
+      const id = Number(key.replace(/^tab:/, ""));
+      if (Number.isInteger(id)) guideTabs.add(id);
+    }
+  })
+  .catch(() => undefined);
+chrome.tabs.onRemoved.addListener((tabId) => guideTabs.delete(tabId));
+
+function panelForRestrictedTab(tabId: number, url: string | undefined): void {
+  if (!guideTabs.has(tabId)) enableSidePanelForRestrictedTab(tabId, url);
+}
+
 chrome.tabs.onActivated.addListener((activeInfo) => {
   void chrome.tabs.get(activeInfo.tabId, (tab) => {
     if (chrome.runtime.lastError || tab?.id == null) return;
     const url = tab.url ?? "";
-    enableSidePanelForRestrictedTab(tab.id, url);
+    panelForRestrictedTab(tab.id, url);
     void warmContentScriptOnTab(activeInfo.tabId, url);
   });
 });
@@ -1408,7 +1968,7 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (tab.id == null) return;
   if (changeInfo.url != null || changeInfo.status === "complete") {
-    enableSidePanelForRestrictedTab(tab.id, tab.url ?? changeInfo.url);
+    panelForRestrictedTab(tab.id, tab.url ?? changeInfo.url);
   }
   if (
     tab.id != null &&
@@ -1460,10 +2020,10 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-  void getUserSettings();
-  void import("../shared/gemini-api-key").then((m) =>
-    m.ensureGeminiKeyTrustedAccess().then(() => m.migrateLegacyGeminiApiKey())
-  );
+  void getUserSettings().catch(() => undefined);
+  void import("../shared/gemini-api-key")
+    .then((m) => m.ensureGeminiKeyTrustedAccess().then(() => m.migrateLegacyGeminiApiKey()))
+    .catch(() => undefined);
   devLog.info("[Cortex] installed: local-only indexing (chunk-level)");
   scheduleStorageMaintenanceAlarm();
 
@@ -1474,6 +2034,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     void closeOffscreenDocument();
     void writeInitialStatsSnapshot();
   }
+  void startAssistantSync().catch(() => undefined);
 
   if (details.reason === "update") {
     void grandfatherIndexingConsentIfNeeded();
@@ -1482,38 +2043,54 @@ chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install") {
     // Do not start history backfill or live indexing until the user agrees
     // on the welcome page (INDEXING_CONSENT_KEY).
-    void storageLocalGet([ONBOARDING_DONE_KEY]).then((r) => {
-      if (r[ONBOARDING_DONE_KEY]) return;
-      void chrome.tabs.create({
-        url: chrome.runtime.getURL("onboarding.html"),
-        active: true,
-      });
-    });
+    void storageLocalGet("cortex_installed_at")
+      .then((r) => {
+        if (typeof r.cortex_installed_at === "number") return;
+        return storageLocalSet({ cortex_installed_at: Date.now() });
+      })
+      .catch(() => undefined);
+    void storageLocalGet([ONBOARDING_DONE_KEY])
+      .then((r) => {
+        if (r[ONBOARDING_DONE_KEY]) return;
+        return chrome.tabs.create({
+          url: chrome.runtime.getURL("onboarding.html"),
+          active: true,
+        });
+      })
+      .catch(() => undefined);
   }
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void getUserSettings();
-  void import("../shared/gemini-api-key").then((m) =>
-    m.ensureGeminiKeyTrustedAccess().then(() => m.migrateLegacyGeminiApiKey())
-  );
+  void getUserSettings().catch(() => undefined);
+  void import("../shared/gemini-api-key")
+    .then((m) => m.ensureGeminiKeyTrustedAccess().then(() => m.migrateLegacyGeminiApiKey()))
+    .catch(() => undefined);
   void grandfatherIndexingConsentIfNeeded();
   scheduleStorageMaintenanceAlarm();
   configureSidePanelBehavior();
   enableGlobalSidePanel();
+  void startAssistantSync().catch(() => undefined);
 });
+
+function quietChrome(result: unknown): void {
+  const pending = result as { catch?: (onReject: () => void) => unknown } | null | undefined;
+  if (pending && typeof pending.catch === "function") void pending.catch(() => undefined);
+}
 
 function scheduleStorageMaintenanceAlarm(): void {
   void syncContextMenus().catch(() => undefined);
-  chrome.alarms.create(ASSISTANT_SYNC_ALARM, { periodInMinutes: ASSISTANT_SYNC_ALARM_PERIOD_MIN });
-  chrome.alarms.create("cortex-evict-storage", { periodInMinutes: 360 });
+  quietChrome(chrome.alarms.create(ASSISTANT_SYNC_ALARM, { periodInMinutes: ASSISTANT_SYNC_ALARM_PERIOD_MIN }));
+  quietChrome(chrome.alarms.create("cortex-evict-storage", { periodInMinutes: 360 }));
   // Phase 4.2: daily retention sweep (no-op while retention is off).
-  chrome.alarms.create(RETENTION_ALARM, { delayInMinutes: 2, periodInMinutes: 24 * 60 });
+  quietChrome(chrome.alarms.create(RETENTION_ALARM, { delayInMinutes: 2, periodInMinutes: 24 * 60 }));
   // Phase 3.4: upgrade pages chunked with an older profile, a few per tick.
-  chrome.alarms.create(RECHUNK_ALARM, {
-    delayInMinutes: 1,
-    periodInMinutes: RECHUNK_ALARM_PERIOD_MIN,
-  });
+  quietChrome(
+    chrome.alarms.create(RECHUNK_ALARM, {
+      delayInMinutes: 1,
+      periodInMinutes: RECHUNK_ALARM_PERIOD_MIN,
+    })
+  );
 }
 
 const RETENTION_ALARM = "cortex-retention";
@@ -1565,16 +2142,23 @@ async function runRechunkTick(): Promise<void> {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ASSISTANT_SYNC_ALARM || alarm.name === ASSISTANT_SYNC_SOON_ALARM) {
-    void runAssistantSyncAlarm();
+  if (alarm.name === ASSISTANT_SYNC_ALARM) {
+    void finalizeStaleVisits()
+      .catch(() => undefined)
+      .then(() => planAssistantFlush("safety"))
+      .catch(() => undefined);
+    return;
+  }
+  if (alarm.name === ASSISTANT_SYNC_SOON_ALARM) {
+    void runAssistantSyncPass("alarm").catch(() => undefined);
     return;
   }
   if (alarm.name === RECHUNK_ALARM) {
-    void runRechunkTick();
+    void runRechunkTick().catch(() => undefined);
     return;
   }
   if (alarm.name === RETENTION_ALARM) {
-    void runRetentionSweep();
+    void runRetentionSweep().catch(() => undefined);
     return;
   }
   if (alarm.name !== "cortex-evict-storage") return;
@@ -1642,9 +2226,6 @@ async function addTabPageToCollection(
 // Context menus (Phase 5.3 highlights, 5.4 collections). Rebuilt from settings.
 // ---------------------------------------------------------------------------
 const HIGHLIGHT_MENU_ID = "cortex-save-highlight";
-const COLLECTION_MENU_ID = "cortex-collections";
-const COLLECTION_ITEM_PREFIX = "cortex-collection-";
-const COLLECTION_NEW_ID = "cortex-collection-new";
 const WEB_PATTERNS = ["http://*/*", "https://*/*"];
 
 async function syncContextMenus(): Promise<void> {
@@ -1652,61 +2233,18 @@ async function syncContextMenus(): Promise<void> {
   const settings = await getEffectiveSettings();
   await new Promise<void>((resolve) => chrome.contextMenus.removeAll(() => resolve()));
   if (settings.highlightsEnabled) {
-    chrome.contextMenus.create({
-      id: HIGHLIGHT_MENU_ID,
-      title: "Save to Cortex",
-      contexts: ["selection"],
-      documentUrlPatterns: WEB_PATTERNS,
-    });
+    chrome.contextMenus.create(
+      {
+        id: HIGHLIGHT_MENU_ID,
+        title: "Save to Bobbin",
+        contexts: ["selection"],
+        documentUrlPatterns: WEB_PATTERNS,
+      },
+      () => {
+        void chrome.runtime.lastError;
+      }
+    );
   }
-  chrome.contextMenus.create({
-    id: COLLECTION_MENU_ID,
-    title: "Add page to collection",
-    contexts: ["page"],
-    documentUrlPatterns: WEB_PATTERNS,
-  });
-  for (const c of await listCollections()) {
-    chrome.contextMenus.create({
-      id: `${COLLECTION_ITEM_PREFIX}${c.id}`,
-      parentId: COLLECTION_MENU_ID,
-      title: c.name.replace(/&/g, "&&"),
-      contexts: ["page"],
-      documentUrlPatterns: WEB_PATTERNS,
-    });
-  }
-  chrome.contextMenus.create({
-    id: COLLECTION_NEW_ID,
-    parentId: COLLECTION_MENU_ID,
-    title: "New collection...",
-    contexts: ["page"],
-    documentUrlPatterns: WEB_PATTERNS,
-  });
-}
-
-async function handleCollectionMenu(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab): Promise<void> {
-  if (tab?.id == null) return;
-  const id = String(info.menuItemId);
-  let collectionId: number | null = null;
-  if (id === COLLECTION_NEW_ID) {
-    let name: string | null = null;
-    try {
-      const [r] = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => window.prompt("Name for the new Cortex collection:", ""),
-      });
-      name = typeof r?.result === "string" ? r.result : null;
-    } catch {
-      name = null;
-    }
-    if (!name?.trim()) return;
-    collectionId = await createCollection(name);
-    await syncContextMenus();
-  } else if (id.startsWith(COLLECTION_ITEM_PREFIX)) {
-    collectionId = Number(id.slice(COLLECTION_ITEM_PREFIX.length));
-  }
-  if (collectionId == null || !Number.isFinite(collectionId)) return;
-  const res = await addTabPageToCollection(collectionId, tab);
-  flashBadge(tab.id, res.ok ? "+" : "!");
 }
 
 function flashBadge(tabId: number, text: string): void {
@@ -1733,7 +2271,7 @@ async function handleSaveHighlight(info: chrome.contextMenus.OnClickData, tab?: 
     const [r] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: (q: string) =>
-        window.prompt(`Save to Cortex:\n"${q.slice(0, 140)}"\n\nAdd a note (optional):`, ""),
+        window.prompt(`Save to Bobbin:\n"${q.slice(0, 140)}"\n\nAdd a note (optional):`, ""),
       args: [quote],
     });
     // prompt() returns null on Cancel; executeScript reports that as a missing
@@ -1754,10 +2292,6 @@ async function handleSaveHighlight(info: chrome.contextMenus.OnClickData, tab?: 
 chrome.contextMenus?.onClicked.addListener((info, tab) => {
   if (info.menuItemId === HIGHLIGHT_MENU_ID) {
     void handleSaveHighlight(info, tab).catch((e) => devLog.warn("[Cortex] highlight:", e));
-    return;
-  }
-  if (String(info.menuItemId).startsWith(COLLECTION_ITEM_PREFIX)) {
-    void handleCollectionMenu(info, tab).catch((e) => devLog.warn("[Cortex] collection menu:", e));
   }
 });
 
@@ -1770,11 +2304,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ---------------------------------------------------------------------------
 // Address bar: keyword "cx" (Phase 5.2). Local search only.
 // ---------------------------------------------------------------------------
-const OMNIBOX_DEFAULT = "Search your Cortex library for <match>%s</match>";
+const OMNIBOX_DEFAULT = "Search your Bobbin library for <match>%s</match>";
 let omniboxSeq = 0;
 let omniboxLast: { query: string; bestUrl: string | null } = { query: "", bestUrl: null };
 
-chrome.omnibox?.setDefaultSuggestion({ description: OMNIBOX_DEFAULT });
+quietChrome(chrome.omnibox?.setDefaultSuggestion({ description: OMNIBOX_DEFAULT }));
 
 chrome.omnibox?.onInputChanged.addListener((text, suggest) => {
   const seq = ++omniboxSeq;
@@ -1782,7 +2316,7 @@ chrome.omnibox?.onInputChanged.addListener((text, suggest) => {
     const settings = await getEffectiveSettings();
     if (!settings.omniboxEnabled) {
       chrome.omnibox.setDefaultSuggestion({
-        description: "Cortex address bar search is off. Turn it on in Cortex settings.",
+        description: "Bobbin address bar search is off. Turn it on in Bobbin settings.",
       });
       suggest([]);
       return;
@@ -1851,14 +2385,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
 
   const type = (msg as { type: string }).type;
 
+  if (type === "CORTEX_KEEPALIVE") {
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (type === "CORTEX_CHAT_WARM") {
+    void ensureOffscreen().then(() => cortexBus.postMessage({ kind: "chat-warm" } satisfies CortexBusInbound)).catch(() => undefined);
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (type === "CORTEX_INDEX_REQUEST") {
     const tabId = sender.tab?.id;
     const url = String((msg as { url?: unknown }).url ?? "");
-    if (tabId == null || !indexPayloadUrlMatchesTab(url, sender)) {
+    const tabUrl = sender.tab?.url ?? "";
+    if (tabId == null || (!indexPayloadUrlMatchesTab(url, sender) && !sameLinkedInProfile(url, tabUrl))) {
       sendResponse({ ok: false, error: "bad_index_request" });
       return true;
     }
-    if (!rateLimitHit(`extract:${tabId}`, 20, sendResponse)) return true;
+    const entityPage = /linkedin\.com\/(?:in|company|school|showcase)\//i.test(url);
+    if (!rateLimitHit(`extract:${tabId}`, entityPage ? 60 : 20, sendResponse)) return true;
     void requestTabExtraction(tabId, url, sender).then(sendResponse);
     return true;
   }
@@ -1960,21 +2507,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
   if (type === "CORTEX_INDEX") {
     const p = (msg as { payload: IndexPayload }).payload;
     const domainKey = `index:${hostnameFromUrl(p.url)}`;
-    if (!rateLimitHit(domainKey, 30, sendResponse)) return true;
+    // A profile or company page still gets saved when the text index is
+    // rate limited. LinkedIn retries would otherwise drop the person.
+    const indexAllowed = p?.person
+      ? SW_RATE_LIMITER.check(domainKey, 30)
+      : rateLimitHit(domainKey, 30, sendResponse);
+    if (!p?.person && !indexAllowed) return true;
 
     void (async () => {
       try {
-        const gate = await shouldSkipIndexing(
-          (msg as { payload: IndexPayload }).payload.url,
-          sender
-        );
+        const gate = await shouldSkipIndexing(p.url, sender);
         if (gate.skip) {
           sendResponse({ ok: false, reason: gate.reason });
           return;
         }
 
-        const p = (msg as { payload: IndexPayload }).payload;
-        if (!indexPayloadUrlMatchesTab(p.url, sender)) {
+        const tabUrl = sender.tab?.url ?? "";
+        if (!indexPayloadUrlMatchesTab(p.url, sender) && !sameLinkedInProfile(p.url, tabUrl)) {
           sendResponse({
             ok: false,
             error: ERROR_CODES.INDEX_URL_MISMATCH,
@@ -1983,7 +2532,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
           return;
         }
 
+        // A captcha, Cloudflare check, or login wall is not the page. Its real title triggers a new capture.
+        if (isChallengePage({ url: p.url, title: p.title, text: p.text })) {
+          sendResponse({ ok: false, reason: "challenge" });
+          return;
+        }
+
         const personRecorded = p.person ? await maybeRecordPerson(p.person, p.url) : false;
+        if (!indexAllowed) {
+          sendResponse({ ok: personRecorded, reason: "rate_limited", person: personRecorded });
+          return;
+        }
 
         const settingsForExtras = await getEffectiveSettings();
         const extraChunks = sanitizeExtraChunks(p.extraChunks, {
@@ -2022,6 +2581,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
         delete p.imageInputs;
         const { id: docId, chunks } = await commitIndexPayload(p, {
           tabId: sender.tab?.id,
+          tabUrl: sender.tab?.url,
           extraChunks,
           imageInputs,
         });
@@ -2137,10 +2697,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     return true;
   }
 
+  if (type === "CORTEX_PHOTO_GET") {
+    // The saved copy only. Nothing here talks to LinkedIn.
+    if (!rateLimitHit(`photo:${sender.tab?.id ?? 0}`, 300, sendResponse)) return true;
+    const profileUrl = String((msg as { profileUrl?: unknown }).profileUrl ?? "").slice(0, 2048);
+    void (async () => {
+      const settings = await getEffectiveSettings();
+      const photo = settings.profilePhotosEnabled && profileUrl ? await getProfilePhoto(profileUrl) : undefined;
+      if (!photo) {
+        sendResponse({ ok: false });
+        return;
+      }
+      const bytes = new Uint8Array(photo.bytes);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 8192) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192) as unknown as number[]);
+      }
+      sendResponse({ ok: true, mime: photo.mime, b64: btoa(bin) });
+    })().catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (type === "CORTEX_PEOPLE_LIST") {
     void (async () => {
       const q = String((msg as { q?: unknown }).q ?? "").slice(0, 200);
-      const people = await listPeople({ q, limit: 200 });
+      const [rows, settings] = await Promise.all([listPeople({ q, limit: 200 }), getEffectiveSettings()]);
+      const saved = settings.profilePhotosEnabled ? await profilesWithPhotos() : new Set<string>();
+      const people = rows.map((p) => ({ ...p, hasPhoto: saved.has(p.profileUrl) }));
       sendResponse({ ok: true as const, people });
     })().catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
@@ -2302,11 +2885,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
         const cidRaw = (msg as { collectionId?: unknown }).collectionId;
         const collectionId =
           typeof cidRaw === "number" && Number.isFinite(cidRaw) ? cidRaw : undefined;
-        const result = await searchViaOffscreen(q, collectionId);
+        const from = Number((msg as { from?: unknown }).from);
+        const to = Number((msg as { to?: unknown }).to);
+        const exact = String((msg as { exact?: unknown }).exact ?? "").slice(0, 120);
+        const site = String((msg as { site?: unknown }).site ?? "").slice(0, 80);
+        const result = await searchViaOffscreen(q, {
+          collectionId,
+          ...(Number.isFinite(from) && Number.isFinite(to) ? { from, to } : {}),
+          ...(exact.trim() ? { exact: exact.trim() } : {}),
+          ...(site.trim() ? { site: site.trim() } : {}),
+        });
         if (result.ok) {
+          const read = await readingTimeFor(result.hits.map((h) => h.url)).catch(() => new Map<string, number>());
           sendResponse({
             ok: true,
-            hits: result.hits,
+            hits: result.hits.map((h) => (read.has(h.url) ? { ...h, readMs: read.get(h.url) } : h)),
             evidence: result.evidence,
           });
         } else {
@@ -2576,7 +3169,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
 
   if (type === "CORTEX_INDEXING_CONSENT_GRANT") {
     if (!isConsentUiSender(sender)) {
-      sendResponse({ ok: false, error: "This action is only available from Cortex." });
+      sendResponse({ ok: false, error: "This action is only available from Bobbin." });
       return true;
     }
     const runBackfill =
@@ -2681,40 +3274,192 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
     return true;
   }
 
+  if (type === "CORTEX_SYNC_LABEL") {
+    if (sender.id !== chrome.runtime.id) {
+      sendResponse({ on: false });
+      return true;
+    }
+    void readSyncEngineState().then((state) => {
+      const phase = !state.syncEnabled
+        ? "wave"
+        : state.lastError
+          ? "lost"
+          : state.backfillPhase === "reading" || state.backfillPhase === "writing" || !state.lastSyncedAt
+            ? "syncing"
+            : "connected";
+      sendResponse({ on: state.syncEnabled, phase });
+    });
+    return true;
+  }
+
   if (type === "CORTEX_ASSISTANT_SYNC") {
+    const parsed = parseMessage(AssistantSyncMessageSchema, msg);
+    // Status: any Cortex page, including the Connect frame inside the panel. Content scripts report the web page URL.
+    if (parsed?.action === "status" && isExtensionPageSender(sender)) {
+      void assistantSyncStatus().then(sendResponse, () => sendResponse({ ok: false, error: "status_failed" }));
+      return true;
+    }
+    // Enable from the click in the Connect frame inside the Cortex panel. Nothing else from there.
+    const frameEnable = parsed?.action === "enable" && isConnectFrameSender(sender);
     // Options opens in a tab, so sender.tab is set. A web page still cannot send this.
-    if (!isPrivilegedExtensionSender(sender) && !isOptionsPageSender(sender)) {
-      sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
+    if (!isPrivilegedExtensionSender(sender) && !isOptionsPageSender(sender) && !frameEnable) {
+      sendResponse({ ok: false, error: "This action is only available from Bobbin settings." });
       return true;
     }
-    const action = (msg as { action?: string }).action;
-    if (action === "status") {
-      void readSyncEngineState().then((state) => sendResponse({ ok: true, state }));
-      return true;
-    }
-    if (action !== "enable" && action !== "now" && action !== "disable") {
+    if (!parsed) {
       sendResponse({ ok: false, error: "bad_action" });
       return true;
     }
-    // Interactive Enable must come from Settings (user gesture + getAuthToken).
-    if (action === "enable" && !isOptionsPageSender(sender)) {
-      sendResponse({ ok: false, error: "This action is only available from Cortex settings." });
+    const action = parsed.action;
+    if (action === "status") {
+      void assistantSyncStatus().then(sendResponse, () => sendResponse({ ok: false, error: "status_failed" }));
+      return true;
+    }
+    // Interactive Enable comes from the Enable click in Settings, the setup side panel, or the Connect frame.
+    if (action === "enable" && !isOptionsPageSender(sender) && !isGuidePanelSender(sender) && !frameEnable) {
+      sendResponse({ ok: false, error: "This action is only available from Bobbin settings." });
+      return true;
+    }
+    if (action === "pages" && !isOptionsPageSender(sender)) {
+      sendResponse({ ok: false, error: "This action is only available from Bobbin settings." });
       return true;
     }
     if (action === "now") {
-      void readSyncEngineState().then((state) => {
+      void readSyncEngineState().then(async (state) => {
         if (!state.syncEnabled) {
-          sendResponse({ ok: false, error: "Turn Assist Sync on before syncing." });
+          sendResponse({ ok: false, error: "Turn Assistant Sync on before syncing." });
           return;
         }
-        void forwardAssistantSync("now").then((result) => sendResponse(result));
+        // One flush a minute, Sync now included. Inside the minute the page counts down.
+        const waitMs = state.lastFlushAt + 60_000 - Date.now();
+        if (waitMs > 0) {
+          await planAssistantFlush("now");
+          sendResponse({ ok: true, status: "waiting", waitMs });
+          return;
+        }
+        sendResponse(await runAssistantSyncPass("now"));
       });
       return true;
     }
-    const pageToken = (msg as { token?: unknown }).token;
-    void forwardAssistantSync(action, typeof pageToken === "string" ? pageToken : undefined).then((result) =>
-      sendResponse(result)
+    void forwardAssistantSync(action, parsed.token, { choice: parsed.choice, cleanup: parsed.cleanup, pages: parsed.pages }).then(async (result) => {
+      if (action === "enable" && result.more) await planAssistantFlush("now");
+      // Restored days upload on the next pass.
+      if (action === "pages" && parsed.pages === "undo" && result.ok) await planAssistantFlush("now");
+      sendResponse(result);
+    });
+    return true;
+  }
+
+  if (type === "CORTEX_GUIDE_PANEL") {
+    const tabId = (msg as { tabId?: unknown }).tabId;
+    if (!isExtensionPageSender(sender) || typeof tabId !== "number" || !Number.isInteger(tabId)) {
+      sendResponse({ ok: false });
+      return true;
+    }
+    // Recorded before the write, so a restricted-page event for this tab cannot undo it.
+    guideTabs.add(tabId);
+    void chrome.sidePanel
+      .setOptions({ tabId, path: GUIDE_PANEL_PATH, enabled: true })
+      .then(
+        () => sendResponse({ ok: true }),
+        () => sendResponse({ ok: false })
+      );
+    return true;
+  }
+
+  if (type === "CORTEX_SYNC_WARNINGS") {
+    if (!isOptionsPageSender(sender)) {
+      sendResponse({ ok: false, error: "This action is only available from Bobbin settings." });
+      return true;
+    }
+    void listSyncWarnings().then(
+      (warnings) => sendResponse({ ok: true, warnings }),
+      () => sendResponse({ ok: false, error: "warnings_failed" })
     );
+    return true;
+  }
+
+  // Attach to chat: only the Connect frame inside the Cortex panel asks.
+  if (type === "CORTEX_PACKET_ITEMS") {
+    const req = parsePacketRequest(msg);
+    if (!isConnectFrameSender(sender) || !req) {
+      sendResponse({ ok: false });
+      return true;
+    }
+    void buildPacketItems(req, packetDeps).then(
+      (items) => sendResponse({ ok: true, items }),
+      () => sendResponse({ ok: false })
+    );
+    return true;
+  }
+
+  // Writes into the chat page's focused field after the Insert click. Never submits.
+  if (type === "CORTEX_PACKET_INSERT") {
+    const text = String((msg as { text?: unknown }).text ?? "").slice(0, MAX_PACKET_CHARS);
+    if (!isConnectFrameSender(sender) || !text.trim()) {
+      sendResponse({ ok: false, reason: "rejected" });
+      return true;
+    }
+    void (async () => {
+      // The panel inside a page writes to that page; the side panel writes to the active tab.
+      const tabId = sender.tab?.id ?? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
+      if (tabId == null) return { ok: false, reason: "blocked" };
+      const [run] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func: insertIntoField, args: [text] });
+      const result = (run?.result as InsertResult | undefined) ?? { ok: false, reason: "rejected" };
+      if (result.ok && sender.tab?.id != null) {
+        chrome.tabs.sendMessage(sender.tab.id, { type: "CORTEX_CLOSE_SEARCH" }, { frameId: 0 }, () => void chrome.runtime.lastError);
+      }
+      return result;
+    })().then(sendResponse, () => sendResponse({ ok: false, reason: "blocked" }));
+    return true;
+  }
+
+  if (type === "CORTEX_DWELL_ALLOWED") {
+    const ask = parseMessage(DwellAllowedMessageSchema, msg);
+    if (sender.id !== chrome.runtime.id || sender.tab?.id == null || !ask) return false;
+    const tabId = sender.tab.id;
+    void dwellAllowed(ask.url, sender)
+      .then(async (ok) => {
+        if (ok) await rememberDwellPage(tabId, ask.url).catch(() => undefined);
+        sendResponse({ ok });
+      })
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (type === "CORTEX_FEED_POST") {
+    const post = parseMessage(FeedPostMessageSchema, msg);
+    if (sender.id !== chrome.runtime.id || sender.tab?.id == null || !post) return false;
+    void captureFeedPost(post, sender).catch(() => undefined);
+    return false;
+  }
+
+  if (type === "CORTEX_DWELL") {
+    const tabId = sender.tab?.id;
+    const report = parseMessage(DwellMessageSchema, msg);
+    if (sender.id !== chrome.runtime.id || tabId == null || !report) return false;
+    handleDwellReport(tabId, report, sender);
+    return false;
+  }
+
+  if (type === COPY_MESSAGE) {
+    const allowed =
+      isConnectFrameSender(sender) ||
+      isGuidePanelSender(sender) ||
+      isOptionsPageSender(sender) ||
+      isPrivilegedExtensionSender(sender);
+    const text = typeof (msg as { text?: unknown }).text === "string" ? (msg as { text: string }).text.slice(0, COPY_TEXT_MAX) : "";
+    if (!allowed || !text) {
+      sendResponse({ ok: false as const });
+      return true;
+    }
+    void (async () => {
+      try {
+        sendResponse({ ok: await copyThroughOffscreen(text) });
+      } catch {
+        sendResponse({ ok: false as const });
+      }
+    })();
     return true;
   }
 
@@ -2723,7 +3468,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse): boolean => {
       try {
         const section = String((msg as { section?: unknown }).section ?? "");
         // Whitelist only known options sections (Assist Sync deep link from Agents tab).
-        if (section === "cx-sec-assistant") {
+        if (
+          section === "cx-sec-assistant" ||
+          section === "cx-sec-capture" ||
+          section === "cx-sec-connect" ||
+          section === "cx-sec-about"
+        ) {
           await chrome.tabs.create({
             url: chrome.runtime.getURL(`options.html#${section}`),
             active: true,

@@ -1,22 +1,34 @@
 /// <reference types="chrome"/>
-import { FetchDriveApi, trashMemory, type DriveApi, type StoredMemoryIds } from "./drive-api";
+import { storeOtherDeviceVisits, type OtherDeviceVisit } from "./other-device";
 import {
+  FetchDriveApi,
+  googleErrorDetail,
+  googleStatus,
+  trashMemory,
+  type DriveApi,
+  type GoogleErrorDetail,
+  type MemoryChoice,
+  type StoredMemoryIds,
+} from "./drive-api";
+import {
+  answerLegacyCleanup,
+  checkLegacyFiles,
   disableAssistantSync,
   enableAssistantSync,
-  runSyncTick,
+  forbiddenMessage,
+  runFlush,
+  type FlushResult,
   type HistoryPerson,
   type HistoryVisit,
 } from "./sync-engine";
 import { readSyncEngineState, writeSyncEngineState } from "./db";
+import { dismissPagesNotice, undoPagesRemoval } from "./pages-sync";
 import { applyAssistantSyncPreferences } from "./preferences";
-import {
-  ASSISTANT_SYNC_BACKUP_FILE_ID,
-  ASSISTANT_SYNC_FILE_ID,
-  ASSISTANT_SYNC_FOLDER_ID,
-} from "./preference-keys";
+import { ASSISTANT_SYNC_FILE_ID, ASSISTANT_SYNC_FOLDER_ID } from "./preference-keys";
 import { loadTopicVectors } from "./topics";
+import type { FinalizedVisitInput } from "./capture";
 
-export { ASSISTANT_SYNC_BACKUP_FILE_ID, ASSISTANT_SYNC_FILE_ID, ASSISTANT_SYNC_FOLDER_ID };
+export { ASSISTANT_SYNC_FILE_ID, ASSISTANT_SYNC_FOLDER_ID };
 
 export interface MemoryIdStore {
   getIds(): Promise<StoredMemoryIds>;
@@ -61,10 +73,6 @@ export async function trashStoredMemoryFromChrome(
   return trashStoredMemory(memoryIdStore(ids), new FetchDriveApi(token));
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function loadCortexHistory(cutoffMs: number): Promise<{ visits: HistoryVisit[]; people: HistoryPerson[] }> {
   const { db } = await import(/* webpackChunkName: "assistant-sync-history" */ "../db/schema");
   const rows = await db.visitLog.where("visitedAt").aboveOrEqual(cutoffMs).toArray();
@@ -97,46 +105,136 @@ export interface AssistantSyncWorkResult {
   created?: boolean;
   warning?: string;
   ids?: StoredMemoryIds;
-  backupFileId?: string | null;
+  /** Google returned 401. The service worker refreshes the token once and retries. */
+  authFailed?: boolean;
+  /** Epoch ms when the service worker should schedule the next attempt. */
+  retryAt?: number;
+  more?: boolean;
+  /** Sheets requests this pass made, for the flush log. */
+  reads?: number;
+  writes?: number;
+  confirm?: "missing" | "trashed";
+  /** The failed Google call, for the flush log. */
+  errorDetail?: GoogleErrorDetail;
+  otherDeviceStored?: boolean;
+  /** Drive writes for the Pages docs this pass. */
+  docWrites?: number;
+  pagesError?: string;
+  /** The Pages folder, so the service worker never captures it. */
+  pagesFolderId?: string;
+}
+
+export interface AssistantSyncLaunch {
+  ids: StoredMemoryIds;
+  retentionDays?: number;
+  sheetDetail?: string;
+  /** Drive id of the JSON backup older builds wrote, for the one-time cleanup check. */
+  backupId?: string | null;
+  choice?: MemoryChoice;
+  cleanup?: "trash" | "keep";
+  pages?: "undo" | "dismiss";
+  /** Visits Chrome synced from the user's other devices, read by the service worker. */
+  otherDeviceVisits?: OtherDeviceVisit[];
 }
 
 function plainSyncError(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
-  if (message === "google_403" || message === "drive_folder_failed" || message === "drive_sheet_failed") {
-    return "Google refused the Drive call. Enable the Google Drive API and the Google Sheets API in this Cloud project, then press Enable again.";
-  }
+  if (googleStatus(error) === 403) return forbiddenMessage(error);
   if (message === "google_401") {
-    return "Google did not accept the sign-in. Press Enable and choose the test user account.";
+    return "Google did not accept the sign-in. Press Enable to reconnect Google Drive.";
+  }
+  if (message === "google_bad_response") {
+    return "Google sent a reply Bobbin could not read. Bobbin will try again.";
   }
   if (/failed to fetch/i.test(message)) {
-    return "Cortex could not reach Google. Reload the extension and press Enable again.";
+    return "Bobbin could not reach Google. Reload the extension and press Enable again.";
   }
   return message || "Sync did not start.";
 }
 
+function workResult(flush: FlushResult, created = false): AssistantSyncWorkResult {
+  return {
+    ok: flush.status === "ready",
+    status: flush.status,
+    appended: flush.appended,
+    created,
+    ...(flush.status === "auth" ? { authFailed: true } : {}),
+    ...(flush.error ? { error: flush.error } : {}),
+    ...(flush.errorDetail ? { errorDetail: flush.errorDetail } : {}),
+    ...(flush.warning ? { warning: flush.warning } : {}),
+    ...(flush.retryAt ? { retryAt: flush.retryAt } : {}),
+    ...(flush.more ? { more: true } : {}),
+    reads: flush.reads,
+    writes: flush.writes,
+    ...(flush.docWrites ? { docWrites: flush.docWrites } : {}),
+    ...(flush.pagesError ? { pagesError: flush.pagesError } : {}),
+  };
+}
+
+async function withPagesFolder(result: AssistantSyncWorkResult): Promise<AssistantSyncWorkResult> {
+  const { pagesFolderId } = await readSyncEngineState();
+  return pagesFolderId ? { ...result, pagesFolderId } : result;
+}
+
 /** Token comes from the service worker. This function performs the Google fetches. */
 export async function runAssistantSyncFromChrome(
-  action: "alarm" | "now" | "enable" | "disable",
+  action: "alarm" | "now" | "enable" | "disable" | "cleanup" | "pages",
   token: string,
-  launch: {
-    ids: StoredMemoryIds;
-    retentionDays?: number;
-    archivesEnabled?: boolean;
-    backupFileId?: string | null;
-  }
+  launch: AssistantSyncLaunch
 ): Promise<AssistantSyncWorkResult> {
   const store = memoryIdStore(launch.ids);
-  let backupFileId = launch.backupFileId ?? null;
-  const saveBackupId = async (id: string | null) => {
-    backupFileId = id;
-  };
   try {
     if (action === "disable") {
       await disableAssistantSync();
-      return { ok: true, status: "disabled", ids: store.current(), backupFileId };
+      return { ok: true, status: "disabled", ids: store.current() };
     }
-    const result = await runAssistantSyncWork(action, token, launch, store, saveBackupId, () => backupFileId);
-    return { ...result, ids: store.current(), backupFileId };
+    if (action === "cleanup") {
+      const answer = launch.cleanup ?? "keep";
+      await answerLegacyCleanup(answer === "trash" ? new FetchDriveApi(token) : null, answer);
+      return { ok: true, status: "ready", ids: store.current() };
+    }
+    if (action === "pages") {
+      if (launch.pages === "undo") await undoPagesRemoval(new FetchDriveApi(token));
+      else await dismissPagesNotice();
+      return { ok: true, status: "ready", ids: store.current() };
+    }
+    const api = new FetchDriveApi(token);
+    await applyAssistantSyncPreferences({ retentionDays: launch.retentionDays, sheetDetail: launch.sheetDetail });
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const now = Date.now();
+    const loadLibraryPeople = async () => (await loadCortexHistory(0)).people;
+    const legacy = async (ids: StoredMemoryIds) => {
+      await checkLegacyFiles(api, ids, launch.backupId).catch(() => undefined);
+    };
+    if (action === "enable") {
+      const result = await enableAssistantSync({
+        api,
+        ids: launch.ids,
+        now,
+        timeZone,
+        saveIds: (next) => store.setIds(next),
+        loadHistory: loadCortexHistory,
+        loadLibraryPeople,
+        choice: launch.choice,
+      });
+      if ("confirm" in result) {
+        return { ok: false, status: "confirm", confirm: result.confirm, ids: store.current() };
+      }
+      if (result.flush.status === "ready") await legacy(result.ids);
+      return withPagesFolder({ ...workResult(result.flush, result.created), ids: store.current() });
+    }
+    // Stored before the flush so they go out in this pass. Duplicates are skipped by id.
+    await storeOtherDeviceVisits(launch.otherDeviceVisits ?? [], launch.ids);
+    const flush = await runFlush({
+      api,
+      ids: launch.ids,
+      now,
+      timeZone,
+      mode: action === "now" ? "user" : "scheduled",
+      loadLibraryPeople,
+    });
+    if (flush.status === "ready") await legacy(launch.ids);
+    return withPagesFolder({ ...workResult(flush), otherDeviceStored: true, ids: store.current() });
   } catch (error) {
     const message = plainSyncError(error);
     try {
@@ -145,87 +243,25 @@ export async function runAssistantSyncFromChrome(
     } catch {
       /* The page still receives the message below. */
     }
-    return { ok: false, error: message, ids: store.current(), backupFileId };
+    const detail = googleErrorDetail(error);
+    return { ok: false, error: message, ...(detail ? { errorDetail: detail } : {}), ids: store.current() };
   }
 }
 
-async function runAssistantSyncWork(
-  action: "alarm" | "now" | "enable",
-  token: string,
-  launch: { retentionDays?: number; archivesEnabled?: boolean },
-  store: MemoryIdStore,
-  saveBackupId: (id: string | null) => Promise<void>,
-  currentBackupId: () => string | null
-): Promise<AssistantSyncWorkResult> {
-  const api = new FetchDriveApi(token);
-  const ids = await store.getIds();
-  await applyAssistantSyncPreferences({
-    retentionDays: launch.retentionDays,
-    archivesEnabled: launch.archivesEnabled,
-  });
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const now = Date.now();
-  const loadLibraryPeople = async () => (await loadCortexHistory(0)).people;
-  if (action === "enable") {
-    const result = await enableAssistantSync({
-      api,
-      ids,
-      now,
-      timeZone,
-      saveIds: (next) => store.setIds(next),
-      sleep,
-      loadHistory: loadCortexHistory,
-      loadLibraryPeople,
-      backupFileId: currentBackupId(),
-      saveBackupId,
-    });
-    return {
-      ok: result.tick.status === "ready",
-      status: result.tick.status,
-      appended: result.tick.appended,
-      created: result.created,
-      error: result.tick.error,
-      warning: result.tick.warning,
-      backupFileId: result.tick.backupFileId ?? currentBackupId(),
-    };
-  }
-  const tick = await runSyncTick({
-    api,
-    ids,
-    now,
-    timeZone,
-    fromAlarm: action === "alarm",
-    fromUser: action === "now",
-    sleep,
-    loadLibraryPeople,
-    backupFileId: currentBackupId(),
-    saveBackupId,
-  });
-  return {
-    ok: tick.status === "ready",
-    status: tick.status,
-    appended: tick.appended,
-    created: false,
-    error: tick.error,
-    warning: tick.warning,
-    backupFileId: tick.backupFileId ?? currentBackupId(),
-  };
-}
-
-/** Live visit hook. Dwell stays blank because the extension does not measure it yet. */
+/**
+ * Live visit hook. An open visit waits for the tab to leave the page; the service
+ * worker then calls finalizeVisit with the measured dwell.
+ */
 export async function captureVisitFromChrome(visit: {
   id: string;
   url: string;
   title: string;
   visitedAt: number;
-  linkedInFields?: {
-    kind: "person" | "company";
-    name: string;
-    headline?: string;
-    company?: string;
-    profileUrl: string;
-  } | null;
-}): Promise<{ ok: true; stored: boolean }> {
+  pageText?: string | null;
+  open?: boolean;
+  linkedInFields?: FinalizedVisitInput["linkedInFields"];
+  ownIds?: (StoredMemoryIds & { pagesFolderId?: string | null }) | null;
+}, embed?: (text: string) => Promise<number[] | null>): Promise<{ ok: true; stored: boolean }> {
   const state = await readSyncEngineState();
   if (!state.syncEnabled) return { ok: true, stored: false };
   const { captureFinalizedVisit } = await import(/* webpackChunkName: "assistant-sync-capture" */ "./capture");
@@ -236,7 +272,7 @@ export async function captureVisitFromChrome(visit: {
     url: visit.url,
     dwellMinutes: null,
     maxScrollPct: null,
-    pageText: null,
+    pageText: visit.pageText ?? null,
     pageEmbedding: null,
     hasPasswordInput: false,
     userDenylist: state.userDenylist,
@@ -244,6 +280,31 @@ export async function captureVisitFromChrome(visit: {
     linkedInDocument: null,
     linkedInFields: visit.linkedInFields ?? null,
     syncEnabled: true,
+    open: visit.open === true,
+    ownIds: visit.ownIds ?? null,
+    embed,
+  });
+  return { ok: true, stored: result.stored };
+}
+
+/** A LinkedIn feed post that stayed on screen 2 seconds. The service worker has checked the feed setting. */
+export async function captureFeedPostFromChrome(post: {
+  url: string;
+  visitId: string;
+  seenAt: number;
+  author: string;
+  text: string;
+  urn?: string;
+  ownIds?: (StoredMemoryIds & { pagesFolderId?: string | null }) | null;
+}): Promise<{ ok: true; stored: boolean }> {
+  const state = await readSyncEngineState();
+  if (!state.syncEnabled) return { ok: true, stored: false };
+  const { captureFeedPost } = await import(/* webpackChunkName: "assistant-sync-capture" */ "./capture");
+  const result = await captureFeedPost({
+    ...post,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    syncEnabled: true,
+    userDenylist: state.userDenylist,
   });
   return { ok: true, stored: result.stored };
 }

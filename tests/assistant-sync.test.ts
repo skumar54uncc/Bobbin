@@ -8,7 +8,7 @@ import { CANONICAL_QUERY_ALLOWLIST, canonicalizeUrl } from "../src/assistant-syn
 import { dailySummary } from "../src/assistant-sync/daily-summary";
 import { assistantSyncDb, setDriveFolderTrashHandler, wipeAssistantSyncOnLocalDelete } from "../src/assistant-sync/db";
 import { documentHasPasswordInput, syncDenyReason } from "../src/assistant-sync/denylist";
-import { buildExcerpt } from "../src/assistant-sync/excerpt";
+import { countsAsRead, GAP, readText } from "../src/assistant-sync/page-text";
 import { howFoundFromReferrer } from "../src/assistant-sync/linkedin-selectors";
 import { linkedInSyncRow } from "../src/assistant-sync/linkedin-sync";
 import { localVisitStamp } from "../src/assistant-sync/local-time";
@@ -60,6 +60,15 @@ describe("canonical url", () => {
     );
     expect(canonicalizeUrl("chrome://settings")).toBeNull();
   });
+
+  it("collapses tracking and fragment variants of one page, and keeps different paths apart", () => {
+    const storage = "https://one.google.com/storage";
+    expect(canonicalizeUrl("https://one.google.com/storage?utm_source=g1&g1_landing_page=5#plans")).toBe(storage);
+    expect(canonicalizeUrl("https://ONE.google.com/storage?hl=en")).toBe(storage);
+    // Different paths are different pages in Google One, so they stay separate rows.
+    expect(canonicalizeUrl("https://one.google.com/storage/management")).not.toBe(storage);
+    expect(canonicalizeUrl("https://one.google.com/u/0/storage")).not.toBe(storage);
+  });
 });
 
 describe("page type", () => {
@@ -91,6 +100,24 @@ describe("denylist", () => {
     expect(syncDenyReason("https://example.com/article")).toBeNull();
     expect(documentHasPasswordInput({ querySelector: () => ({}) })).toBe(true);
     expect(documentHasPasswordInput({ querySelector: () => null })).toBe(false);
+  });
+
+  it("never captures Bobbin's own sheet or folder", () => {
+    const ownIds = { fileId: "1AbCsheetId", folderId: "0FolderId" };
+    expect(syncDenyReason("https://docs.google.com/spreadsheets/d/1AbCsheetId/edit#gid=0", { ownIds })).toBe("cortex");
+    expect(syncDenyReason("https://drive.google.com/drive/u/0/folders/0FolderId", { ownIds })).toBe("cortex");
+    expect(syncDenyReason("https://drive.google.com/open?id=1AbCsheetId", { ownIds })).toBe("cortex");
+    // By title, before any id is stored.
+    expect(syncDenyReason("https://docs.google.com/spreadsheets/d/x/edit", { title: "Bobbin Memory - Google Sheets" })).toBe("cortex");
+    expect(syncDenyReason("https://drive.google.com/drive/folders/y", { title: "Bobbin Memory - Google Drive" })).toBe("cortex");
+    expect(syncDenyReason("https://docs.google.com/spreadsheets/d/x/edit", { title: "Cortex Memory - Google Sheets" })).toBe("cortex");
+    expect(syncDenyReason("https://docs.google.com/document/d/p/edit", { title: "Cortex Pages 2026-10-08 Thursday - Google Docs" })).toBe("cortex");
+    expect(syncDenyReason("https://docs.google.com/document/d/p/edit", { title: "Bobbin Pages 2026-10-08 Thursday - Google Docs" })).toBe("cortex");
+    expect(syncDenyReason("https://docs.google.com/spreadsheets/d/z/edit", { title: "Cortex Memory Archive 2026-09 - Google Sheets" })).toBe("cortex");
+    // Other files, and the same title anywhere else, are kept.
+    expect(syncDenyReason("https://docs.google.com/spreadsheets/d/other/edit", { title: "Budget - Google Sheets", ownIds })).toBeNull();
+    expect(syncDenyReason("https://docs.google.com/document/d/a/edit", { title: "Bobbin Memory notes - Google Docs" })).toBeNull();
+    expect(syncDenyReason("https://example.com/blog", { title: "Bobbin Memory" })).toBeNull();
   });
 });
 
@@ -132,22 +159,42 @@ describe("search capture", () => {
   });
 });
 
-describe("excerpt", () => {
-  it("requires a known dwell of at least 5 minutes and caps the text", () => {
-    expect(buildExcerpt("hello world", null)).toBeNull();
-    expect(buildExcerpt("hello world", 4.9)).toBeNull();
-    expect(buildExcerpt("  hello   world  ", 5)).toBe("hello world");
-    const long = `${"word ".repeat(400)}end`;
-    const excerpt = buildExcerpt(long, 12);
-    expect(excerpt).not.toBeNull();
-    expect(excerpt!.length).toBeLessThanOrEqual(1500);
-    expect(excerpt!.endsWith(" ")).toBe(false);
+describe("page text", () => {
+  it("counts a page as read at 20 seconds on screen or a 30% scroll, never on a missing measurement", () => {
+    expect(countsAsRead(null, null)).toBe(false);
+    expect(countsAsRead(19_999, 29)).toBe(false);
+    expect(countsAsRead(20_000, null)).toBe(true);
+    expect(countsAsRead(null, 30)).toBe(true);
+    expect(countsAsRead(1_000, 31)).toBe(true);
+  });
+
+  it("keeps up to 4,000 characters, from the start when the read part fits", () => {
+    expect(readText("  hello   world  ", null)).toBe("hello world");
+    expect(readText("para one\n\n\n\npara   two", 50)).toBe("para one\n\npara two");
+    const long = Array.from({ length: 2000 }, (_, i) => `w${i}`).join(" ");
+    const shallow = readText(long, 10);
+    expect(shallow.length).toBeLessThanOrEqual(4000);
+    expect(shallow.startsWith("w0 w1 ")).toBe(true);
+    expect(shallow).not.toContain(GAP.trim());
+  });
+
+  it("prefers the part scrolled through: the start and the last part read, middle marked", () => {
+    const long = Array.from({ length: 6000 }, (_, i) => `w${i}`).join(" ");
+    const deep = readText(long, 60);
+    expect(deep.length).toBeLessThanOrEqual(4000);
+    expect(deep.startsWith("w0 w1 ")).toBe(true);
+    expect(deep).toContain(GAP.trim());
+    // The read part ends 60% into the text, so the kept tail ends near there and not at the end.
+    const lastWord = Number(deep.split(" ").at(-1)!.slice(1));
+    expect(lastWord).toBeGreaterThan(3200);
+    expect(lastWord).toBeLessThan(3700);
+    expect(deep).not.toContain("w5999");
   });
 });
 
 describe("topics", () => {
-  it("lists 40 labels and returns at most three above the threshold", () => {
-    expect(new Set(TOPIC_CATALOG.map((t) => t.label)).size).toBe(40);
+  it("lists 73 distinct labels and returns at most three above the threshold", () => {
+    expect(new Set(TOPIC_CATALOG.map((t) => t.label)).size).toBe(73);
     expect(tagTopics(null)).toEqual([]);
     const labels = [
       { label: "RAG", vector: [1, 0, 0] },
@@ -209,6 +256,7 @@ describe("linkedin sync", () => {
     expect(row.person.company).toBe("Tidora");
     expect(row.person.howFound).toBe("");
     expect(row.person).not.toHaveProperty("photoUrl");
+    expect(JSON.stringify(row)).not.toMatch(/licdn|photo/i);
     expect(howFoundFromReferrer("https://www.linkedin.com/search/results/people/?keywords=tidora")).toBe("search");
     expect(howFoundFromReferrer("https://www.linkedin.com/feed/")).toBe("feed");
     expect(howFoundFromReferrer("https://www.linkedin.com/in/other/?trk=public_profile_browsemap")).toBe(
@@ -243,7 +291,7 @@ describe("capture", () => {
     expect(await assistantSyncDb.visits.count()).toBe(0);
   });
 
-  it("stores a visit once, skips excerpts when dwell is unknown, and redacts the title", async () => {
+  it("stores a visit once, saves page text only once it counts as read, and redacts the title", async () => {
     const first = await visit({
       title: "Mail ada@example.com",
       pageText: "A long article about pinecone pricing and indexes.",
@@ -262,10 +310,10 @@ describe("capture", () => {
     expect(row?.dwellMinutes).toBe(8);
     expect(row?.pageType).toBe("Article");
     const content = await assistantSyncDb.content.get("v1");
-    expect(content?.excerpt).toContain("pinecone");
+    expect(content?.text).toContain("pinecone");
   });
 
-  it("does not invent an excerpt for a pre sync row with blank dwell", async () => {
+  it("does not invent page text for a pre sync row with blank dwell", async () => {
     await visit({ id: "old", pageText: "x".repeat(2000), dwellMinutes: null });
     expect(await assistantSyncDb.content.get("old")).toBeUndefined();
   });
@@ -279,6 +327,16 @@ describe("capture", () => {
       engine: "Google",
       query: "who works at tesla",
     });
+  });
+
+  it("skips the Bobbin Memory sheet by its stored id", async () => {
+    const result = await visit({
+      url: "https://docs.google.com/spreadsheets/d/sheet-1/edit",
+      title: "Untitled",
+      ownIds: { fileId: "sheet-1", folderId: "folder-1" },
+    });
+    expect(result).toEqual({ stored: false, reason: "cortex" });
+    expect(await assistantSyncDb.visits.count()).toBe(0);
   });
 });
 

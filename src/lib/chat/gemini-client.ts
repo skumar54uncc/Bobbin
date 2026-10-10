@@ -1,3 +1,5 @@
+import { CONTINUE_PROMPT, MAX_CONTINUATIONS } from "./cloud-provider";
+
 /**
  * Cloud models, in order. The first is the one we want. The rest are tried
  * when that model is missing, rate-limited, or overloaded.
@@ -22,6 +24,8 @@ function modelUrl(model: string): string {
 
 export interface GeminiOptions {
   apiKey: string;
+  /** Tried before the built-in fallback list when the user set a model id. */
+  model?: string;
   systemPrompt?: string;
   temperature?: number;
   maxOutputTokens?: number;
@@ -52,20 +56,30 @@ function friendlyGeminiFailure(status: number): string {
   }
   if (status === 404) return "No Gemini model on this API key could answer.";
   if (status === 401 || status === 403) {
-    return "The Gemini API key was rejected. Check it in Cortex settings.";
+    return "The Gemini API key was rejected. Check it in Bobbin settings.";
   }
   return "Gemini could not answer just now.";
 }
 
+type GeminiTurn = { role: "user" | "model"; parts: { text: string }[] };
+
+type GeminiPart = { text?: string; thought?: boolean };
+
+/** Every visible text part of one SSE chunk. Thought parts are the model's notes, not the answer. */
+export function geminiChunkText(parts: GeminiPart[] | undefined): string {
+  return (parts ?? []).map((p) => (p.thought || typeof p.text !== "string" ? "" : p.text)).join("");
+}
+
 async function* streamGeminiModel(
   model: string,
-  prompt: string,
-  options: GeminiOptions
+  contents: GeminiTurn[],
+  options: GeminiOptions,
+  end: { cut: boolean }
 ): AsyncIterable<string> {
   const url = `${modelUrl(model)}?alt=sse`;
 
   const body = {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents,
     systemInstruction: options.systemPrompt
       ? { parts: [{ text: options.systemPrompt }] }
       : undefined,
@@ -104,35 +118,41 @@ async function* streamGeminiModel(
   };
   options.signal?.addEventListener("abort", onAbort, { once: true });
 
-  try {
-  while (true) {
-    if (options.signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
+  const read = (line: string): string => {
+    if (!line.startsWith("data:")) return "";
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") return "";
+    try {
+      const parsed = JSON.parse(data) as {
+        candidates?: Array<{ content?: { parts?: GeminiPart[] }; finishReason?: string }>;
+      };
+      const first = parsed.candidates?.[0];
+      if (first?.finishReason === "MAX_TOKENS") end.cut = true;
+      return geminiChunkText(first?.content?.parts);
+    } catch {
+      return "";
     }
-    const { done, value } = await reader.read();
-    if (done) break;
+  };
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+  try {
+    while (true) {
+      if (options.signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6).trim();
-      if (data === "[DONE]") return;
-      try {
-        const parsed = JSON.parse(data) as {
-          candidates?: Array<{
-            content?: { parts?: Array<{ text?: string }> };
-          }>;
-        };
-        const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const text = read(line);
         if (text) yield text;
-      } catch {
-        /* skip malformed SSE chunks */
       }
     }
-  }
+    // The last event may arrive without a trailing newline.
+    const tail = read(buffer + decoder.decode());
+    if (tail) yield tail;
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
   }
@@ -143,13 +163,25 @@ export async function* geminiStream(
   options: GeminiOptions
 ): AsyncIterable<string> {
   let last: GeminiHttpError | null = null;
-  for (const model of GEMINI_MODELS) {
+  const preferred = options.model?.trim();
+  const models = preferred
+    ? [preferred, ...GEMINI_MODELS.filter((model) => model !== preferred)]
+    : GEMINI_MODELS;
+  for (const model of models) {
     if (options.signal?.aborted) return;
     let yielded = false;
     try {
-      for await (const chunk of streamGeminiModel(model, prompt, options)) {
-        yielded = true;
-        yield chunk;
+      const contents: GeminiTurn[] = [{ role: "user", parts: [{ text: prompt }] }];
+      let answer = "";
+      for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
+        const end = { cut: false };
+        for await (const chunk of streamGeminiModel(model, contents, options, end)) {
+          yielded = true;
+          answer += chunk;
+          yield chunk;
+        }
+        if (!end.cut || !answer || options.signal?.aborted) break;
+        contents.splice(1, contents.length - 1, { role: "model", parts: [{ text: answer }] }, { role: "user", parts: [{ text: CONTINUE_PROMPT }] });
       }
       return;
     } catch (e) {

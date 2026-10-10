@@ -15,6 +15,8 @@ export interface StatsSnapshotVisitRow {
   title: string;
   visitedAt: number;
   hostname: string;
+  /** Measured reading time for this visit. */
+  readMs?: number;
 }
 
 export interface StatsSnapshotCurrentTab {
@@ -47,7 +49,8 @@ function isVisitRow(v: unknown): v is StatsSnapshotVisitRow {
     typeof v.url === "string" &&
     typeof v.title === "string" &&
     typeof v.visitedAt === "number" &&
-    typeof v.hostname === "string"
+    typeof v.hostname === "string" &&
+    (v.readMs === undefined || typeof v.readMs === "number")
   );
 }
 

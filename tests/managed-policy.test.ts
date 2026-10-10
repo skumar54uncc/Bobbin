@@ -206,7 +206,15 @@ describe("reading chrome.storage.managed", () => {
       }
     );
     const chat = await getEffectiveChatSettings();
-    expect(chat).toEqual({ mode: "auto", cloudEnabled: false, geminiApiKey: "", peopleEnabled: true });
+    expect(chat).toEqual({
+      mode: "auto",
+      cloudEnabled: false,
+      geminiApiKey: "",
+      cloudProvider: "gemini",
+      cloudModel: "",
+      cloudBaseUrl: "",
+      peopleEnabled: true,
+    });
   });
 
   it("getEffectiveChatSettings reads the key from the secret store, not cortex_user_settings", async () => {

@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from "dexie";
 import type { PageType } from "./page-type";
 import type { CompanySection, HowFound } from "./linkedin-selectors";
 import type { SearchEngine } from "./search-capture";
+import type { SheetDetail } from "./sheet-detail";
 
 export interface SyncVisitRecord {
   id: string;
@@ -13,15 +14,148 @@ export interface SyncVisitRecord {
   maxScrollPct: number | null;
   pageType: PageType;
   topics: string[];
+  /**
+   * Epoch ms when the visit ended (tab closed or navigated away). Unset while the
+   * page is still open. Backfilled history rows are final on arrival.
+   */
+  finalizedAt?: number;
+  /** Set on visits read from Chrome history that came from another signed-in device. */
+  device?: "other";
 }
 
+/**
+ * A title or excerpt that reads like instructions to an AI ("ignore previous instructions",
+ * "system prompt", role tags). Kept on this device for review; the row itself is not changed.
+ */
+export interface SyncWarningRecord {
+  /** `visitId:field`. */
+  key: string;
+  visitId: string;
+  field: "title" | "text" | "post";
+  url: string;
+  /** The matched text with some context, at most 160 characters. */
+  snippet: string;
+  /** Names of the patterns that matched. */
+  flags: string[];
+  at: number;
+}
+
+/** Page text kept until the visit ends, so the excerpt can depend on real dwell. Never synced. */
+export interface SyncDraftRecord {
+  id: string;
+  text: string;
+  profile?: SyncProfileFields;
+}
+
+/** Where each tab's rows sit in the sheet, so a flush needs no reads. */
+export interface SheetLayout {
+  fileId: string;
+  sheetIds: Record<string, number>;
+  /** Data rows per tab, in sheet order, run-length encoded by date. The header row is not counted. */
+  runs: Record<string, { date: string; count: number }[]>;
+  /** Tabs whose header row is in the sheet. */
+  headers?: Record<string, boolean>;
+  aboutRows: number;
+  verifiedAt: number;
+  /** Visits header version: 4 has visit_count and last_time. Unset on layouts saved before it, which forces one read. */
+  schema?: number;
+  /** Columns in the Visits header when it was last read. Tells the migration which columns to fill. */
+  visitColumns?: number;
+  /** Tabs that carry Cortex's warning-only protection. */
+  protectedIds?: number[];
+}
+
+/**
+ * A row the sheet has. `date` and `ord` (its place among that date's rows, in
+ * sheet order) locate it for an in-place update with no read. `sig` is a hash of
+ * the cells last written. `of` marks a visit merged into another visit's row.
+ */
+export interface SyncedRecord {
+  key: string;
+  sig?: string;
+  date?: string;
+  ord?: number;
+  of?: string;
+}
+
+/** A flush that was sent but not confirmed. Its presence after a restart triggers a recovery read. */
+export interface InflightFlush {
+  id: "inflight";
+  fileId: string;
+  keys: string[];
+  startedAt: number;
+}
+
+/** Labeled fields of an opened LinkedIn profile. Never photos, contact info, or messages. */
+export interface SyncProfileFields {
+  name?: string;
+  headline: string;
+  location: string;
+  /** "Head of Field Programs, Tidora": the experience row marked Present. */
+  currentRole?: string;
+  about: string;
+  /** The page held only a shortened About. */
+  aboutTruncated?: boolean;
+  experience: { title: string; company: string; dates: string; location?: string; description?: string }[];
+  /** One line per school, as older rows stored it. */
+  education: string[];
+  schools?: { school: string; degree: string; field: string; years: string }[];
+  skills?: string[];
+  /** The logged-out public profile. */
+  publicView?: boolean;
+  /** The profile these fields belong to, so a /details/ page joins the profile's section. */
+  profileUrl?: string;
+  detailsPage?: "experience" | "education" | "skills";
+}
+
+/** What a page said, for its section in the day's Pages doc. Redacted before it is stored. */
 export interface SyncContentRecord {
   id: string;
   visitedAt: number;
   title: string;
   url: string;
   topics: string[];
-  excerpt: string;
+  /** Main text, up to PAGE_TEXT_MAX_CHARS. Empty for a profile, which has `profile` instead. */
+  text: string;
+  profile?: SyncProfileFields;
+}
+
+/** A LinkedIn feed post that stayed on screen for 2 seconds or more. Saved only with the feed setting on. */
+export interface SyncPostRecord {
+  /** `post:<hash>`, one per post per day. */
+  id: string;
+  /** The feed visit it was seen in, or "" when the tab had none. */
+  visitId: string;
+  /** When it was first seen that day. */
+  visitedAt: number;
+  author: string;
+  text: string;
+  url: string;
+}
+
+/** One day's Pages doc in Drive. `sig` hashes the HTML last uploaded, so an unchanged day is skipped. */
+export interface SyncPagesDocRecord {
+  date: string;
+  fileId: string;
+  sig: string;
+  /** Characters of text in the doc, after trimming. */
+  chars: number;
+  /** UTF-8 bytes of the uploaded HTML. */
+  bytes: number;
+  sections: number;
+  uploadedAt: number;
+  /**
+   * The user moved this day doc to the trash or deleted it. That day's page text is not
+   * uploaded again unless the user presses Undo in Settings.
+   */
+  userDeleted?: boolean;
+}
+
+/** Shown once in Settings after the user trashed a day doc or the Pages folder. */
+export interface PagesDeletedNotice {
+  kind: "day" | "folder";
+  /** Days whose docs the user removed. Empty for the folder. */
+  dates: string[];
 }
 
 export interface SyncSearchRecord {
@@ -65,29 +199,57 @@ export const SYNC_ENGINE_STATE_ID = "engine";
 export const DEFAULT_RETENTION_DAYS = 90;
 export const MIN_RETENTION_DAYS = 7;
 export const MAX_RETENTION_DAYS = 365;
+/** Safety alarm. Flushes anything still pending. */
 export const ASSISTANT_SYNC_ALARM = "cortex-assistant-sync";
 export const ASSISTANT_SYNC_ALARM_PERIOD_MIN = 15;
-/** One-shot alarm after LinkedIn (or other) capture. Not a Google call by itself. */
+/** One-shot alarm for the next scheduled flush (activity, Sync now countdown, backoff). */
 export const ASSISTANT_SYNC_SOON_ALARM = "cortex-assistant-sync-soon";
-export const ASSISTANT_SYNC_SOON_DELAY_MIN = 2;
-export const MAX_CONSECUTIVE_SYNC_FAILURES = 10;
-
 export type BackfillPhase = "idle" | "reading" | "writing" | "done";
 
 export interface SyncEngineState {
   id: typeof SYNC_ENGINE_STATE_ID;
   syncEnabled: boolean;
   retentionDays: number;
-  archivesEnabled: boolean;
   userDenylist: string[];
-  consecutiveFailures: number;
-  stoppedUntilAlarm: boolean;
   lastError: string;
   /** Epoch ms of the last successful sync. 0 until the first one finishes. */
   lastSyncedAt: number;
   backfillDone: number;
   backfillTotal: number;
   backfillPhase: BackfillPhase;
+  /** Epoch ms when the last flush request was sent, successful or not. Enforces one flush a minute. */
+  lastFlushAt: number;
+  /** Epoch ms of the Last checked time the sheet's About tab shows. */
+  aboutCheckedAt: number;
+  /** Earliest epoch ms for the next attempt after a 429 or 5xx. 0 when no backoff is active. */
+  nextAttemptAt: number;
+  /** Failed flushes in a row (429 or 5xx). Drives the backoff exponent. */
+  backoffFailures: number;
+  /** Flushes in a row that ended in 429. Three of them start slow mode. */
+  consecutive429: number;
+  /** Until this epoch ms, flush only on the 15 minute cadence. */
+  slowUntil: number;
+  /** Google refused the token twice. Only Enable clears it. */
+  authNeeded: boolean;
+  /** The next flush reads the sheet first (startup check, recovery). */
+  verifyNext: boolean;
+  layout: SheetLayout | null;
+  sheetDetail: SheetDetail;
+  /** CSV size estimate of the sheet after the last flush. */
+  sheetBytes: number;
+  /** What the last trim removed. Shown for a week. */
+  trimNote: string;
+  trimmedAt: number;
+  /** Old Drive JSON backups and monthly archives: not checked yet, none, waiting for the user, or the user's answer. */
+  legacyCleanup: "unchecked" | "none" | "ask" | "trashed" | "kept";
+  legacyFiles: { id: string; name: string }[];
+  /** Drive id of the Pages folder inside Cortex Memory. "" until it is created. */
+  pagesFolderId: string;
+  /** What the last Pages doc upload said, when it failed. */
+  pagesError: string;
+  /** The user trashed or deleted the Pages folder: no day doc is uploaded until Undo. */
+  pagesFolderTrashed: boolean;
+  pagesNotice: PagesDeletedNotice | null;
 }
 
 export function clampRetentionDays(days: number): number {
@@ -100,15 +262,31 @@ export function defaultSyncEngineState(): SyncEngineState {
     id: SYNC_ENGINE_STATE_ID,
     syncEnabled: false,
     retentionDays: DEFAULT_RETENTION_DAYS,
-    archivesEnabled: false,
     userDenylist: [],
-    consecutiveFailures: 0,
-    stoppedUntilAlarm: false,
     lastError: "",
     lastSyncedAt: 0,
     backfillDone: 0,
     backfillTotal: 0,
     backfillPhase: "idle",
+    lastFlushAt: 0,
+    aboutCheckedAt: 0,
+    nextAttemptAt: 0,
+    backoffFailures: 0,
+    consecutive429: 0,
+    slowUntil: 0,
+    authNeeded: false,
+    verifyNext: false,
+    layout: null,
+    sheetDetail: "standard",
+    sheetBytes: 0,
+    trimNote: "",
+    trimmedAt: 0,
+    legacyCleanup: "unchecked",
+    legacyFiles: [],
+    pagesFolderId: "",
+    pagesError: "",
+    pagesFolderTrashed: false,
+    pagesNotice: null,
   };
 }
 
@@ -119,9 +297,14 @@ class AssistantSyncDB extends Dexie {
   people!: EntityTable<SyncPersonRecord, "id">;
   companies!: EntityTable<SyncCompanyRecord, "id">;
   /** Keys are `Tab:id`. Cleared on a full local delete. */
-  synced!: EntityTable<{ key: string }, "key">;
+  synced!: EntityTable<SyncedRecord, "key">;
   pending!: EntityTable<PendingSyncRow, "key">;
   state!: EntityTable<SyncEngineState, "id">;
+  drafts!: EntityTable<SyncDraftRecord, "id">;
+  inflight!: EntityTable<InflightFlush, "id">;
+  warnings!: EntityTable<SyncWarningRecord, "key">;
+  posts!: EntityTable<SyncPostRecord, "id">;
+  pagesDocs!: EntityTable<SyncPagesDocRecord, "date">;
 
   constructor() {
     super("cortex-assistant-sync");
@@ -150,6 +333,69 @@ class AssistantSyncDB extends Dexie {
       pending: "key, tab, enqueuedAt",
       state: "id",
     });
+    this.version(4)
+      .stores({
+        visits: "id, visitedAt, domain, finalizedAt",
+        content: "id, visitedAt",
+        searches: "id, visitedAt",
+        people: "id, visitedAt",
+        companies: "id, visitedAt",
+        synced: "key",
+        pending: "key, tab, enqueuedAt",
+        state: "id",
+        drafts: "id",
+        inflight: "id",
+      })
+      .upgrade(async (tx) => {
+        // Rows captured before dwell tracking are final as they are.
+        await tx.table("visits").toCollection().modify((visit: SyncVisitRecord) => {
+          if (visit.finalizedAt == null) visit.finalizedAt = visit.visitedAt;
+        });
+      });
+    this.version(5).stores({
+      visits: "id, visitedAt, domain, finalizedAt",
+      content: "id, visitedAt",
+      searches: "id, visitedAt",
+      people: "id, visitedAt",
+      companies: "id, visitedAt",
+      synced: "key",
+      pending: "key, tab, enqueuedAt",
+      state: "id",
+      drafts: "id",
+      inflight: "id",
+      warnings: "key, visitId, at",
+    });
+    this.version(6)
+      .stores({
+        visits: "id, visitedAt, domain, finalizedAt",
+        content: "id, visitedAt",
+        searches: "id, visitedAt",
+        people: "id, visitedAt",
+        companies: "id, visitedAt",
+        synced: "key",
+        pending: "key, tab, enqueuedAt",
+        state: "id",
+        drafts: "id",
+        inflight: "id",
+        warnings: "key, visitId, at",
+        posts: "id, visitId, visitedAt",
+        pagesDocs: "date",
+      })
+      .upgrade(async (tx) => {
+        // Content tab excerpts become the page text of their Pages doc section.
+        await tx.table("content").toCollection().modify((row: SyncContentRecord & { excerpt?: string }) => {
+          if (row.text == null) row.text = row.excerpt ?? "";
+          delete row.excerpt;
+        });
+        const warnings = tx.table("warnings");
+        const old = (await warnings.toArray()).filter((row: { field: string }) => row.field === "excerpt");
+        await warnings.bulkDelete(old.map((row: { key: string }) => row.key));
+        await warnings.bulkPut(
+          old.map((row: SyncWarningRecord) => ({ ...row, key: `${row.visitId}:text`, field: "text" }))
+        );
+        // The Content tab is gone, so its sync keys are too.
+        await tx.table("synced").where("key").startsWith("Content:").delete();
+      });
   }
 }
 
@@ -167,8 +413,18 @@ export async function clearAssistantSyncDatabase(): Promise<void> {
       assistantSyncDb.synced,
       assistantSyncDb.pending,
       assistantSyncDb.state,
+      assistantSyncDb.drafts,
+      assistantSyncDb.inflight,
+      assistantSyncDb.warnings,
+      assistantSyncDb.posts,
+      assistantSyncDb.pagesDocs,
     ],
     async () => {
+      await assistantSyncDb.warnings.clear();
+      await assistantSyncDb.posts.clear();
+      await assistantSyncDb.pagesDocs.clear();
+      await assistantSyncDb.drafts.clear();
+      await assistantSyncDb.inflight.clear();
       await assistantSyncDb.visits.clear();
       await assistantSyncDb.content.clear();
       await assistantSyncDb.searches.clear();
@@ -188,6 +444,17 @@ export async function readSyncEngineState(): Promise<SyncEngineState> {
 
 export async function writeSyncEngineState(state: SyncEngineState): Promise<void> {
   await assistantSyncDb.state.put({ ...state, id: SYNC_ENGINE_STATE_ID });
+}
+
+/** Finished page visits the sheet does not have yet. The status line counts these. */
+export async function countUnsyncedVisits(): Promise<number> {
+  const synced = new Set((await assistantSyncDb.synced.toCollection().primaryKeys()).map(String));
+  return assistantSyncDb.visits.filter((row) => row.finalizedAt != null && !synced.has(`Visits:${row.id}`)).count();
+}
+
+/** Newest warnings first, for Settings. */
+export async function listSyncWarnings(limit = 200): Promise<SyncWarningRecord[]> {
+  return assistantSyncDb.warnings.orderBy("at").reverse().limit(limit).toArray();
 }
 
 /** The service worker points this at the offscreen Drive client. Tests replace it. */

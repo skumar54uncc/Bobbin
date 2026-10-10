@@ -17,7 +17,9 @@
  * - The legacy `pages` table (pre-v3 full text) is covered too.
  */
 import { wipeAssistantSyncOnLocalDelete } from "../assistant-sync/db";
+import { clearLocalMemory, forgetLocalMemorySince, forgetLocalMemorySite } from "../assistant-sync/local-memory-read";
 import { db, type ConversationMessageRecord } from "../db/schema";
+import { pruneOrphanPhotos } from "./profile-photos";
 
 export const HANDLED_TABLES = [
   "pages",
@@ -31,6 +33,7 @@ export const HANDLED_TABLES = [
   "collections",
   "collectionItems",
   "highlights",
+  "photos",
 ] as const;
 
 export const FORGET_WINDOWS_MS = {
@@ -69,6 +72,7 @@ const ALL_TABLES = () => [
   db.collections,
   db.collectionItems,
   db.highlights,
+  db.photos,
 ];
 
 async function deleteDocumentsById(ids: number[], out: DeleteCounts): Promise<void> {
@@ -115,6 +119,7 @@ export async function applyRetention(days: number, now: number = Date.now()): Pr
     out.visits += await db.visitLog.where("visitedAt").below(cutoff).delete();
     out.pages += await db.pages.where("visitedAt").below(cutoff).delete();
     out.people += await db.people.where("lastSeen").below(cutoff).delete();
+    await pruneOrphanPhotos();
     await deleteHighlights(await db.highlights.where("createdAt").below(cutoff).toArray(), out);
 
     const oldConvs = (await db.conversations.where("updatedAt").below(cutoff).primaryKeys()) as number[];
@@ -174,6 +179,7 @@ export async function forgetSite(hostname: string): Promise<DeleteCounts> {
     out.visits += await db.visitLog.filter((v) => hostMatches(v.hostname || safeHost(v.url), site)).delete();
     out.pages += await db.pages.filter((p) => hostMatches(safeHost(p.url), site)).delete();
     out.people += await db.people.filter((p) => hostMatches(safeHost(p.profileUrl), site)).delete();
+    await pruneOrphanPhotos();
     await deleteHighlights(await db.highlights.filter((h) => hostMatches(safeHost(h.url), site)).toArray(), out);
 
     const citing = await db.messages
@@ -186,6 +192,8 @@ export async function forgetSite(hostname: string): Promise<DeleteCounts> {
     }
     if (anyDeleted(out)) await db.digestCache.clear();
   });
+  // Ask any assistant's local searches and page text.
+  out.visits += await forgetLocalMemorySite(site, hostMatches);
   return out;
 }
 
@@ -206,6 +214,7 @@ export async function forgetSince(since: number): Promise<DeleteCounts> {
     out.visits += await db.visitLog.where("visitedAt").aboveOrEqual(since).delete();
     out.pages += await db.pages.where("visitedAt").aboveOrEqual(since).delete();
     out.people += await db.people.where("lastSeen").aboveOrEqual(since).delete();
+    await pruneOrphanPhotos();
     await deleteHighlights(await db.highlights.where("createdAt").aboveOrEqual(since).toArray(), out);
 
     const recentMsgs = await db.messages.where("timestamp").aboveOrEqual(since).toArray();
@@ -216,6 +225,7 @@ export async function forgetSince(since: number): Promise<DeleteCounts> {
     }
     if (anyDeleted(out)) await db.digestCache.clear();
   });
+  out.visits += await forgetLocalMemorySince(since);
   return out;
 }
 
@@ -229,5 +239,6 @@ export async function forgetAll(): Promise<void> {
   await db.transaction("rw", ALL_TABLES(), async () => {
     for (const t of ALL_TABLES()) await t.clear();
   });
+  await clearLocalMemory();
   await wipeAssistantSyncOnLocalDelete();
 }

@@ -32,6 +32,8 @@ export interface DocumentRecord {
    * Missing on 1.0.x rows; the background re-chunk job upgrades them.
    */
   chunkingVersion?: number;
+  /** Measured reading time across visits. Missing until a tab reports attention. */
+  readMs?: number;
 }
 
 export type EmbedState = "pending" | "embedded" | "failed" | "skipped";
@@ -107,8 +109,6 @@ export interface PersonRecord {
   industry?: string;
   companySize?: string;
   tagline?: string;
-  /** LinkedIn CDN photo, when the profile card had one. */
-  photoUrl?: string;
   /** About, experience and education, for search. Not shown on the card. */
   profileText?: string;
 }
@@ -145,6 +145,8 @@ export interface VisitLogEntry {
   hostname: string;
   visitedAt: number;
   textLength: number;
+  /** Measured reading time for this visit. */
+  readMs?: number;
 }
 
 export interface ConversationRecord {
@@ -192,6 +194,8 @@ export class CortexDB extends Dexie {
   collections!: EntityTable<CollectionRecord, "id">;
   collectionItems!: EntityTable<CollectionItemRecord, "id">;
   highlights!: EntityTable<HighlightRecord, "id">;
+  /** Device-only photo copies keyed by profile URL. Never synced or exported. */
+  photos!: EntityTable<import("../lib/profile-photos").PhotoRecord, "profileUrl">;
 
   constructor() {
     super("cortex-db");
@@ -273,6 +277,28 @@ export class CortexDB extends Dexie {
       collectionItems: "++id, collectionId, documentId, &[collectionId+documentId], addedAt",
       highlights: "++id, documentId, url, createdAt",
     });
+    // Profile photos move from a LinkedIn URL on the person row to a local copy.
+    // Old rows lose the URL; their photo is saved on the next visit to that profile.
+    this.version(7)
+      .stores({
+        pages: "++id, url, visitedAt",
+        visitLog: "++id, visitedAt, hostname, url",
+        documents: "++id, url, domain, lastVisitedAt",
+        chunks: "++id, documentId, ord, kind",
+        conversations: "++id, createdAt, updatedAt, title",
+        messages: "++id, conversationId, timestamp",
+        digestCache: "range, generatedAt",
+        people: "++id, &profileUrl, lastSeen, company",
+        collections: "++id, &name, createdAt",
+        collectionItems: "++id, collectionId, documentId, &[collectionId+documentId], addedAt",
+        highlights: "++id, documentId, url, createdAt",
+        photos: "profileUrl",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("people").toCollection().modify((row: Record<string, unknown>) => {
+          delete row.photoUrl;
+        });
+      });
   }
 }
 
@@ -431,10 +457,12 @@ export async function clearAllIndexedData(): Promise<void> {
       db.collections,
       db.collectionItems,
       db.highlights,
+      db.photos,
     ],
     async () => {
       await db.pages.clear();
       await db.people.clear();
+      await db.photos.clear();
       await db.collections.clear();
       await db.collectionItems.clear();
       await db.highlights.clear();

@@ -1,3 +1,4 @@
+import { feedbackFormUrl } from "../shared/about-copy";
 import { injectBrandFontFacesInto } from "../styles/brand-fonts";
 import type { StatsSnapshot } from "../lib/stats-snapshot-types";
 import {
@@ -207,6 +208,18 @@ document.addEventListener("DOMContentLoaded", () => {
   qs("#cx-empty-get-started").addEventListener("click", () => {
     void chrome.tabs.create({
       url: chrome.runtime.getURL("onboarding.html"),
+      active: true,
+    });
+    window.close();
+  });
+
+  const feedback = document.querySelector<HTMLAnchorElement>("#cx-popup-feedback");
+  if (feedback) feedback.href = feedbackFormUrl(chrome.runtime.getManifest().version, navigator.userAgent);
+
+  document.querySelector("#cx-why-free")?.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    void chrome.tabs.create({
+      url: chrome.runtime.getURL("options.html#cx-sec-about"),
       active: true,
     });
     window.close();

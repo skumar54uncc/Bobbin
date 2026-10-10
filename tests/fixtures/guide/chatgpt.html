@@ -1,0 +1,23 @@
+<!-- SYNTHETIC: hand-written to test the pointer. Not copied from chatgpt.com. Elements marked data-expect are the targets: the controls the user acts on. -->
+<!doctype html>
+<html><body>
+  <div role="dialog" aria-label="Settings">
+    <div role="tablist">
+      <button role="tab">General</button>
+      <button role="tab">Personalization</button>
+      <button role="tab">Integrations</button>
+    </div>
+    <section>
+      <h2>Plugins</h2>
+      <button class="row"><span>Notion</span></button>
+      <button class="row" data-expect="connect"><span>Google Drive</span></button>
+    </section>
+    <section>
+      <h2>Additional ChatGPT settings</h2>
+      <div class="row">
+        <span>Connector search</span>
+        <button role="switch" aria-checked="false" data-expect="extra"></button>
+      </div>
+    </section>
+  </div>
+</body></html>

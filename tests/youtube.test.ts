@@ -38,7 +38,7 @@ describe("videoIdFromUrl", () => {
 });
 
 describe("parsePlayerResponse", () => {
-  it("keeps only the fields Cortex needs", () => {
+  it("keeps only the fields Bobbin needs", () => {
     const p = parsePlayerResponse(PR)!;
     expect(p.videoId).toBe("tIdAl4Mgr01");
     expect(p.title).toBe("Tidal microgrids explained");

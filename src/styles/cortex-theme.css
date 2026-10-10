@@ -1,50 +1,67 @@
 /**
- * Cortex brand tokens for extension pages (popup, options, onboarding).
- * Warm beige surfaces (#e4e2dd) + accent (#a82207).
- * Overlay/side panel light+dark tokens live in src/shared/theme.ts and map
- * accent light to #b8250a (contrast on header gradient). Settings stay light.
- * Shared buttons: cx-buttons.css. Type steps: --cx-ts-* below.
+ * Page tokens for popup, options, and onboarding.
+ * Colors come from tokens.css. Felt (#cd5f3e) is for illustration and
+ * focus rings. Text and primary buttons use brick so they stay at AA.
+ * Overlay light and dark tokens stay in src/shared/theme.ts.
+ * Shared buttons: cx-buttons.css.
  */
 :root {
-  /* System UI face: the same sans Chrome uses for its own chrome. */
-  --cx-brand-font:
-    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", sans-serif;
-  --cx-font-body:
-    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", sans-serif;
+  --cx-brand-font: var(--font-display, "Fraunces", serif);
+  --cx-font-body: var(--font-body, "Nunito", sans-serif);
   --cx-font-mono:
     ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
 
-  --cx-ts-display: 700 20px/1.2 var(--cx-brand-font);
-  --cx-ts-title: 700 15px/1.4 var(--cx-font-body);
-  --cx-ts-body: 400 15px/1.55 var(--cx-font-body);
-  --cx-ts-small: 500 13px/1.5 var(--cx-font-body);
-  --cx-ts-caption: 500 12px/1.45 var(--cx-font-body);
-  --cx-ts-metric: 700 22px/1.2 var(--cx-font-body);
+  --cx-ts-display: 560 26px/1.2 var(--cx-brand-font);
+  --cx-ts-title: 560 20px/1.3 var(--cx-brand-font);
+  --cx-ts-body: 400 14px/1.55 var(--cx-font-body);
+  --cx-ts-small: 600 14px/1.45 var(--cx-font-body);
+  --cx-ts-caption: 600 12px/1.45 var(--cx-font-body);
+  --cx-ts-metric: 560 26px/1.2 var(--cx-brand-font);
 
-  --cx-bg: #e4e2dd;
-  --cx-surface: #f0eee9;
-  --cx-surface-raised: #faf8f4;
-  --cx-surface-2: #dad8d3;
-  /* Darkened for 4.5:1 on accent-soft fills (axe, release 1.2.0); was #c72a09 */
-  --cx-accent: #a82207;
-  --cx-accent-hover: #8a1c05;
-  --cx-accent-soft: rgba(199, 42, 9, 0.14);
-  --cx-accent-strong: rgba(199, 42, 9, 0.28);
-  --cx-text: #1c1917;
-  --cx-text-muted: #57534e;
-  --cx-border: rgba(28, 25, 23, 0.14);
-  --cx-link: #9a3412;
+  --cx-bg: var(--cream, #f8f1e6);
+  --cx-surface: var(--oat, #efe4d2);
+  --cx-surface-raised: var(--thread, #fff9ef);
+  --cx-surface-2: var(--oat, #efe4d2);
+  --cx-accent: var(--brick, #9c3b21);
+  --cx-accent-hover: #7f3019;
+  --cx-accent-soft: rgba(156, 59, 33, 0.12);
+  --cx-accent-strong: rgba(156, 59, 33, 0.22);
+  --cx-text: var(--ink, #2e231d);
+  --cx-text-muted: var(--ink-soft, #6b5a4e);
+  --cx-border: var(--stitch, rgba(156, 59, 33, 0.35));
+  --cx-link: var(--brick, #9c3b21);
   --cx-success: #166534;
   --cx-success-soft: rgba(34, 197, 94, 0.14);
   --cx-warning: #92400e;
   --cx-warning-soft: rgba(245, 158, 11, 0.18);
   --cx-danger: #b91c1c;
   --cx-danger-soft: rgba(239, 68, 68, 0.12);
-  --cx-focus: rgba(199, 42, 9, 0.45);
+  --cx-focus: var(--felt, #cd5f3e);
+}
+
+:root[data-theme="dark"] {
+  --cx-accent: #e07a5c;
+  --cx-link: #e07a5c;
 }
 
 body {
   font: var(--cx-ts-body);
+  color: var(--cx-text);
+  background-color: var(--cx-bg);
+  background-image: var(--felt-grain);
+}
+
+h1,
+h2,
+h3,
+.cx-opt-title,
+.cx-sec-title,
+.cx-opt-brand-wordmark,
+.cx-brand-wordmark,
+.cx-section-heading {
+  font-family: var(--cx-brand-font);
+  font-weight: 560;
+  font-variation-settings: "SOFT" 100, "WONK" 0, "opsz" 72;
 }
 
 .cx-brand {
@@ -87,9 +104,10 @@ body {
 
 .cx-brand-wordmark {
   font-family: var(--cx-brand-font);
-  font-weight: 700;
+  font-weight: 560;
+  font-variation-settings: "SOFT" 100, "WONK" 0, "opsz" 72;
   letter-spacing: -0.03em;
-  font-size: 19px;
+  font-size: 20px;
   line-height: 1.1;
   color: var(--cx-accent);
 }
